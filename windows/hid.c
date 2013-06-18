@@ -881,7 +881,14 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
-	return (wchar_t*)dev->last_error_str;
+	if (dev) {
+		if (dev->last_error_str == NULL)
+			return L"Success";
+		return (wchar_t*)dev->last_error_str;
+	}
+
+	// Global error messages are not (yet) implemented on Windows.
+	return L"hid_error for global errors is not implemented yet";
 }
 
 
