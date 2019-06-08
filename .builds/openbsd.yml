@@ -1,0 +1,20 @@
+image: openbsd/6.5
+packages:
+- autoconf-2.69p2
+- automake-1.16.1
+- libiconv
+- libtool
+- libusb1
+sources:
+- https://github.com/libusb/hidapi
+tasks:
+- setup: |
+    cd hidapi
+    export AUTOCONF_VERSION=2.69
+    export AUTOMAKE_VERSION=1.16
+    ./bootstrap
+    ./configure
+- build: |
+    cd hidapi
+    make
+    make DESTDIR=$PWD/root install
