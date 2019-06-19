@@ -107,6 +107,21 @@ case $host in
 	AC_CHECK_LIB([usb], [libusb_init], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -lusb"], [hidapi_lib_error libusb])
 	echo libs_priv: $LIBS_LIBUSB_PRIVATE
 	;;
+*-openbsd*)
+	AC_MSG_RESULT([ (OpenBSD back-end)])
+	AC_DEFINE(OS_OPENBSD, 1, [OpenBSD implementation])
+	AC_SUBST(OS_OPENBSD)
+	backend="libusb"
+	os="openbsd"
+	threads="pthreads"
+
+	CFLAGS="$CFLAGS -I/usr/local/include"
+	LDFLAGS="$LDFLAGS -L/usr/local/lib"
+	PKG_CHECK_MODULES([libusb], [libusb-1.0 >= 1.0.9], true, [hidapi_lib_error libusb-1.0])
+	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} $libusb_LIBS"
+	CFLAGS_LIBUSB="${CFLAGS_LIBUSB} $libusb_CFLAGS"
+	AC_CHECK_LIB([iconv], [libiconv_open], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -liconv"], [hidapi_lib_error libiconv])
+	;;
 *-mingw*)
 	AC_MSG_RESULT([ (Windows back-end, using MinGW)])
 	backend="windows"
@@ -213,6 +228,7 @@ AM_CONDITIONAL(OS_LINUX, test "x$os" = xlinux)
 AM_CONDITIONAL(OS_DARWIN, test "x$os" = xdarwin)
 AM_CONDITIONAL(OS_FREEBSD, test "x$os" = xfreebsd)
 AM_CONDITIONAL(OS_KFREEBSD, test "x$os" = xkfreebsd)
+AM_CONDITIONAL(OS_OPENBSD, test "x$os" = xopenbsd)
 AM_CONDITIONAL(OS_WINDOWS, test "x$os" = xwindows)
 
 AC_CONFIG_HEADERS([config.h])
