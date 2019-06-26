@@ -25,6 +25,7 @@
 
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
 
+#error "CI should break"
 /* C */
 #include <stdio.h>
 #include <string.h>

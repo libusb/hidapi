@@ -20,6 +20,8 @@
         http://github.com/signal11/hidapi .
 ********************************************************/
 
+#error "CI should break"
+
 /* See Apple Technical Note TN2187 for details on IOHidManager. */
 
 #include <IOKit/hid/IOHIDManager.h>

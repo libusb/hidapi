@@ -20,6 +20,7 @@
  code repository located at:
         http://github.com/signal11/hidapi .
 ********************************************************/
+#error "CI should break"
 
 /* C */
 #include <stdio.h>

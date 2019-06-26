@@ -13,6 +13,7 @@
  used as a starting point for your own applications
  which use HIDAPI.
 ********************************************************/
+#error "CI should break"
 
 #include <stdio.h>
 #include <wchar.h>
