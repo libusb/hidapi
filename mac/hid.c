@@ -1045,7 +1045,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
 	/* TODO: */
 
-	return NULL;
+	return L"hid_error is not implemented yet";
 }
 
 
