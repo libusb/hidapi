@@ -45,15 +45,6 @@
 
 #include "hidapi.h"
 
-/* Definitions from linux/hidraw.h. Since these are new, some distros
-   may not have header files which contain them. */
-#ifndef HIDIOCSFEATURE
-#define HIDIOCSFEATURE(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
-#endif
-#ifndef HIDIOCGFEATURE
-#define HIDIOCGFEATURE(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, len)
-#endif
-
 
 /* USB HID device property names */
 const char *device_string_names[] = {
@@ -77,29 +68,6 @@ struct hid_device_ {
 	int uses_numbered_reports;
 };
 
-
-static __u32 kernel_version = 0;
-
-static __u32 detect_kernel_version(void)
-{
-	struct utsname name;
-	int major, minor, release;
-	int ret;
-
-	uname(&name);
-	ret = sscanf(name.release, "%d.%d.%d", &major, &minor, &release);
-	if (ret == 3) {
-		return KERNEL_VERSION(major, minor, release);
-	}
-
-	ret = sscanf(name.release, "%d.%d", &major, &minor);
-	if (ret == 2) {
-		return KERNEL_VERSION(major, minor, 0);
-	}
-
-	printf("Couldn't determine kernel version from version string \"%s\"\n", name.release);
-	return 0;
-}
 
 static hid_device *new_hid_device(void)
 {
@@ -367,8 +335,6 @@ int HID_API_EXPORT hid_init(void)
 	locale = setlocale(LC_CTYPE, NULL);
 	if (!locale)
 		setlocale(LC_CTYPE, "");
-
-	kernel_version = detect_kernel_version();
 
 	return 0;
 }
@@ -708,15 +674,6 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	bytes_read = read(dev->device_handle, data, length);
 	if (bytes_read < 0 && (errno == EAGAIN || errno == EINPROGRESS))
 		bytes_read = 0;
-
-	if (bytes_read >= 0 &&
-	    kernel_version != 0 &&
-	    kernel_version < KERNEL_VERSION(2,6,34) &&
-	    dev->uses_numbered_reports) {
-		/* Work around a kernel bug. Chop off the first byte. */
-		memmove(data, data+1, bytes_read);
-		bytes_read--;
-	}
 
 	return bytes_read;
 }
