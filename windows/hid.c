@@ -823,6 +823,7 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 	if (!dev)
 		return;
 	CancelIo(dev->device_handle);
+	SetEvent(dev->ol.hEvent);
 	free_hid_device(dev);
 }
 
