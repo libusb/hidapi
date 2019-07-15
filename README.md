@@ -1,5 +1,11 @@
 ## HIDAPI library for Windows, Linux, FreeBSD and macOS
 
+| CI instance          | Status |
+|----------------------|--------|
+| `macOS master`       | [![Build Status](https://travis-ci.org/libusb/hidapi.svg?branch=master)](https://travis-ci.org/libusb/hidapi) |
+| `Windows master` | [![Build status](https://ci.appveyor.com/api/projects/status/r482aevuigmi86rk/branch/master?svg=true)](https://ci.appveyor.com/project/Youw/hidapi/branch/master) |
+| `Linux/BSD, last build (branch/PR)` | [![builds.sr.ht status](https://builds.sr.ht/~qbicz/hidapi.svg)](https://builds.sr.ht/~qbicz/hidapi?) |
+
 HIDAPI is a multi-platform library which allows an application to interface
 with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
 HIDAPI can be either built as a shared library (`.so`, `.dll` or `.dylib`) or
