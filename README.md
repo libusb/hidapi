@@ -43,13 +43,13 @@ tradeoffs, and the functionality supported is slightly different.
 
 __Linux/hidraw__ (`linux/hid.c`):
 
-This back-end uses the hidraw interface in the Linux kernel.  While this
-back-end will support both USB and Bluetooth, it has some limitations on
-kernels prior to 2.6.39, including the inability to send or receive feature
-reports.  In addition, it will only communicate with devices which have
-hidraw nodes associated with them.  Keyboards, mice, and some other devices
-which are blacklisted from having hidraw nodes will not work. Fortunately,
-for nearly all the uses of hidraw, this is not a problem.
+This back-end uses the hidraw interface in the Linux kernel, and supports
+both USB and Bluetooth HID devices. It requires kernel version at least 2.6.39
+to build. In addition, it will only communicate with devices which have hidraw
+nodes associated with them.
+Keyboards, mice, and some other devices which are blacklisted from having
+hidraw nodes will not work. Fortunately, for nearly all the uses of hidraw,
+this is not a problem.
 
 __Linux/FreeBSD/libusb__ (`libusb/hid.c`):
 
