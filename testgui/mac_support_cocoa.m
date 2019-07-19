@@ -20,7 +20,7 @@
 extern FXMainWindow *g_main_window;
 
 
-@interface MyAppDelegate : NSObject
+@interface MyAppDelegate : NSObject<NSApplicationDelegate>
 {
 } 
 @end
