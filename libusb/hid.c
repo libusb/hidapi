@@ -25,7 +25,7 @@
 
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
 
-#include <config.h>
+//#include <config.h>
 
 /* C */
 #include <stdio.h>
