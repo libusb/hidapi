@@ -25,6 +25,8 @@
 
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
 
+#include <config.h>
+
 /* C */
 #include <stdio.h>
 #include <string.h>
@@ -408,7 +410,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 	size_t inbytes;
 	size_t outbytes;
 	size_t res;
-	char *inptr;
+	ICONV_CONST char *inptr;
 	char *outptr;
 #endif
 

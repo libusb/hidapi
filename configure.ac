@@ -84,11 +84,11 @@ case $host in
 
 	CFLAGS="$CFLAGS -I/usr/local/include"
 	LDFLAGS="$LDFLAGS -L/usr/local/lib"
-	LIBS="${LIBS}"
+	AM_ICONV
+	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} ${LTLIBICONV}"
 	PKG_CHECK_MODULES([libusb], [libusb-1.0 >= 1.0.9], true, [hidapi_lib_error libusb-1.0])
 	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} $libusb_LIBS"
 	CFLAGS_LIBUSB="${CFLAGS_LIBUSB} $libusb_CFLAGS"
-	AC_CHECK_LIB([iconv], [iconv_open], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -liconv"], [hidapi_lib_error libiconv])
 	;;
 *-kfreebsd*)
 	AC_MSG_RESULT([ (kFreeBSD back-end)])
