@@ -20,7 +20,7 @@
  files located at the root of the source distribution.
  These files may also be found in the public source
  code repository located at:
-        http://github.com/signal11/hidapi .
+        https://github.com/libusb/hidapi .
 ********************************************************/
 
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
