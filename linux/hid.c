@@ -797,7 +797,7 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 
 	res = ioctl(dev->device_handle, HIDIOCGREPORT, data);
 	if (res < 0)
-		register_device_error_format(dev, "ioctl (GINPUT): %s", strerror(errno));
+		register_device_error_format(dev, "ioctl (GREPORT): %s", strerror(errno));
 
 	return res;
 }
