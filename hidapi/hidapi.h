@@ -334,7 +334,7 @@ extern "C" {
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length);
 
-				/** @brief Get a input report from a HID device.
+		/** @brief Get a input report from a HID device.
 
 			Set the first byte of @p data[] to the Report ID of the
 			report to be read.  Make sure to allow space for this
