@@ -795,9 +795,19 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 {
 	int res;
 
-	res = ioctl(dev->device_handle, HIDIOCGREPORT, data);
+	unsigned char bfr[64] = {0}; //Maximum Hid Report Size is 64 bytes, added one extra. See https://www.usb.org/sites/default/files/documents/hid1_11.pdf section 5.6
+
+	if(length > 64){
+		register_device_error_format(dev, "ioctl (GREPORT): %s", strerror(EINVAL)); //22      /* Invalid argument */
+	}
+
+	memcpy(bfr, data, length); // copy the data onto the buffer	
+
+	res = ioctl(dev->device_handle, HIDIOCGREPORT, bfr);
 	if (res < 0)
 		register_device_error_format(dev, "ioctl (GREPORT): %s", strerror(errno));
+
+	memcpy(data, bfr, length);	
 
 	return res;
 }
