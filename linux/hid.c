@@ -38,6 +38,7 @@
 #include <poll.h>
 
 /* Linux */
+#include <linux/hiddev.h>
 #include <linux/hidraw.h>
 #include <linux/version.h>
 #include <linux/input.h>
@@ -790,6 +791,16 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return res;
 }
 
+int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
+{
+	int res;
+
+	res = ioctl(dev->device_handle, HIDIOCGREPORT, data);
+	if (res < 0)
+		perror("ioctl (GINPUT)");
+
+	return res;
+}
 
 void HID_API_EXPORT hid_close(hid_device *dev)
 {
