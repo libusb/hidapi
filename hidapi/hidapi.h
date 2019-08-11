@@ -337,7 +337,7 @@ extern "C" {
 		/** @brief Get a input report from a HID device.
 
 			Set the first byte of @p data[] to the Report ID of the
-			report to be read.  Make sure to allow space for this
+			report to be read. Make sure to allow space for this
 			extra byte in @p data[]. Upon return, the first byte will
 			still contain the Report ID, and the report data will
 			start in data[1].

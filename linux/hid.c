@@ -794,7 +794,6 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
-
 	unsigned char bfr[64] = {0}; //Maximum Hid Report Size is 64 bytes, added one extra. See https://www.usb.org/sites/default/files/documents/hid1_11.pdf section 5.6
 
 	if(length > 64){

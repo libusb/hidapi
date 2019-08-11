@@ -832,7 +832,7 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 		register_error(dev, "HidD_GetInputReport");
 		return -1;
 	}
-	return length
+	return length;
 #else
 	DWORD bytes_returned;
 
