@@ -10,7 +10,7 @@ Pod::Spec.new do |spec|
 
   spec.homepage     = "https://github.com/libusb/hidapi"
 
-  spec.license      = { :type=> "One of three licenses", :file => "LICENSE.txt" }
+  spec.license      = { :type=> "GNU GPLv3 or BSD or HIDAPI original", :file => "LICENSE.txt" }
 
   spec.authors      = { "Alan Ott" => "alan@signal11.us",
                         "Ludovic Rousseau" => "rousseau@debian.org",
