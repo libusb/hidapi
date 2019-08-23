@@ -46,7 +46,7 @@ extern "C" {
 		typedef struct hid_device_ hid_device; /**< opaque hidapi structure */
 
 		/** hidapi info structure */
-		typedef struct hid_device_info {
+		struct hid_device_info {
 			/** Platform-specific device path */
 			char *path;
 			/** Device Vendor ID */
@@ -80,7 +80,7 @@ extern "C" {
 
 			/** Pointer to the next device */
 			struct hid_device_info *next;
-		} HID_DEVICE_INFO;
+		};
 
 
 		/** @brief Initialize the HIDAPI library.
