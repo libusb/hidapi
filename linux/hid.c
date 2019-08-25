@@ -791,7 +791,7 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return res;
 }
 
-//Not implemented for Linux HidRaw yet
+// Not supported by Linux HidRaw yet
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	return -1;
