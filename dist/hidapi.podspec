@@ -18,7 +18,7 @@ Pod::Spec.new do |spec|
                         "Vitaly Samoylik" => "vitalys@gmail.com" }
 
   spec.platform     = :osx
-  # spec.osx.deployment_target = "10.7"
+  spec.osx.deployment_target = "10.7"
 
   spec.source       = { :git => "https://github.com/libusb/hidapi.git", :tag => "#{spec.version}" }
 
