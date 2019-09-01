@@ -696,11 +696,11 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	io_registry_entry_t entry = MACH_PORT_NULL;
 	IOReturn ret = kIOReturnInvalid;
 
-	dev = new_hid_device();
-
 	/* Set up the HID Manager if it hasn't been done */
 	if (hid_init() < 0)
-		return NULL;
+		goto return_error;
+
+	dev = new_hid_device();
 
 	/* Get the IORegistry entry for the given path */
 	entry = IORegistryEntryFromPath(kIOMasterPortDefault, path);
