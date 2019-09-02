@@ -763,38 +763,61 @@ return_error:
 
 static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char *data, size_t length)
 {
-	const unsigned char *data_to_send;
-	size_t length_to_send;
+	const unsigned char *data_to_send = data;
+	CFIndex length_to_send = length;
 	IOReturn res;
+	const unsigned char report_id = data[0];
 
-	/* Return if the device has been disconnected. */
-	if (dev->disconnected)
-		return -1;
-
-	if (data[0] == 0x0) {
+	if (report_id == 0x0) {
 		/* Not using numbered Reports.
 		   Don't send the report number. */
 		data_to_send = data+1;
 		length_to_send = length-1;
 	}
-	else {
-		/* Using numbered Reports.
-		   Send the Report Number */
-		data_to_send = data;
-		length_to_send = length;
+
+	/* Avoid crash if the device has been unplugged. */
+	if (dev->disconnected) {
+		return -1;
 	}
 
-	if (!dev->disconnected) {
-		res = IOHIDDeviceSetReport(dev->device_handle,
-					   type,
-					   data[0], /* Report ID*/
-					   data_to_send, length_to_send);
+	res = IOHIDDeviceSetReport(dev->device_handle,
+	                           type,
+	                           report_id,
+	                           data_to_send, length_to_send);
 
-		if (res == kIOReturnSuccess) {
-			return length;
-		}
-		else
-			return -1;
+	if (res == kIOReturnSuccess) {
+		return length;
+	}
+
+	return -1;
+}
+
+static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data, size_t length)
+{
+	unsigned char *report = data;
+	CFIndex report_length = length;
+	IOReturn res = kIOReturnSuccess;
+	const unsigned char report_id = data[0];
+
+	if (report_id == 0x0) {
+		/* Not using numbered Reports.
+		   Don't send the report number. */
+		report = data+1;
+		report_length = length-1;
+	}
+
+	/* Avoid crash if the device has been unplugged. */
+	if (dev->disconnected) {
+		return -1;
+	}
+
+	res = IOHIDDeviceGetReport(dev->device_handle,
+	                           type,
+	                           report_id,
+	                           report, &report_length);
+
+	if (res == kIOReturnSuccess) {
+		return length;
 	}
 
 	return -1;
@@ -954,23 +977,8 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 
 int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length)
 {
-	CFIndex len = length - 1;
-	IOReturn res;
-
-	/* Return if the device has been unplugged. */
-	if (dev->disconnected)
-		return -1;
-
-	res = IOHIDDeviceGetReport(dev->device_handle,
-	                           kIOHIDReportTypeFeature,
-	                           data[0], /* Report ID */
-	                           data + 1, &len);
-	if (res == kIOReturnSuccess)
-		return len + 1;
-	else
-		return -1;
+	return get_report(dev, kIOHIDReportTypeFeature, data, length);
 }
-
 
 void HID_API_EXPORT hid_close(hid_device *dev)
 {
