@@ -14,8 +14,8 @@ Pod::Spec.new do |spec|
 
   spec.authors      = { "Alan Ott" => "alan@signal11.us",
                         "Ludovic Rousseau" => "rousseau@debian.org",
-                        "libusb/hidapi Team" => "https://github.com/libusb/hidapi/graphs/contributors", 
-                        "Vitaly Samoylik" => "vitalys@gmail.com" }
+                        "libusb/hidapi Team" => "https://github.com/libusb/hidapi/blob/master/AUTHORS.txt",
+                      }
 
   spec.platform     = :osx
   spec.osx.deployment_target = "10.7"
