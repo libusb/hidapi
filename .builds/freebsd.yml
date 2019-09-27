@@ -4,6 +4,7 @@ packages:
 - automake
 - libiconv
 - libtool
+- pkgconf
 sources:
 - https://github.com/libusb/hidapi
 tasks:
