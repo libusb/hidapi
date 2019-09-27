@@ -1,7 +1,7 @@
 Pod::Spec.new do |spec|
 
   spec.name         = "hidapi"
-  spec.version      = "0.9.0"
+  spec.version      = "0.9.1"
   spec.summary      = "A Simple library for communicating with USB and Bluetooth HID devices on Linux, Mac and Windows."
 
   spec.description  = <<-DESC
