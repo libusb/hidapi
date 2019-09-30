@@ -38,7 +38,6 @@
 #include <poll.h>
 
 /* Linux */
-#include <linux/hiddev.h>
 #include <linux/hidraw.h>
 #include <linux/version.h>
 #include <linux/input.h>
