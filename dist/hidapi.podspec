@@ -20,7 +20,7 @@ Pod::Spec.new do |spec|
   spec.platform     = :osx
   spec.osx.deployment_target = "10.7"
 
-  spec.source       = { :git => "https://github.com/libusb/hidapi.git", :tag => "#{spec.version}" }
+  spec.source       = { :git => "https://github.com/libusb/hidapi.git", :tag => "hidapi-#{spec.version}" }
 
   spec.source_files = "mac/hid.c", "hidapi/hidapi.h"
 
