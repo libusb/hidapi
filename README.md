@@ -68,11 +68,14 @@ which HIDAPI supports.  Since it relies on a 3rd party library, building it
 is optional but recommended because it is so useful when debugging hardware.
 
 ## What Does the API Look Like?
-The API provides the the most commonly used HID functions including sending
-and receiving of input, output, and feature reports.  The sample program,
+The API provides the most commonly used HID functions including sending
+and receiving of input, output, and feature reports. The sample program,
 which communicates with a heavily hacked up version of the Microchip USB
 Generic HID sample looks like this (with error checking removed for
 simplicity):
+
+**Warning: Only run the code you understand, and only when it conforms to the
+device spec. Writing data at random to your HID devices can break them.**
 
 ```c
 #ifdef WIN32
@@ -138,6 +141,10 @@ int main(int argc, char* argv[])
 	return 0;
 }
 ```
+
+You can also use [hidtest/hidtest.c](https://github.com/libusb/hidapi/blob/master/hidtest/hidtest.c)
+as a starting point for your applications.
+
 
 ## License
 HIDAPI may be used by one of three licenses as outlined in [LICENSE.txt](LICENSE.txt).
