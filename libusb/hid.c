@@ -173,6 +173,11 @@ struct hid_device_ {
 
 	/* List of received input reports. */
 	struct input_report *input_reports;
+
+	/* Was kernel driver detached by libusb */
+#ifdef DETACH_KERNEL_DRIVER
+	int is_driver_detached;
+#endif
 };
 
 static libusb_context *usb_context = NULL;
@@ -908,6 +913,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 #ifdef DETACH_KERNEL_DRIVER
 						/* Detach the kernel driver, but only if the
 						   device is managed by the kernel */
+						dev->is_driver_detached = 0;
 						if (libusb_kernel_driver_active(dev->device_handle, intf_desc->bInterfaceNumber) == 1) {
 							res = libusb_detach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
 							if (res < 0) {
@@ -916,6 +922,10 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 								free(dev_path);
 								good_open = 0;
 								break;
+							}
+							else {
+								dev->is_driver_detached = 1;
+								LOG("Driver successfully detached from kernel.\n");
 							}
 						}
 #endif
@@ -1246,6 +1256,15 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	/* release the interface */
 	libusb_release_interface(dev->device_handle, dev->interface);
+
+	/* reattach the kernel driver if it was detached */
+#ifdef DETACH_KERNEL_DRIVER
+	if (dev->is_driver_detached) {
+		int res = libusb_attach_kernel_driver(dev->device_handle, dev->interface);
+		if (res < 0)
+			LOG("Failed to reattach the driver to kernel.\n");
+	}
+#endif
 
 	/* Close the handle */
 	libusb_close(dev->device_handle);
