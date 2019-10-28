@@ -437,6 +437,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 				cur_dev->path = NULL;
 
 			/* Serial Number */
+			wstr[0]= 0x0000;
 			res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
 			wstr[WSTR_LEN-1] = 0x0000;
 			if (res) {
@@ -444,6 +445,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 			}
 
 			/* Manufacturer String */
+			wstr[0]= 0x0000;
 			res = HidD_GetManufacturerString(write_handle, wstr, sizeof(wstr));
 			wstr[WSTR_LEN-1] = 0x0000;
 			if (res) {
@@ -451,6 +453,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 			}
 
 			/* Product String */
+			wstr[0]= 0x0000;
 			res = HidD_GetProductString(write_handle, wstr, sizeof(wstr));
 			wstr[WSTR_LEN-1] = 0x0000;
 			if (res) {
