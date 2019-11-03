@@ -10,15 +10,14 @@ all: hidtest
 
 CC=gcc
 CXX=g++
-COBJS=hid.o
-CPPOBJS=../hidtest/hidtest.o
-OBJS=$(COBJS) $(CPPOBJS)
+COBJS=hid.o ../hidtest/test.o
+OBJS=$(COBJS)
 CFLAGS+=-I../hidapi -Wall -g -c 
 LIBS=-framework IOKit -framework CoreFoundation
 
 
 hidtest: $(OBJS)
-	g++ -Wall -g $^ $(LIBS) -o hidtest
+	$(CC) -Wall -g $^ $(LIBS) -o hidtest
 
 $(COBJS): %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
