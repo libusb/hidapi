@@ -142,7 +142,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\hidtest\hidtest.c" />
+    <ClCompile Include="..\hidtest\test.c" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="hidapi.vcxproj">
