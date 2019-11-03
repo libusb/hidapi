@@ -135,6 +135,9 @@ int main(int argc, char* argv[])
 	for (i = 0; i < 4; i++)
 		printf("buf[%d]: %d\n", i, buf[i]);
 
+	// Close the device
+	hid_close(handle);
+
 	// Finalize the hidapi library
 	res = hid_exit();
 
