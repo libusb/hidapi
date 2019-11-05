@@ -145,7 +145,7 @@ int main(int argc, char* argv[])
 }
 ```
 
-You can also use [hidtest/hidtest.c](https://github.com/libusb/hidapi/blob/master/hidtest/hidtest.c)
+You can also use [hidtest/test.c](hidtest/test.c)
 as a starting point for your applications.
 
 
