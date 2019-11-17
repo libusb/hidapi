@@ -305,7 +305,7 @@ static io_service_t hidapi_IOHIDDeviceGetService(IOHIDDeviceRef device)
 	 * and the fallback method will be used.
 	 */
 	if (iokit_framework == NULL) {
-		iokit_framework = dlopen("/System/Library/IOKit.framework/IOKit", RTLD_LAZY);
+		iokit_framework = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
 
 		if (iokit_framework != NULL)
 			dynamic_IOHIDDeviceGetService = (dynamic_IOHIDDeviceGetService_t) dlsym(iokit_framework, "IOHIDDeviceGetService");
