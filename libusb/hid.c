@@ -478,7 +478,8 @@ err:
 	return str;
 }
 
-static char *make_path(libusb_device *dev, int interface_number) {
+static char *make_path(libusb_device *dev, int interface_number)
+{
 	char str[64];
 	// Note that USB3 port count limit is 7; use 8 here for alignment
 	uint8_t port_numbers[8] = {0, 0, 0, 0, 0, 0, 0, 0};
