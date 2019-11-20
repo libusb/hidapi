@@ -478,26 +478,29 @@ err:
 	return str;
 }
 
-static char *make_path(libusb_device *dev, int interface_number)
-{
+static char *make_path(libusb_device *dev, int interface_number) {
 	char str[64];
-	uint8_t port_numbers[8] = { 0,0,0,0,0,0,0,0 };
-	int num_ports;
 	// Note that USB3 port count limit is 7; use 8 here for alignment
+	uint8_t port_numbers[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  	int num_ports = libusb_get_port_numbers(dev, port_numbers, 8);
 
-	num_ports = libusb_get_port_numbers(dev, port_numbers, 8);
-	snprintf(str, sizeof(str), "%04x:%04x:%04x:%04x:%04x:%02x",
-		libusb_get_bus_number(dev),
-		*(uint16_t*)(&port_numbers[0]),
-		*(uint16_t*)(&port_numbers[2]),
-		*(uint16_t*)(&port_numbers[4]),
-		*(uint16_t*)(&port_numbers[6]),
-		interface_number);
-	str[sizeof(str)-1] = '\0';
-
-	return strdup(str);
+  	if (num_ports > 0) {
+  	  	snprintf(str, sizeof(str), "%04x:%04x:%04x:%04x:%04x:%02x",
+  	        libusb_get_bus_number(dev), *(uint16_t *)(&port_numbers[0]),
+  	        *(uint16_t *)(&port_numbers[2]), *(uint16_t *)(&port_numbers[4]),
+  	        *(uint16_t *)(&port_numbers[6]), interface_number);
+  	  	str[sizeof(str) - 1] = '\0';
+  	} else {
+  	    // USB3.0 specs limit number of ports to 7 and buffer size here is 8
+  	  	if (num_ports == LIBUSB_ERROR_OVERFLOW) {
+			LOG("make_path() failed. buffer overflow error\n");
+  	  	} else {
+			LOG("make_path() failed. unknown error\n");
+		}
+		str[0] = '\0';
+  	}
+  	return strdup(str);
 }
-
 
 int HID_API_EXPORT hid_init(void)
 {
