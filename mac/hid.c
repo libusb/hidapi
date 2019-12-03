@@ -506,11 +506,11 @@ static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
 				root = next;
 			}
 			else {
-				if (next != NULL) {
-					cur->next = next;
-				}
+				cur->next = next;
 			}
-			cur = next;
+			if (next != NULL) {
+				cur = next;
+			}
 		}
 	}
 
