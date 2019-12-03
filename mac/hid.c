@@ -423,6 +423,9 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	}
 
 	cur_dev = (struct hid_device_info *)calloc(1, sizeof(struct hid_device_info));
+	if (cur_dev == NULL) {
+		return NULL;
+	}
 
 	dev_vid = get_vendor_id(dev);
 	dev_pid = get_product_id(dev);
@@ -494,8 +497,8 @@ static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
 			    !CFDictionaryGetValueIfPresent((CFDictionaryRef)dict, CFSTR(kIOHIDDeviceUsageKey), &usage_ref) ||
 					CFGetTypeID(usage_page_ref) != CFNumberGetTypeID() ||
 					CFGetTypeID(usage_ref) != CFNumberGetTypeID() ||
-					!CFNumberGetValue((CFNumberRef)usage_page_ref, kCFNumberIntType, &usage_page) ||
-					!CFNumberGetValue((CFNumberRef)usage_ref, kCFNumberIntType, &usage)) {
+					!CFNumberGetValue((CFNumberRef)usage_page_ref, kCFNumberSInt32Type, &usage_page) ||
+					!CFNumberGetValue((CFNumberRef)usage_ref, kCFNumberSInt32Type, &usage)) {
 					continue;
 			}
 			next = create_device_info_with_usage(device, usage_page, usage);
@@ -503,7 +506,9 @@ static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
 				root = next;
 			}
 			else {
-				cur->next = next;
+				if (next != NULL) {
+					cur->next = next;
+				}
 			}
 			cur = next;
 		}
@@ -539,13 +544,13 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	if (vendor_id != 0 || product_id != 0) {
 		matching = CFDictionaryCreateMutable(kCFAllocatorDefault, kIOHIDOptionsTypeNone, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-		if (vendor_id != 0) {
+		if (matching && vendor_id != 0) {
 			CFNumberRef v = CFNumberCreate(kCFAllocatorDefault, kCFNumberShortType, &vendor_id);
 			CFDictionarySetValue(matching, CFSTR(kIOHIDVendorIDKey), v);
 			CFRelease(v);
 		}
 
-		if (product_id != 0) {
+		if (matching && product_id != 0) {
 			CFNumberRef p = CFNumberCreate(kCFAllocatorDefault, kCFNumberShortType, &product_id);
 			CFDictionarySetValue(matching, CFSTR(kIOHIDProductIDKey), p);
 			CFRelease(p);
@@ -586,7 +591,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 		/* move the pointer to the tail of returnd list */
 		while (cur_dev->next != NULL) {
-		  cur_dev = cur_dev->next;
+			cur_dev = cur_dev->next;
 		}
 	}
 
