@@ -144,6 +144,7 @@ struct hid_device_ {
 		BOOL read_pending;
 		char *read_buf;
 		OVERLAPPED ol;
+		OVERLAPPED write_ol;			  
 };
 
 static hid_device *new_hid_device()
@@ -159,6 +160,8 @@ static hid_device *new_hid_device()
 	dev->read_buf = NULL;
 	memset(&dev->ol, 0, sizeof(dev->ol));
 	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
+	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
+	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*inital state f=nonsignaled*/, NULL);											  
 
 	return dev;
 }
@@ -166,6 +169,7 @@ static hid_device *new_hid_device()
 static void free_hid_device(hid_device *dev)
 {
 	CloseHandle(dev->ol.hEvent);
+	CloseHandle(dev->write_ol.hEvent);							   
 	CloseHandle(dev->device_handle);
 	LocalFree(dev->last_error_str);
 	free(dev->read_buf);
@@ -176,6 +180,7 @@ static void register_error(hid_device *dev, const char *op)
 {
 	WCHAR *ptr, *msg;
 
+	(void)op; //Unrefd param
 	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
 		FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -242,6 +247,24 @@ static HANDLE open_device(const char *path, BOOL open_rw)
 		OPEN_EXISTING,
 		FILE_FLAG_OVERLAPPED,/*FILE_ATTRIBUTE_NORMAL,*/
 		0);
+
+	/* Seen a problem with an application (AccuWeather) causing
+           a sharing violation and the device can not be opened for R+W,SHARE_READ
+           The app must open it for share R+W so we must also open it for share R+W
+           i.e. we can't be the 2nd CreateFile as say "Only allow others to SHARE_READ"
+           So as a last resort open the file with SHARE_READ/WRITE, this does mean
+           that two people can have the device open for write, but no other option
+           if a rogue application is doing something silly. */
+	if (handle == INVALID_HANDLE_VALUE)
+        {
+            handle = CreateFileA(path,
+                                GENERIC_WRITE |GENERIC_READ,
+                                FILE_SHARE_READ|FILE_SHARE_WRITE, /*share mode*/
+                                NULL,
+                                OPEN_EXISTING,
+                                FILE_FLAG_OVERLAPPED,/*FILE_ATTRIBUTE_NORMAL,*/
+                                0);
+        }
 
 	return handle;
 }
@@ -441,12 +464,15 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 				cur_dev->path = NULL;
 
 			/* Serial Number */
-			wstr[0]= 0x0000;
-			res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
-			wstr[WSTR_LEN-1] = 0x0000;
-			if (res) {
-				cur_dev->serial_number = _wcsdup(wstr);
-			}
+			for (i=0; i < 5; ++i) {		   
+				res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
+				wstr[WSTR_LEN-1] = 0x0000;
+				if (res) {
+					cur_dev->serial_number = _wcsdup(wstr);
+				} else {
+                    Sleep(100);
+                }
+            }
 
 			/* Manufacturer String */
 			wstr[0]= 0x0000;
@@ -536,7 +562,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 	while (cur_dev) {
 		if (cur_dev->vendor_id == vendor_id &&
 		    cur_dev->product_id == product_id) {
-			if (serial_number) {
+			if (serial_number && cur_dev->serial_number) {
 				if (wcscmp(serial_number, cur_dev->serial_number) == 0) {
 					path_to_open = cur_dev->path;
 					break;
@@ -629,12 +655,11 @@ err:
 
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
-	DWORD bytes_written;
+	DWORD bytes_written = 0;
 	BOOL res;
+	BOOL overlapped = FALSE;								 
 
-	OVERLAPPED ol;
 	unsigned char *buf;
-	memset(&ol, 0, sizeof(ol));
 
 	/* Make sure the right number of bytes are passed to WriteFile. Windows
 	   expects the number of bytes which are in the _longest_ report (plus
@@ -654,7 +679,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		length = dev->output_report_length;
 	}
 
-	res = WriteFile(dev->device_handle, buf, length, NULL, &ol);
+	res = WriteFile(dev->device_handle, buf, length, NULL, &dev->write_ol);
 	
 	if (!res) {
 		if (GetLastError() != ERROR_IO_PENDING) {
@@ -663,16 +688,28 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 			bytes_written = -1;
 			goto end_of_function;
 		}
+		overlapped = TRUE;
 	}
 
-	/* Wait here until the write is done. This makes
-	   hid_write() synchronous. */
-	res = GetOverlappedResult(dev->device_handle, &ol, &bytes_written, TRUE/*wait*/);
-	if (!res) {
-		/* The Write operation failed. */
-		register_error(dev, "WriteFile");
-		bytes_written = -1;
-		goto end_of_function;
+	if (overlapped) {
+	    /* Wait for the transaction to complete */
+	    res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
+	    if (res != WAIT_OBJECT_0) {
+		    	/* There was a Timeout. */
+    			bytes_written = -1;
+			    register_error(dev, "WriteFile/WaitForSingleObject Timeout");
+			    goto end_of_function;
+	    }
+
+		/* Wait here until the write is done. This makes
+		   hid_write() synchronous. */
+		 res = GetOverlappedResult(dev->device_handle, &dev->write_ol, &bytes_written, FALSE/*wait*/);
+		 if (!res) {
+			 /* The Write operation failed. */
+			 register_error(dev, "WriteFile");
+			 bytes_written = -1;
+			 goto end_of_function;
+		 }
 	}
 
 end_of_function:
@@ -688,6 +725,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	DWORD bytes_read = 0;
 	size_t copy_len = 0;
 	BOOL res;
+	BOOL overlapped = FALSE;
 
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
@@ -707,24 +745,29 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 				dev->read_pending = FALSE;
 				goto end_of_function;
 			}
-		}
+			overlapped = TRUE;	   
+		}																		   
+	}else {
+        overlapped = TRUE;	
 	}
 
-	if (milliseconds >= 0) {
-		/* See if there is any data yet. */
-		res = WaitForSingleObject(ev, milliseconds);
-		if (res != WAIT_OBJECT_0) {
-			/* There was no data this time. Return zero bytes available,
-			   but leave the Overlapped I/O running. */
-			return 0;
+	if (overlapped) {
+        BOOL wait = TRUE;
+		if (milliseconds >= 0) {
+			/* See if there is any data yet. */
+			res = WaitForSingleObject(ev, milliseconds);
+			if (res != WAIT_OBJECT_0) {
+				/* There was no data this time. Return zero bytes available,
+				   but leave the Overlapped I/O running. */
+				return 0;
+			}
 		}
-	}
 
-	/* Either WaitForSingleObject() told us that ReadFile has completed, or
-	   we are in non-blocking mode. Get the number of bytes read. The actual
-	   data has been copied to the data[] array which was passed to ReadFile(). */
-	res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE/*wait*/);
-	
+		/* Either WaitForSingleObject() told us that ReadFile has completed, or
+		   we are in non-blocking mode. Get the number of bytes read. The actual
+		   data has been copied to the data[] array which was passed to ReadFile(). */
+		res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, wait/*wait*/);
+	}
 	/* Set pending back to false, even if GetOverlappedResult() returned error. */
 	dev->read_pending = FALSE;
 
