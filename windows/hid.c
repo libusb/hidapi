@@ -248,24 +248,6 @@ static HANDLE open_device(const char *path, BOOL open_rw)
 		FILE_FLAG_OVERLAPPED,/*FILE_ATTRIBUTE_NORMAL,*/
 		0);
 
-	/* Seen a problem with an application (AccuWeather) causing
-		   a sharing violation and the device can not be opened for R+W,SHARE_READ
-		   The app must open it for share R+W so we must also open it for share R+W
-		   i.e. we can't be the 2nd CreateFile as say "Only allow others to SHARE_READ"
-		   So as a last resort open the file with SHARE_READ/WRITE, this does mean
-		   that two people can have the device open for write, but no other option
-		   if a rogue application is doing something silly. */
-	if (handle == INVALID_HANDLE_VALUE)
-		{
-			handle = CreateFileA(path,
-								GENERIC_WRITE |GENERIC_READ,
-								FILE_SHARE_READ|FILE_SHARE_WRITE, /*share mode*/
-								NULL,
-								OPEN_EXISTING,
-								FILE_FLAG_OVERLAPPED,/*FILE_ATTRIBUTE_NORMAL,*/
-								0);
-		}
-
 	return handle;
 }
 
