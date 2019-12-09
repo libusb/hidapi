@@ -180,7 +180,7 @@ static void register_error(hid_device *dev, const char *op)
 {
 	WCHAR *ptr, *msg;
 
-	(void)op; //Unrefd param
+	(void)op; // unreferenced  param
 	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
 		FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
