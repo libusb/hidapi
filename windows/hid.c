@@ -249,22 +249,22 @@ static HANDLE open_device(const char *path, BOOL open_rw)
 		0);
 
 	/* Seen a problem with an application (AccuWeather) causing
-           a sharing violation and the device can not be opened for R+W,SHARE_READ
-           The app must open it for share R+W so we must also open it for share R+W
-           i.e. we can't be the 2nd CreateFile as say "Only allow others to SHARE_READ"
-           So as a last resort open the file with SHARE_READ/WRITE, this does mean
-           that two people can have the device open for write, but no other option
-           if a rogue application is doing something silly. */
+		   a sharing violation and the device can not be opened for R+W,SHARE_READ
+		   The app must open it for share R+W so we must also open it for share R+W
+		   i.e. we can't be the 2nd CreateFile as say "Only allow others to SHARE_READ"
+		   So as a last resort open the file with SHARE_READ/WRITE, this does mean
+		   that two people can have the device open for write, but no other option
+		   if a rogue application is doing something silly. */
 	if (handle == INVALID_HANDLE_VALUE)
-        {
-            handle = CreateFileA(path,
-                                GENERIC_WRITE |GENERIC_READ,
-                                FILE_SHARE_READ|FILE_SHARE_WRITE, /*share mode*/
-                                NULL,
-                                OPEN_EXISTING,
-                                FILE_FLAG_OVERLAPPED,/*FILE_ATTRIBUTE_NORMAL,*/
-                                0);
-        }
+		{
+			handle = CreateFileA(path,
+								GENERIC_WRITE |GENERIC_READ,
+								FILE_SHARE_READ|FILE_SHARE_WRITE, /*share mode*/
+								NULL,
+								OPEN_EXISTING,
+								FILE_FLAG_OVERLAPPED,/*FILE_ATTRIBUTE_NORMAL,*/
+								0);
+		}
 
 	return handle;
 }
@@ -464,15 +464,12 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 				cur_dev->path = NULL;
 
 			/* Serial Number */
-			for (i=0; i < 5; ++i) {		   
-				res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
-				wstr[WSTR_LEN-1] = 0x0000;
-				if (res) {
-					cur_dev->serial_number = _wcsdup(wstr);
-				} else {
-                    Sleep(100);
-                }
-            }
+			wstr[0]= 0x0000;
+			res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
+			wstr[WSTR_LEN-1] = 0x0000;
+			if (res) {
+				cur_dev->serial_number = _wcsdup(wstr);
+			}
 
 			/* Manufacturer String */
 			wstr[0]= 0x0000;
@@ -562,7 +559,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 	while (cur_dev) {
 		if (cur_dev->vendor_id == vendor_id &&
 		    cur_dev->product_id == product_id) {
-			if (serial_number && cur_dev->serial_number) {
+			if (serial_number) {
 				if (wcscmp(serial_number, cur_dev->serial_number) == 0) {
 					path_to_open = cur_dev->path;
 					break;
@@ -692,14 +689,14 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	}
 
 	if (overlapped) {
-	    /* Wait for the transaction to complete */
-	    res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
-	    if (res != WAIT_OBJECT_0) {
+		/* Wait for the transaction to complete */
+		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
+		if (res != WAIT_OBJECT_0) {
 		    	/* There was a Timeout. */
-    			bytes_written = -1;
-			    register_error(dev, "WriteFile/WaitForSingleObject Timeout");
-			    goto end_of_function;
-	    }
+				bytes_written = -1;
+				register_error(dev, "WriteFile/WaitForSingleObject Timeout");
+				goto end_of_function;
+		}
 
 		/* Wait here until the write is done. This makes
 		   hid_write() synchronous. */
@@ -748,11 +745,10 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 			overlapped = TRUE;	   
 		}																		   
 	}else {
-        overlapped = TRUE;	
+		overlapped = TRUE;	
 	}
 
 	if (overlapped) {
-        BOOL wait = TRUE;
 		if (milliseconds >= 0) {
 			/* See if there is any data yet. */
 			res = WaitForSingleObject(ev, milliseconds);
@@ -766,7 +762,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 		/* Either WaitForSingleObject() told us that ReadFile has completed, or
 		   we are in non-blocking mode. Get the number of bytes read. The actual
 		   data has been copied to the data[] array which was passed to ReadFile(). */
-		res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, wait/*wait*/);
+		res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE/*wait*/);
 	}
 	/* Set pending back to false, even if GetOverlappedResult() returned error. */
 	dev->read_pending = FALSE;
