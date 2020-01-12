@@ -8,3 +8,6 @@ script:
   - ./configure
   - make
   - make DESTDIR=$PWD/root install
+  - make clean
+  - cd mac
+  - make -f Makefile-manual
