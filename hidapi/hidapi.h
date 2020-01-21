@@ -96,10 +96,10 @@ extern "C" {
 			/** Product string */
 			wchar_t *product_string;
 			/** Usage Page for this Device/Interface
-			    (Windows/Mac only). */
+			    (Windows/Mac/hidraw only) */
 			unsigned short usage_page;
 			/** Usage for this Device/Interface
-			    (Windows/Mac only).*/
+			    (Windows/Mac/hidraw only) */
 			unsigned short usage;
 			/** The USB interface which this logical device
 			    represents.
@@ -124,7 +124,7 @@ extern "C" {
 			needed.  This function should be called at the beginning of
 			execution however, if there is a chance of HIDAPI handles
 			being opened by different threads simultaneously.
-			
+
 			@ingroup API
 
 			@returns
