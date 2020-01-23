@@ -648,6 +648,25 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 			/* Interface Number */
 			cur_dev->interface_number = -1;
 
+			/* Usage Page and Usage */
+			int res;
+			struct hidraw_report_descriptor rpt_desc;
+			int device_handle = open(dev_path, O_RDWR);
+			if (device_handle > 0) {
+				res = get_hid_report_descriptor(device_handle, &rpt_desc);
+				if (res >= 0) {
+					unsigned short page = 0, usage = 0;
+					/*
+					 * Parse the usage and usage page
+					 * out of the report descriptor.
+					 */
+					get_hid_usage(rpt_desc.value, rpt_desc.size, &page, &usage);
+					cur_dev->usage_page = page;
+					cur_dev->usage = usage;
+				}
+				close(device_handle);
+			}
+
 			switch (bus_type) {
 				case BUS_USB:
 					/* The device pointed to by raw_dev contains information about
@@ -682,25 +701,6 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					/* Manufacturer and Product strings */
 					cur_dev->manufacturer_string = copy_udev_string(usb_dev, device_string_names[DEVICE_STRING_MANUFACTURER]);
 					cur_dev->product_string = copy_udev_string(usb_dev, device_string_names[DEVICE_STRING_PRODUCT]);
-
-					/* Usage Page and Usage */
-					int res;
-					struct hidraw_report_descriptor rpt_desc;
-					int device_handle = open(dev_path, O_RDWR);
-					if (device_handle > 0) {
-						res = get_hid_report_descriptor(device_handle, &rpt_desc);
-						if (res >= 0) {
-							unsigned short page = 0, usage = 0;
-							/*
-							 * Parse the usage and usage page
-							 * out of the report descriptor.
-							 */
-							get_hid_usage(rpt_desc.value, rpt_desc.size, &page, &usage);
-							cur_dev->usage_page = page;
-							cur_dev->usage = usage;
-						}
-						close(device_handle);
-					}
 
 					/* Release Number */
 					str = udev_device_get_sysattr_value(usb_dev, "bcdDevice");
