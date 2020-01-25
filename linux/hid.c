@@ -284,42 +284,81 @@ static __u32 get_hid_report_bytes(__u8 *rpt, size_t len, size_t num_bytes, size_
 }
 
 /*
- * Retrieves the device's Usage Page and Usage from the report
- * descriptor. The algorithm is simple, as it just returns the first
- * Usage and Usage Page that it finds in the descriptor.
- * The return value is 0 on success and -1 on failure.
+ * Retrieves the device's Usage Page and Usage from the report descriptor.
+ * The algorithm returns the current Usage Page/Usage pair whenever a new
+ * Collection is found and a Usage Local Item is currently in scope.
+ * Usage Local Items are consumed by each Main Item (See. 6.2.2.8).
+ * The algorithm should give similar results as Apple's:
+ *   https://developer.apple.com/documentation/iokit/kiohiddeviceusagepairskey?language=objc
+ * Physical Collections are also matched (macOS does the same).
+ *
+ * This function can be called repeatedly until it returns non-0
+ * Usage is found. pos is the starting point (initially 0) and will be updated
+ * to the next search position.
+ *
+ * The return value is 0 when a pair is found.
+ * 1 when finished processing descriptor.
+ * -1 on a malformed report.
  */
-static int get_hid_usage(__u8 *report_descriptor, __u32 size, unsigned short *usage_page, unsigned short *usage)
+static int get_next_hid_usage(__u8 *report_descriptor, __u32 size, unsigned int *pos, unsigned short *usage_page, unsigned short *usage)
 {
-	unsigned int i = 0;
 	int data_len, key_size;
-	int usage_found = 0, usage_page_found = 0;
+	int initial = *pos == 0; /* Used to handle case where no top-level application collection is defined */
+	int usage_pair_ready = 0;
 
-	while (i < size) {
-		int key = report_descriptor[i];
+	/* Usage is a Local Item, it must be set before each Main Item (Collection) before a pair is returned */
+	int usage_found = 0;
+
+	while (*pos < size) {
+		int key = report_descriptor[*pos];
 		int key_cmd = key & 0xfc;
 
 		/* Determine data_len and key_size */
-		if (!get_hid_item_size(report_descriptor, i, size, &data_len, &key_size))
+		if (!get_hid_item_size(report_descriptor, *pos, size, &data_len, &key_size))
 			return -1; /* malformed report */
 
-		if (key_cmd == 0x4) {
-			*usage_page = get_hid_report_bytes(report_descriptor, size, data_len, i);
-			usage_page_found = 1;
-		}
-		if (key_cmd == 0x8) {
-			*usage = get_hid_report_bytes(report_descriptor, size, data_len, i);
-			usage_found = 1;
-		}
+		switch (key_cmd) {
+		case 0x4: /* Usage Page 6.2.2.7 (Global) */
+			*usage_page = get_hid_report_bytes(report_descriptor, size, data_len, *pos);
+			break;
 
-		if (usage_page_found && usage_found)
-			return 0; /* success */
+		case 0x8: /* Usage 6.2.2.8 (Local) */
+			*usage = get_hid_report_bytes(report_descriptor, size, data_len, *pos);
+			usage_found = 1;
+			break;
+
+		case 0xa0: /* Collection 6.2.2.4 (Main) */
+			/* A Usage Item (Local) must be found for the pair to be valid */
+			if (usage_found)
+				usage_pair_ready = 1;
+
+			/* Usage is a Local Item, unset it */
+			usage_found = 0;
+			break;
+
+		case 0x80: /* Input 6.2.2.4 (Main) */
+		case 0x90: /* Output 6.2.2.4 (Main) */
+		case 0xb0: /* Feature 6.2.2.4 (Main) */
+		case 0xc0: /* End Collection 6.2.2.4 (Main) */
+			/* Usage is a Local Item, unset it */
+			usage_found = 0;
+			break;
+		}
 
 		/* Skip over this key and it's associated data */
-		i += data_len + key_size;
+		*pos += data_len + key_size;
+
+		/* Return usage pair */
+		if (usage_pair_ready)
+			return 0;
 	}
 
-	return -1; /* failure */
+	/* If no top-level application collection is found and usage page/usage pair is found, pair is valid
+	   https://docs.microsoft.com/en-us/windows-hardware/drivers/hid/top-level-collections */
+	if (initial && usage_found)
+		return 0; /* success */
+
+	return 1; /* finished processing */
 }
 
 /*
@@ -648,25 +687,6 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 			/* Interface Number */
 			cur_dev->interface_number = -1;
 
-			/* Usage Page and Usage */
-			int res;
-			struct hidraw_report_descriptor rpt_desc;
-			int device_handle = open(dev_path, O_RDWR);
-			if (device_handle > 0) {
-				res = get_hid_report_descriptor(device_handle, &rpt_desc);
-				if (res >= 0) {
-					unsigned short page = 0, usage = 0;
-					/*
-					 * Parse the usage and usage page
-					 * out of the report descriptor.
-					 */
-					get_hid_usage(rpt_desc.value, rpt_desc.size, &page, &usage);
-					cur_dev->usage_page = page;
-					cur_dev->usage = usage;
-				}
-				close(device_handle);
-			}
-
 			switch (bus_type) {
 				case BUS_USB:
 					/* The device pointed to by raw_dev contains information about
@@ -729,6 +749,52 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					/* Unknown device type - this should never happen, as we
 					 * check for USB and Bluetooth devices above */
 					break;
+			}
+
+			/* Usage Page and Usage */
+			int res;
+			struct hidraw_report_descriptor rpt_desc;
+			int device_handle = open(dev_path, O_RDWR);
+			if (device_handle > 0) {
+				res = get_hid_report_descriptor(device_handle, &rpt_desc);
+				if (res >= 0) {
+					unsigned short page = 0, usage = 0;
+					unsigned int pos = 0, usage_count = 0;
+					/*
+					 * Parse the usage and usage page
+					 * out of the report descriptor.
+					 */
+					while (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
+						usage_count++;
+
+						/* First usage */
+						if (usage_count == 1)
+						{
+							cur_dev->usage_page = page;
+							cur_dev->usage = usage;
+							continue;
+						}
+
+						/* Create new record for additional usage pairs */
+						tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
+						cur_dev->next = tmp;
+						prev_dev = cur_dev;
+						cur_dev = tmp;
+
+						/* Update fields */
+						cur_dev->path = strdup(dev_path);
+						cur_dev->vendor_id = dev_vid;
+						cur_dev->product_id = dev_pid;
+						cur_dev->serial_number = utf8_to_wchar_t(serial_number_utf8);
+						cur_dev->release_number = prev_dev->release_number;
+						cur_dev->interface_number = prev_dev->interface_number;
+						cur_dev->manufacturer_string = prev_dev->manufacturer_string? wcsdup(prev_dev->manufacturer_string): NULL;
+						cur_dev->product_string = prev_dev->product_string? wcsdup(prev_dev->product_string): NULL;
+						cur_dev->usage_page = page;
+						cur_dev->usage = usage;
+					}
+				}
+				close(device_handle);
 			}
 		}
 
