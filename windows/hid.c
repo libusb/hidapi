@@ -828,8 +828,8 @@ int HID_API_EXPORT HID_API_CALL hid_get_feature_report(hid_device *dev, unsigned
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
-#if 0
 	BOOL res;
+#if 0
 	res = HidD_GetInputReport(dev->device_handle, data, length);
 	if (!res) {
 		register_error(dev, "HidD_GetInputReport");
@@ -842,7 +842,7 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 	OVERLAPPED ol;
 	memset(&ol, 0, sizeof(ol));
 
-	BOOL res = DeviceIoControl(dev->device_handle,
+	res = DeviceIoControl(dev->device_handle,
 		IOCTL_HID_GET_INPUT_REPORT,
 		data, length,
 		data, length,
