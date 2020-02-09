@@ -189,7 +189,7 @@ mkdir testgui/TestGUI.app/Contents/MacOS/
 
 if test "x$testgui_enabled" != "xno"; then
 	if test "x$os" = xdarwin; then
-		# On Mac OS, don't use pkg-config.
+		# On Mac OS, do not use pkg-config.
 		AC_CHECK_PROG([foxconfig], [fox-config], [fox-config], false)
 		if test "x$foxconfig" = "xfalse"; then
 			hidapi_prog_error fox-config "FOX Toolkit"
