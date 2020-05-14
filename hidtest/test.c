@@ -70,9 +70,15 @@ int main(int argc, char* argv[])
 	// Open the device using the VID, PID,
 	// and optionally the Serial number.
 	////handle = hid_open(0x4d8, 0x3f, L"12345");
-	handle = hid_open(0x4d8, 0x3f, NULL);
+#ifndef VID
+	#define VID		0x4d8
+#endif
+#ifndef PID
+	#define PID		0x3f
+#endif
+	handle = hid_open(VID, PID, NULL);
 	if (!handle) {
-		printf("unable to open device\n");
+		printf("unable to open device %04x:%04x\n", VID, PID);
  		return 1;
 	}
 
@@ -98,12 +104,14 @@ int main(int argc, char* argv[])
 	printf("Serial Number String: (%d) %ls", wstr[0], wstr);
 	printf("\n");
 
+#ifdef INDEX
 	// Read Indexed String 1
 	wstr[0] = 0x0000;
-	res = hid_get_indexed_string(handle, 1, wstr, MAX_STR);
+	res = hid_get_indexed_string(handle, INDEX, wstr, MAX_STR);
 	if (res < 0)
-		printf("Unable to read indexed string 1\n");
-	printf("Indexed String 1: %ls\n", wstr);
+		printf("Unable to read indexed string %d\n", INDEX);
+	printf("Indexed String %d: %ls\n", INDEX, wstr);
+#endif
 
 	// Set the hid_read() function to be non-blocking.
 	hid_set_nonblocking(handle, 1);
@@ -111,53 +119,55 @@ int main(int argc, char* argv[])
 	// Try to read from the device. There should be no
 	// data here, but execution should not block.
 	res = hid_read(handle, buf, 17);
-
+#ifdef REPORT
 	// Send a Feature Report to the device
-	buf[0] = 0x2;
+	buf[0] = REPORT;
 	buf[1] = 0xa0;
 	buf[2] = 0x0a;
 	buf[3] = 0x00;
 	buf[4] = 0x00;
 	res = hid_send_feature_report(handle, buf, 17);
 	if (res < 0) {
-		printf("Unable to send a feature report.\n");
+		printf("Unable to send a feature report %02x.\n", REPORT);
 	}
 
 	memset(buf,0,sizeof(buf));
 
 	// Read a Feature Report from the device
-	buf[0] = 0x2;
+	buf[0] = REPORT;
 	res = hid_get_feature_report(handle, buf, sizeof(buf));
 	if (res < 0) {
-		printf("Unable to get a feature report.\n");
-		printf("%ls", hid_error(handle));
+		printf("Unable to get a feature report %02x.\n", REPORT);
+		printf("Error: %ls\n", hid_error(handle));
 	}
 	else {
 		// Print out the returned buffer.
-		printf("Feature Report\n   ");
+		printf("Feature Report %02x\n   ", REPORT);
 		for (i = 0; i < res; i++)
 			printf("%02hhx ", buf[i]);
 		printf("\n");
 	}
-
+#endif
 	memset(buf,0,sizeof(buf));
 
 	// Toggle LED (cmd 0x80). The first byte is the report number (0x1).
-	buf[0] = 0x1;
+#ifdef LED
+	buf[0] = LED;
 	buf[1] = 0x80;
 	res = hid_write(handle, buf, 17);
 	if (res < 0) {
-		printf("Unable to write()\n");
+		printf("Unable to write %02x 80\n", LED);
 		printf("Error: %ls\n", hid_error(handle));
 	}
 	
 
 	// Request state (cmd 0x81). The first byte is the report number (0x1).
-	buf[0] = 0x1;
+	buf[0] = LED;
 	buf[1] = 0x81;
 	hid_write(handle, buf, 17);
 	if (res < 0)
-		printf("Unable to write() (2)\n");
+		printf("Unable to write %02x 81\n", LED);
+#endif
 
 	// Read requested state. hid_read() has been set to be
 	// non-blocking by the call to hid_set_nonblocking() above.

@@ -11,7 +11,7 @@ all: hidtest-libusb libs
 libs: libhidapi-libusb.so
 
 CC       ?= gcc
-CFLAGS   ?= -Wall -g -fpic
+CFLAGS   ?= -Wall -D VID=0x483 -D PID=0x5750 -D REPORT=2 -g -fpic
 
 LDFLAGS  ?= -Wall -g
 
