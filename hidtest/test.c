@@ -76,6 +76,9 @@ int main(int argc, char* argv[])
  		return 1;
 	}
 
+	// Read the Path to the Device
+	printf("Path: \"%s\"\n", hid_get_path(handle));
+
 	// Read the Manufacturer String
 	wstr[0] = 0x0000;
 	res = hid_get_manufacturer_string(handle, wstr, MAX_STR);

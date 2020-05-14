@@ -121,6 +121,7 @@ struct hid_device_ {
 	pthread_barrier_t barrier; /* Ensures correct startup sequence */
 	pthread_barrier_t shutdown_barrier; /* Ensures correct shutdown sequence */
 	int shutdown_thread;
+	char *path;
 };
 
 static hid_device *new_hid_device(void)
@@ -142,6 +143,8 @@ static hid_device *new_hid_device(void)
 	pthread_cond_init(&dev->condition, NULL);
 	pthread_barrier_init(&dev->barrier, NULL, 2);
 	pthread_barrier_init(&dev->shutdown_barrier, NULL, 2);
+
+	dev->path = NULL;
 
 	return dev;
 }
@@ -174,6 +177,9 @@ static void free_hid_device(hid_device *dev)
 	pthread_barrier_destroy(&dev->barrier);
 	pthread_cond_destroy(&dev->condition);
 	pthread_mutex_destroy(&dev->mutex);
+
+	/* Free the path str */
+	free(dev->path);
 
 	/* Free the structure itself. */
 	free(dev);
@@ -821,6 +827,12 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	if (ret == kIOReturnSuccess) {
 		char str[32];
 
+		/* Save path */
+		size_t len = strlen(path);
+		dev->path = (char *) calloc(len+1, sizeof(char));
+		strncpy(dev->path, path, len+1);
+		dev->path[len] = '\0';
+
 		/* Create the buffers for receiving data */
 		dev->max_input_report_len = (CFIndex) get_max_report_length(dev->device_handle);
 		dev->input_report_buf = (uint8_t*) calloc(dev->max_input_report_len, sizeof(uint8_t));
@@ -1156,6 +1168,13 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	return 0;
 }
 
+HID_API_EXPORT_CALL const char * hid_get_path(hid_device *dev)
+{
+	if (dev) {
+		return dev->path;
+	}
+	return NULL;
+}
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {

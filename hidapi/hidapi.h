@@ -417,6 +417,16 @@ extern "C" {
 		*/
 		int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen);
 
+		/** @brief Get the Path String from a HID device.
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				This function returns a pointer to path string or NULL on error.
+		*/
+		HID_API_EXPORT_CALL const char *hid_get_path(hid_device *dev);
+
 		/** @brief Get a string describing the last error which occurred.
 
 			Whether a function sets the last error is noted in its

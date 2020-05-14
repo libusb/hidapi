@@ -67,6 +67,7 @@ struct hid_device_ {
 	int blocking;
 	int uses_numbered_reports;
 	wchar_t *last_error_str;
+	char *path;
 };
 
 /* Global error message that is not specific to a device, e.g. for
@@ -80,10 +81,16 @@ static hid_device *new_hid_device(void)
 	dev->blocking = 1;
 	dev->uses_numbered_reports = 0;
 	dev->last_error_str = NULL;
+	dev->path = NULL;
 
 	return dev;
 }
 
+static void free_hid_device(hid_device *dev)
+{
+	free(dev->path);
+	free(dev);
+}
 
 /* The caller must free the returned string with free(). */
 static wchar_t *utf8_to_wchar_t(const char *utf8)
@@ -656,6 +663,12 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		/* Set device error to none */
 		register_device_error(dev, NULL);
 
+		/* Save path */
+		size_t len = strlen(path);
+		dev->path = (char *) calloc(len+1, sizeof(char));
+		strncpy(dev->path, path, len+1);
+		dev->path[len] = '\0';
+
 		/* Get the report descriptor */
 		int res, desc_size = 0;
 		struct hidraw_report_descriptor rpt_desc;
@@ -808,7 +821,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	/* Free the device error message */
 	register_device_error(dev, NULL);
 
-	free(dev);
+	free_hid_device(dev);
 }
 
 
@@ -832,6 +845,13 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	return -1;
 }
 
+HID_API_EXPORT_CALL const char * hid_get_path(hid_device *dev)
+{
+	if (dev) {
+		return dev->path;
+	}
+	return NULL;
+}
 
 /* Passing in NULL means asking for the last global error message. */
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)

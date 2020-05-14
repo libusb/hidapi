@@ -144,6 +144,7 @@ struct hid_device_ {
 		BOOL read_pending;
 		char *read_buf;
 		OVERLAPPED ol;
+		char *path;
 };
 
 static hid_device *new_hid_device()
@@ -159,6 +160,7 @@ static hid_device *new_hid_device()
 	dev->read_buf = NULL;
 	memset(&dev->ol, 0, sizeof(dev->ol));
 	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
+	dev->path = NULL;
 
 	return dev;
 }
@@ -169,6 +171,7 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->device_handle);
 	LocalFree(dev->last_error_str);
 	free(dev->read_buf);
+	free(dev->path);
 	free(dev);
 }
 
@@ -594,6 +597,12 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 		}
 	}
 
+	/* Save path */
+	size_t len = strlen(path);
+	dev->path = (char *) calloc(len+1, sizeof(char));
+	strncpy(dev->path, path, len+1);
+	dev->path[len] = '\0';
+
 	/* Set the Input Report buffer size to 64 reports. */
 	res = HidD_SetNumInputBuffers(dev->device_handle, 64);
 	if (!res) {
@@ -934,6 +943,13 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 	return 0;
 }
 
+HID_API_EXPORT_CALL const char *hid_get_path(hid_device *dev)
+{
+	if (dev) {
+		return dev->path;
+	}
+	return NULL;
+}
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {

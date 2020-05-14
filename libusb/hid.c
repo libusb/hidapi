@@ -178,6 +178,7 @@ struct hid_device_ {
 #ifdef DETACH_KERNEL_DRIVER
 	int is_driver_detached;
 #endif
+	char *path;
 };
 
 static libusb_context *usb_context = NULL;
@@ -194,6 +195,8 @@ static hid_device *new_hid_device(void)
 	pthread_cond_init(&dev->condition, NULL);
 	pthread_barrier_init(&dev->barrier, NULL, 2);
 
+	dev->path = NULL;
+
 	return dev;
 }
 
@@ -203,6 +206,9 @@ static void free_hid_device(hid_device *dev)
 	pthread_barrier_destroy(&dev->barrier);
 	pthread_cond_destroy(&dev->condition);
 	pthread_mutex_destroy(&dev->mutex);
+
+	/* Free the path str */
+	free(dev->path);
 
 	/* Free the device itself */
 	free(dev);
@@ -910,6 +916,12 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 							break;
 						}
 						good_open = 1;
+						/* Save path */
+						size_t len = strlen(path);
+						dev->path = (char *) calloc(len+1, sizeof(char));
+						strncpy(dev->path, path, len+1);
+						dev->path[len] = '\0';
+
 #ifdef DETACH_KERNEL_DRIVER
 						/* Detach the kernel driver, but only if the
 						   device is managed by the kernel */
@@ -1339,6 +1351,13 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 		return -1;
 }
 
+HID_API_EXPORT_CALL const char * hid_get_path(hid_device *dev)
+{
+	if (dev) {
+		return dev->path;
+	}
+	return NULL;
+}
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
