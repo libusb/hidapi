@@ -664,10 +664,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		register_device_error(dev, NULL);
 
 		/* Save path */
-		size_t len = strlen(path);
-		dev->path = (char *) calloc(len+1, sizeof(char));
-		strncpy(dev->path, path, len+1);
-		dev->path[len] = '\0';
+		dev->path = strdup(path);
 
 		/* Get the report descriptor */
 		int res, desc_size = 0;

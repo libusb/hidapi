@@ -598,10 +598,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	}
 
 	/* Save path */
-	size_t len = strlen(path);
-	dev->path = (char *) calloc(len+1, sizeof(char));
-	strncpy(dev->path, path, len+1);
-	dev->path[len] = '\0';
+	dev->path = strdup(path);
 
 	/* Set the Input Report buffer size to 64 reports. */
 	res = HidD_SetNumInputBuffers(dev->device_handle, 64);
