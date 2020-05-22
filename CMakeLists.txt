@@ -47,9 +47,10 @@ target_compile_definitions(hidapi PUBLIC -DHIDAPI_EXPORTS)
 
 add_library(libhidapi STATIC ${HIDAPI_SRC} ${HIDAPI_HDR})
 target_link_libraries(hidapi PUBLIC ${HIDAPI_LIB})
-target_compile_definitions(hidapi PUBLIC -DHIDAPI_STATIC)
+target_compile_definitions(libhidapi PUBLIC -DHIDAPI_STATIC)
 
 install(TARGETS hidapi libhidapi)
+install(FILES hidapi/hidapi.h TYPE INCLUDE)
 
 option(BUILD_TESTS "Build test programms" ON)
 if(BUILD_TESTS)
