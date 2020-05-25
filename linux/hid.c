@@ -313,27 +313,8 @@ static int get_device_string(hid_device *dev, enum device_string_id key, wchar_t
 			           &serial_number_utf8,
 			           &product_name_utf8);
 
-			if (bus_type == BUS_BLUETOOTH) {
-				switch (key) {
-					case DEVICE_STRING_MANUFACTURER:
-						wcsncpy(string, L"", maxlen);
-						ret = 0;
-						break;
-					case DEVICE_STRING_PRODUCT:
-						retm = mbstowcs(string, product_name_utf8, maxlen);
-						ret = (retm == (size_t)-1)? -1: 0;
-						break;
-					case DEVICE_STRING_SERIAL:
-						retm = mbstowcs(string, serial_number_utf8, maxlen);
-						ret = (retm == (size_t)-1)? -1: 0;
-						break;
-					case DEVICE_STRING_COUNT:
-					default:
-						ret = -1;
-						break;
-				}
-			}
-			else {
+			/* Standard USB device */
+			if (bus_type == BUS_USB) {
 				/* This is a USB device. Find its parent USB Device node. */
 				parent = udev_device_get_parent_with_subsystem_devtype(
 					   udev_dev,
@@ -355,9 +336,39 @@ static int get_device_string(hid_device *dev, enum device_string_id key, wchar_t
 						/* Convert the string from UTF-8 to wchar_t */
 						retm = mbstowcs(string, str, maxlen);
 						ret = (retm == (size_t)-1)? -1: 0;
-						goto end;
 					}
+
+					/* USB information parsed */
+					goto end;
 				}
+				else {
+					/* Correctly handled below */
+				}
+			}
+
+			/* USB information not available (uhid) or another type of HID bus */
+			switch (bus_type) {
+				case BUS_BLUETOOTH:
+				case BUS_I2C:
+				case BUS_USB:
+					switch (key) {
+						case DEVICE_STRING_MANUFACTURER:
+							wcsncpy(string, L"", maxlen);
+							ret = 0;
+							break;
+						case DEVICE_STRING_PRODUCT:
+							retm = mbstowcs(string, product_name_utf8, maxlen);
+							ret = (retm == (size_t)-1)? -1: 0;
+							break;
+						case DEVICE_STRING_SERIAL:
+							retm = mbstowcs(string, serial_number_utf8, maxlen);
+							ret = (retm == (size_t)-1)? -1: 0;
+							break;
+						case DEVICE_STRING_COUNT:
+						default:
+							ret = -1;
+							break;
+					}
 			}
 		}
 	}
@@ -465,9 +476,15 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 			goto next;
 		}
 
-		if (bus_type != BUS_USB && bus_type != BUS_BLUETOOTH) {
-			/* We only know how to handle USB and BT devices. */
-			goto next;
+		/* Filter out unhandled devices right away */
+		switch (bus_type) {
+			case BUS_BLUETOOTH:
+			case BUS_I2C:
+			case BUS_USB:
+				break;
+
+			default:
+				goto next;
 		}
 
 		/* Check the VID/PID against the arguments */
@@ -516,22 +533,14 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							"usb",
 							"usb_device");
 
+					/* uhid USB devices
+					   Since this is a virtual hid interface, no USB information will
+					   be available. */
 					if (!usb_dev) {
-						/* Free this device */
-						free(cur_dev->serial_number);
-						free(cur_dev->path);
-						free(cur_dev);
-
-						/* Take it off the device list. */
-						if (prev_dev) {
-							prev_dev->next = NULL;
-							cur_dev = prev_dev;
-						}
-						else {
-							cur_dev = root = NULL;
-						}
-
-						goto next;
+						/* Manufacturer and Product strings */
+						cur_dev->manufacturer_string = wcsdup(L"");
+						cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
+						break;
 					}
 
 					/* Manufacturer and Product strings */
@@ -555,6 +564,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					break;
 
 				case BUS_BLUETOOTH:
+				case BUS_I2C:
 					/* Manufacturer and Product strings */
 					cur_dev->manufacturer_string = wcsdup(L"");
 					cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
