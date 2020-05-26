@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.6.3 FATAL_ERROR)
 
 add_library(hidapi_libusb
+    ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
@@ -22,12 +23,14 @@ set_target_properties(hidapi_libusb
         OUTPUT_NAME "${HIDAPI_LIBNAME}"
         VERSION ${PROJECT_VERSION}
         SOVERSION ${PROJECT_VERSION_MAJOR}
+        PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
 if(HIDAPI_INSTALL_TARGETS)
     install(TARGETS hidapi_libusb
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hidapi"
     )
 endif()
 

@@ -1,4 +1,5 @@
 add_library(hidapi_winapi
+    ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
 target_link_libraries(hidapi_winapi
@@ -11,6 +12,7 @@ set_target_properties(hidapi_winapi
         EXPORT_NAME "winapi"
         OUTPUT_NAME "hidapi"
         VERSION ${PROJECT_VERSION}
+        PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
 if(HIDAPI_INSTALL_TARGETS)
@@ -18,6 +20,7 @@ if(HIDAPI_INSTALL_TARGETS)
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hidapi"
     )
 endif()
 

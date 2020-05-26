@@ -31,10 +31,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_library(hidapi_include INTERFACE)
 target_include_directories(hidapi_include INTERFACE "${PROJECT_ROOT}/hidapi")
+set(HIDAPI_PUBLIC_HEADERS "${PROJECT_ROOT}/hidapi/hidapi.h")
 
 if(HIDAPI_INSTALL_TARGETS)
     include(GNUInstallDirs)
-    install(FILES "${PROJECT_ROOT}/hidapi/hidapi.h" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hidapi")
 endif()
 
 if(WIN32)
