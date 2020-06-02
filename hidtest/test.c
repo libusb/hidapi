@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include "hidapi.h"
 
@@ -27,19 +28,232 @@
 	#include <unistd.h>
 #endif
 
+int ctohex(char ch)
+{
+    ch = tolower(ch);
+    if (ch >= '0' && ch <= '9')
+        return ch - '0';
+    if (ch >= 'a' && ch <= 'f')
+        return ch - 'a' + 10;
+    return -1;
+}
+
+int parseHexByte(const char* text)
+{
+    int hi = ctohex(text[0]);
+    if (hi < 0) {
+        return hi;
+    }
+    int lo = ctohex(text[1]);
+    if (lo < 0) {
+        return lo;
+    }
+    return (hi << 4) | lo;
+}
+
+int parseHexWord(const char* text)
+{
+    int hi = parseHexByte(text);
+    if (hi < 0) {
+        return hi;
+    }
+	int lo = parseHexByte(text + 2);
+	if (lo < 0) {
+		return lo;
+	}
+    return (hi << 8) | lo;
+}
+
+int parseHex(const char* text, uint8_t* out)
+{
+	int length = 0;
+	for (;;) {
+		char ch = *text;
+		// Line terminated by NUL ('\0')
+		if (ch == '\0')
+			break;
+		if (ch == ',') {
+			++text;
+		}
+		int b = parseHexByte(text);
+		if (b < 0)
+			return -1;
+		text += 2;
+		out[length++] = (uint8_t) b;
+	}
+	return length;
+}
+
+int parseHexBuf(const char* text, uint8_t* out)
+{
+	int length = 0;
+	for (;;) {
+		char ch = *text;
+		// Line terminated by NUL ('\0')
+		if (ch == '\0')
+			break;
+		if (ch == ',') {
+			++text;
+		}
+		int w = parseHexWord(text);
+		if (w < 0)
+			return -1;
+		text += 4;
+		out[length++] = (uint8_t) w;
+		out[length++] = (uint8_t) (w >> 8);
+	}
+	return length;
+}
+
+uint8_t wordfmt = FALSE;
+
+void dump_buf(const char* format, uint8_t* buf, int off, int len)
+{
+	int i = off;
+	printf(format, buf[0]);
+	while (i < len) {
+		if (wordfmt) {
+			uint8_t lo = buf[i];
+			uint8_t hi = buf[i + 1];
+			printf("%04hhx ", (hi << 8) | lo);
+			i += 2;
+		} else {
+			uint8_t b = buf[i++];
+			printf("%02hhx ", b);
+		}
+		if ((i % 16) == off) {
+			putchar('\n');
+		}
+	}
+	printf("\n");
+}
+
 int main(int argc, char* argv[])
 {
 	int res;
-	unsigned char buf[256];
+	uint8_t buf[256];
+	uint8_t outbuf[256];
 	#define MAX_STR 255
 	wchar_t wstr[MAX_STR];
 	hid_device *handle;
 	int i;
+	// Default Vendor & Product Ids
+	uint16_t vid = 0x4d8;
+	uint16_t pid = 0x3f;
+	int outlen = 0;
+	int inplen = 17;
+	uint8_t index = 0;
+	uint8_t report = 0;
 
-#ifdef WIN32
-	UNREFERENCED_PARAMETER(argc);
-	UNREFERENCED_PARAMETER(argv);
-#endif
+	// Display version & date
+	fprintf(stderr, "hidtest v1.00 (02-Jun-2020)\n");
+
+	if (argc <= 1) {
+		fprintf(stderr, "usage: hidtest -v id -p id -i index -r reportid -l len (-b outbytes | -w outwords)\n");
+		return 0;
+	}
+
+    for (i = 1; i < argc; ++i) {
+        
+		const char* arg = argv[i];
+		const char* next;
+		char ch = arg[0];
+		if (ch == '-') {
+			// Parse cmd line option
+			ch = arg[1];
+			switch (ch) {
+				case 'v':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					} else {
+						fprintf(stderr, "Missing hex argument after -%c\n", ch);
+						return -2;
+					}
+					vid = parseHexWord(next);
+					break;
+				case 'p':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					} else {
+						fprintf(stderr, "Missing hex argument after -%c\n", ch);
+						return -2;
+					}
+					pid = parseHexWord(next);
+					break;
+				case 'i':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					} else {
+						fprintf(stderr, "Missing hex argument after -%c\n", ch);
+						return -2;
+					}
+					index = parseHexWord(next);
+					break;
+				case 'r':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					} else {
+						fprintf(stderr, "Missing hex argument after -%c\n", ch);
+						return -2;
+					}
+					report = parseHexByte(next);
+					break;
+				case 'l':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					} else {
+						fprintf(stderr, "Missing hex argument after -%c\n", ch);
+						return -2;
+					}
+					inplen = parseHexByte(next);
+					break;
+				case 'b':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					}
+					outlen = parseHex(next, outbuf);
+					if (outlen <= 0) {
+						fprintf(stderr, "Error parsing hex command %s\n", next);
+						return -1;
+					}
+					break;
+				case 'w':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					}
+					else if (++i < argc) {
+						next = argv[i];
+					}
+					outbuf[0] = 0;
+					outlen = parseHexBuf(next, outbuf + 1);
+					if (outlen <= 0) {
+						fprintf(stderr, "Error parsing hex command %s\n", next);
+						return -1;
+					}
+					++outlen;
+					wordfmt = TRUE;
+					break;
+				default:
+					fprintf(stderr, "Invalid option '%c'\n", ch);
+					return -2;
+			} // switch
+		} else {
+			fprintf(stderr, "Missing option %s\n", arg);
+			return -3;
+		}
+	}
 
 	struct hid_device_info *devs, *cur_dev;
 	
@@ -61,24 +275,11 @@ int main(int argc, char* argv[])
 	}
 	hid_free_enumeration(devs);
 
-	// Set up the command buffer.
-	memset(buf,0x00,sizeof(buf));
-	buf[0] = 0x01;
-	buf[1] = 0x81;
-	
-
 	// Open the device using the VID, PID,
 	// and optionally the Serial number.
-	////handle = hid_open(0x4d8, 0x3f, L"12345");
-#ifndef VID
-	#define VID		0x4d8
-#endif
-#ifndef PID
-	#define PID		0x3f
-#endif
-	handle = hid_open(VID, PID, NULL);
+	handle = hid_open(vid, pid, NULL);
 	if (!handle) {
-		printf("unable to open device %04x:%04x\n", VID, PID);
+		printf("unable to open device %04x:%04x\n", vid, pid);
  		return 1;
 	}
 
@@ -104,70 +305,44 @@ int main(int argc, char* argv[])
 	printf("Serial Number String: (%d) %ls", wstr[0], wstr);
 	printf("\n");
 
-#ifdef INDEX
-	// Read Indexed String 1
-	wstr[0] = 0x0000;
-	res = hid_get_indexed_string(handle, INDEX, wstr, MAX_STR);
-	if (res < 0)
-		printf("Unable to read indexed string %d\n", INDEX);
-	printf("Indexed String %d: %ls\n", INDEX, wstr);
-#endif
+	if (index) {
+		// Read Indexed String
+		wstr[0] = 0x0000;
+		res = hid_get_indexed_string(handle, index, wstr, MAX_STR);
+		if (res < 0)
+			printf("Unable to read indexed string %d\n", index);
+		printf("Indexed String %d: %ls\n", index, wstr);
+	}
 
 	// Set the hid_read() function to be non-blocking.
 	hid_set_nonblocking(handle, 1);
 	
 	// Try to read from the device. There should be no
 	// data here, but execution should not block.
-	res = hid_read(handle, buf, 17);
-#ifdef REPORT
-	// Send a Feature Report to the device
-	buf[0] = REPORT;
-	buf[1] = 0xa0;
-	buf[2] = 0x0a;
-	buf[3] = 0x00;
-	buf[4] = 0x00;
-	res = hid_send_feature_report(handle, buf, 17);
-	if (res < 0) {
-		printf("Unable to send a feature report %02x.\n", REPORT);
-	}
+	res = hid_read(handle, buf, inplen);
 
-	memset(buf,0,sizeof(buf));
+	if (outlen > 0) {
+		// Send a Feature Report to the device
+		res = hid_send_feature_report(handle, outbuf, outlen);
+		if (res < 0) {
+			dump_buf("Unable to send a feature report %02x\n", outbuf, 1, outlen);
+		}
+	}
 
 	// Read a Feature Report from the device
-	buf[0] = REPORT;
-	res = hid_get_feature_report(handle, buf, sizeof(buf));
-	if (res < 0) {
-		printf("Unable to get a feature report %02x.\n", REPORT);
-		printf("Error: %ls\n", hid_error(handle));
+	memset(buf, 0, sizeof(buf));
+	if (report != 0) {
+		buf[0] = report;
+		res = hid_get_feature_report(handle, buf, inplen);
+		if (res <= 0) {
+			printf("Unable to get a feature report %02x\n", report);
+			printf("Error: %ls\n", hid_error(handle));
+		} else {
+			// Print out the returned buffer.
+			dump_buf("Feature Report %02x\n", buf, 1, res);
+		}
 	}
-	else {
-		// Print out the returned buffer.
-		printf("Feature Report %02x\n   ", REPORT);
-		for (i = 0; i < res; i++)
-			printf("%02hhx ", buf[i]);
-		printf("\n");
-	}
-#endif
 	memset(buf,0,sizeof(buf));
-
-	// Toggle LED (cmd 0x80). The first byte is the report number (0x1).
-#ifdef LED
-	buf[0] = LED;
-	buf[1] = 0x80;
-	res = hid_write(handle, buf, 17);
-	if (res < 0) {
-		printf("Unable to write %02x 80\n", LED);
-		printf("Error: %ls\n", hid_error(handle));
-	}
-	
-
-	// Request state (cmd 0x81). The first byte is the report number (0x1).
-	buf[0] = LED;
-	buf[1] = 0x81;
-	hid_write(handle, buf, 17);
-	if (res < 0)
-		printf("Unable to write %02x 81\n", LED);
-#endif
 
 	// Read requested state. hid_read() has been set to be
 	// non-blocking by the call to hid_set_nonblocking() above.
@@ -179,27 +354,20 @@ int main(int argc, char* argv[])
 			printf("waiting...\n");
 		if (res < 0)
 			printf("Unable to read()\n");
-		#ifdef WIN32
+#ifdef WIN32
 		Sleep(500);
-		#else
+#else
 		usleep(500*1000);
-		#endif
+#endif
 	}
 
-	printf("Data read:\n   ");
 	// Print out the returned buffer.
-	for (i = 0; i < res; i++)
-		printf("%02hhx ", buf[i]);
-	printf("\n");
+	dump_buf("Data read:\n", buf, 0, res);
 
 	hid_close(handle);
 
 	/* Free static HIDAPI objects. */
 	hid_exit();
-
-#ifdef WIN32
-	system("pause");
-#endif
 
 	return 0;
 }
