@@ -105,7 +105,7 @@ int parseHexBuf(const char* text, uint8_t* out)
 	return length;
 }
 
-uint8_t wordfmt = FALSE;
+uint8_t wordfmt = 0;
 
 void dump_buf(const char* format, uint8_t* buf, int off, int len)
 {
@@ -115,7 +115,7 @@ void dump_buf(const char* format, uint8_t* buf, int off, int len)
 		if (wordfmt) {
 			uint8_t lo = buf[i];
 			uint8_t hi = buf[i + 1];
-			printf("%04hhx ", (hi << 8) | lo);
+			printf("%04x ", (hi << 8) | lo);
 			i += 2;
 		} else {
 			uint8_t b = buf[i++];
@@ -243,7 +243,7 @@ int main(int argc, char* argv[])
 						return -1;
 					}
 					++outlen;
-					wordfmt = TRUE;
+					wordfmt = 1;
 					break;
 				default:
 					fprintf(stderr, "Invalid option '%c'\n", ch);
