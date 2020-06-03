@@ -84,6 +84,8 @@ int parseHex(const char* text, uint8_t* out)
 	return length;
 }
 
+uint8_t wordfmt = 0;
+
 int parseHexBuf(const char* text, uint8_t* out)
 {
 	int length = 0;
@@ -92,20 +94,33 @@ int parseHexBuf(const char* text, uint8_t* out)
 		// Line terminated by NUL ('\0')
 		if (ch == '\0')
 			break;
+		int b1 = parseHexByte(text);
+		if (b1 < 0)
+			return -1;
+		text += 2;
+		ch = *text;
 		if (ch == ',') {
 			++text;
+			out[length++] = (uint8_t) b1;
+			continue;
 		}
-		int w = parseHexWord(text);
-		if (w < 0)
+		int b2 = parseHexByte(text);
+		if (b2 < 0)
 			return -1;
-		text += 4;
-		out[length++] = (uint8_t) w;
-		out[length++] = (uint8_t) (w >> 8);
+		text += 2;
+		ch = *text;
+		if (ch == ',') {
+			++text;
+			wordfmt = 1;
+			out[length++] = b2;		// Little endian
+			out[length++] = b1;
+		} else {
+			out[length++] = b1;		// Retain order
+			out[length++] = b2;
+		}
 	}
 	return length;
 }
-
-uint8_t wordfmt = 0;
 
 void dump_buf(const char* format, uint8_t* buf, int off, int len)
 {
@@ -140,16 +155,17 @@ int main(int argc, char* argv[])
 	// Default Vendor & Product Ids
 	uint16_t vid = 0x4d8;
 	uint16_t pid = 0x3f;
-	int outlen = 0;
+	int oreport = 0;
 	int inplen = 17;
+	int feature = 0;
 	uint8_t index = 0;
 	uint8_t report = 0;
 
 	// Display version & date
-	fprintf(stderr, "hidtest v1.00 (02-Jun-2020)\n");
+	fprintf(stderr, "hidtest v1.01 (03-Jun-2020)\n");
 
 	if (argc <= 1) {
-		fprintf(stderr, "usage: hidtest -v id -p id -i index -r reportid -l len (-b outbytes | -w outwords)\n");
+		fprintf(stderr, "usage: hidtest -v id -p id [-i index] [-r reportid] [-l len] (-f feature | -o oreport)\n");
 		return 0;
 	}
 
@@ -217,33 +233,28 @@ int main(int argc, char* argv[])
 					}
 					inplen = parseHexByte(next);
 					break;
-				case 'b':
+				case 'f':
+					if (arg[2] != '\0') {
+						next = arg + 2;
+					} else if (++i < argc) {
+						next = argv[i];
+					} else {
+						fprintf(stderr, "Missing hex argument after -%c\n", ch);
+						return -2;
+					}
+					feature = parseHexBuf(next, outbuf);
+					break;
+				case 'o':
 					if (arg[2] != '\0') {
 						next = arg + 2;
 					} else if (++i < argc) {
 						next = argv[i];
 					}
-					outlen = parseHex(next, outbuf);
-					if (outlen <= 0) {
+					oreport = parseHexBuf(next, outbuf);
+					if (oreport < 0) {
 						fprintf(stderr, "Error parsing hex command %s\n", next);
 						return -1;
 					}
-					break;
-				case 'w':
-					if (arg[2] != '\0') {
-						next = arg + 2;
-					}
-					else if (++i < argc) {
-						next = argv[i];
-					}
-					outbuf[0] = 0;
-					outlen = parseHexBuf(next, outbuf + 1);
-					if (outlen <= 0) {
-						fprintf(stderr, "Error parsing hex command %s\n", next);
-						return -1;
-					}
-					++outlen;
-					wordfmt = 1;
 					break;
 				default:
 					fprintf(stderr, "Invalid option '%c'\n", ch);
@@ -321,11 +332,17 @@ int main(int argc, char* argv[])
 	// data here, but execution should not block.
 	res = hid_read(handle, buf, inplen);
 
-	if (outlen > 0) {
-		// Send a Feature Report to the device
-		res = hid_send_feature_report(handle, outbuf, outlen);
+	if (oreport > 0) {
+		// Write oreport to the device
+		res = hid_write(handle, outbuf, oreport);
 		if (res < 0) {
-			dump_buf("Unable to send a feature report %02x\n", outbuf, 1, outlen);
+			dump_buf("Unable to write oreport %02x\n", outbuf, 1, oreport);
+		}
+	} else if (feature) {
+		// Send a Feature Report to the device
+		res = hid_send_feature_report(handle, outbuf, oreport);
+		if (res < 0) {
+			dump_buf("Unable to send feature %02x\n", outbuf, 1, feature);
 		}
 	}
 
