@@ -24,4 +24,6 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+
 add_library(hidapi ALIAS hidapi_winapi)

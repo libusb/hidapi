@@ -29,6 +29,8 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-hidraw.pc.in")
+
 if(NOT HIDAPI_WITH_LIBUSB)
     add_library(hidapi ALIAS hidapi_hidraw)
 endif()

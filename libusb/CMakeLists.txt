@@ -34,4 +34,10 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
+if(HIDAPI_LIBNAME_VERBOSE)
+    hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-libusb.pc.in")
+else()
+    hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+endif()
+
 add_library(hidapi ALIAS hidapi_libusb)
