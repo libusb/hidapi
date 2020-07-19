@@ -1,0 +1,21 @@
+@PACKAGE_INIT@
+
+set(hidapi_VERSION_MAJOR "@hidapi_VERSION_MAJOR@")
+set(hidapi_VERSION_MINOR "@hidapi_VERSION_MINOR@")
+set(hidapi_VERSION_PATCH "@hidapi_VERSION_PATCH@")
+set(hidapi_VERSION "@hidapi_VERSION@")
+set(hidapi_VERSION_STR "@hidapi_VERSION@@VERSION_SUFFIX@")
+
+set(hidapi_FOUND FALSE)
+
+include("${CMAKE_CURRENT_LIST_DIR}/hidapi.cmake")
+
+set(hidapi_FOUND TRUE)
+
+add_library(hidapi::hidapi ALIAS hidapi::@EXPORT_ALIAS@)
+
+foreach(_component @EXPORT_COMPONENTS@)
+  set(hidapi_${_component}_FOUND TRUE)
+endforeach()
+
+check_required_components(hidapi)

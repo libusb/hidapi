@@ -27,7 +27,7 @@ set_target_properties(hidapi_libusb
 )
 
 if(HIDAPI_INSTALL_TARGETS)
-    install(TARGETS hidapi_libusb
+    install(TARGETS hidapi_libusb EXPORT hidapi
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hidapi"
@@ -39,5 +39,3 @@ if(HIDAPI_LIBNAME_VERBOSE)
 else()
     hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
 endif()
-
-add_library(hidapi ALIAS hidapi_libusb)

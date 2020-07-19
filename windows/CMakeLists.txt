@@ -16,7 +16,7 @@ set_target_properties(hidapi_winapi
 )
 
 if(HIDAPI_INSTALL_TARGETS)
-    install(TARGETS hidapi_winapi
+    install(TARGETS hidapi_winapi EXPORT hidapi
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -25,5 +25,3 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
-
-add_library(hidapi ALIAS hidapi_winapi)

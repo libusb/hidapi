@@ -30,7 +30,7 @@ if(NOT CMAKE_FRAMEWORK)
 endif()
 
 if(HIDAPI_INSTALL_TARGETS)
-    install(TARGETS hidapi_darwin
+    install(TARGETS hidapi_darwin EXPORT hidapi
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         FRAMEWORK DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -39,5 +39,3 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
-
-add_library(hidapi ALIAS hidapi_darwin)

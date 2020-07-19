@@ -51,17 +51,29 @@ endfunction()
 # The library
 
 add_library(hidapi_include INTERFACE)
-target_include_directories(hidapi_include INTERFACE "${PROJECT_ROOT}/hidapi")
+target_include_directories(hidapi_include INTERFACE
+    "$<BUILD_INTERFACE:${PROJECT_ROOT}/hidapi>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hidapi>"
+)
+set_target_properties(hidapi_include PROPERTIES EXPORT_NAME "include")
 set(HIDAPI_PUBLIC_HEADERS "${PROJECT_ROOT}/hidapi/hidapi.h")
 
 if(HIDAPI_INSTALL_TARGETS)
     include(GNUInstallDirs)
+    install(TARGETS hidapi_include EXPORT hidapi)
 endif()
+
+set(EXPORT_ALIAS)
+set(EXPORT_COMPONENTS)
 
 if(WIN32)
     add_subdirectory("${PROJECT_ROOT}/windows" windows)
+    set(EXPORT_ALIAS winapi)
+    list(APPEND EXPORT_COMPONENTS winapi)
 elseif(APPLE)
     add_subdirectory("${PROJECT_ROOT}/mac" mac)
+    set(EXPORT_ALIAS darwin)
+    list(APPEND EXPORT_COMPONENTS darwin)
 else()
     if(NOT DEFINED HIDAPI_WITH_LIBUSB)
         set(HIDAPI_WITH_LIBUSB ON)
@@ -69,6 +81,10 @@ else()
     if(CMAKE_SYSTEM_NAME MATCHES "Linux")
         if(NOT DEFINED HIDAPI_WITH_HIDRAW OR HIDAPI_WITH_HIDRAW)
             add_subdirectory("${PROJECT_ROOT}/linux" linux)
+            list(APPEND EXPORT_COMPONENTS hidraw)
+            if(NOT HIDAPI_WITH_LIBUSB)
+                set(EXPORT_ALIAS hidraw)
+            endif()
         endif()
         set(HIDAPI_LIBNAME_VERBOSE ON)
     else()
@@ -77,7 +93,33 @@ else()
     endif()
     if(HIDAPI_WITH_LIBUSB)
         add_subdirectory("${PROJECT_ROOT}/libusb" libusb)
+        list(APPEND EXPORT_COMPONENTS libusb)
+        set(EXPORT_ALIAS libusb)
     elseif(NOT TARGET hidapi_hidraw)
         message(FATAL_ERROR "Select at least one option to build: HIDAPI_WITH_LIBUSB or HIDAPI_WITH_HIDRAW")
     endif()
+endif()
+
+add_library(hidapi ALIAS hidapi_${EXPORT_ALIAS})
+
+if(HIDAPI_INSTALL_TARGETS)
+    include(CMakePackageConfigHelpers)
+    set(EXPORT_DENERATED_LOCATION "${CMAKE_BINARY_DIR}/export_generated")
+    set(EXPORT_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hidapi")
+    write_basic_package_version_file("${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
+        COMPATIBILITY SameMajorVersion
+    )
+    configure_package_config_file("cmake/hidapi-config.cmake.in" "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
+        INSTALL_DESTINATION "${EXPORT_DESTINATION}"
+        NO_SET_AND_CHECK_MACRO
+    )
+    install(FILES
+            "${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
+            "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
+        DESTINATION "${EXPORT_DESTINATION}"
+    )
+    install(EXPORT hidapi
+        DESTINATION "${EXPORT_DESTINATION}"
+        NAMESPACE hidapi::
+    )
 endif()

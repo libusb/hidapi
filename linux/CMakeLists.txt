@@ -22,7 +22,7 @@ set_target_properties(hidapi_hidraw
 )
 
 if(HIDAPI_INSTALL_TARGETS)
-    install(TARGETS hidapi_hidraw
+    install(TARGETS hidapi_hidraw EXPORT hidapi
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         PUBLIC_HEADER DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hidapi"
@@ -30,7 +30,3 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-hidraw.pc.in")
-
-if(NOT HIDAPI_WITH_LIBUSB)
-    add_library(hidapi ALIAS hidapi_hidraw)
-endif()
