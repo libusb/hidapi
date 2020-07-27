@@ -46,5 +46,7 @@ check_required_components(hidapi)
 
 if(NOT TARGET hidapi::hidapi)
   add_library(hidapi::hidapi INTERFACE IMPORTED)
-  target_link_libraries(hidapi::hidapi INTERFACE hidapi::@EXPORT_ALIAS@)
+  set_target_properties(hidapi::hidapi PROPERTIES
+    INTERFACE_LINK_LIBRARIES hidapi::@EXPORT_ALIAS@
+  )
 endif()
