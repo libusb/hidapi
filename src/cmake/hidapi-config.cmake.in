@@ -12,10 +12,15 @@ include("${CMAKE_CURRENT_LIST_DIR}/hidapi.cmake")
 
 set(hidapi_FOUND TRUE)
 
-add_library(hidapi::hidapi ALIAS hidapi::@EXPORT_ALIAS@)
-
 foreach(_component @EXPORT_COMPONENTS@)
-  set(hidapi_${_component}_FOUND TRUE)
+  if(TARGET hidapi::${_component})
+    set(hidapi_${_component}_FOUND TRUE)
+  endif()
 endforeach()
 
 check_required_components(hidapi)
+
+if(NOT TARGET hidapi::hidapi)
+  add_library(hidapi::hidapi INTERFACE IMPORTED)
+  target_link_libraries(hidapi::hidapi INTERFACE hidapi::@EXPORT_ALIAS@)
+endif()
