@@ -6,10 +6,11 @@ add_library(hidapi_libusb
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
 
-include(FindPkgConfig)
-include(FindThreads)
+find_package(Threads REQUIRED)
 
+include(FindPkgConfig)
 pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
+
 target_link_libraries(hidapi_libusb PRIVATE PkgConfig::libusb Threads::Threads)
 
 set(HIDAPI_LIBNAME "hidapi")

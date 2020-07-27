@@ -5,7 +5,7 @@ add_library(hidapi_darwin
     hid.c
 )
 
-include(FindThreads)
+find_package(Threads REQUIRED)
 
 target_link_libraries(hidapi_darwin
     PUBLIC hidapi_include
