@@ -128,13 +128,14 @@ if(HIDAPI_INSTALL_TARGETS)
         INSTALL_DESTINATION "${EXPORT_DESTINATION}"
         NO_SET_AND_CHECK_MACRO
     )
+
+    install(EXPORT hidapi
+        DESTINATION "${EXPORT_DESTINATION}"
+        NAMESPACE hidapi::
+    )
     install(FILES
             "${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
             "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
         DESTINATION "${EXPORT_DESTINATION}"
-    )
-    install(EXPORT hidapi
-        DESTINATION "${EXPORT_DESTINATION}"
-        NAMESPACE hidapi::
     )
 endif()
