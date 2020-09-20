@@ -465,7 +465,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	/* We can only retrieve the interface number for USB HID devices.
 	 * IOKit always seems to return 0 when querying a standard USB device
 	 * for its interface. */
-	bool is_usb_hid = get_int_property(dev, CFSTR(kUSBInterfaceClass)) == kUSBHIDClass;
+	int is_usb_hid = get_int_property(dev, CFSTR(kUSBInterfaceClass)) == kUSBHIDClass;
 	if (is_usb_hid) {
 		/* Get the interface number */
 		cur_dev->interface_number = get_int_property(dev, CFSTR(kUSBInterfaceNumber));
