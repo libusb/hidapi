@@ -917,7 +917,7 @@ static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data
 	                           report, &report_length);
 
 	if (res == kIOReturnSuccess) {
-		if (report_id == 0x0) { // 0 report number still present at the beginning
+		if (report_id == 0x0) { /* 0 report number still present at the beginning */
 			report_length++;
 		}
 		return report_length;
