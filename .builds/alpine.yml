@@ -17,3 +17,9 @@ tasks:
     cd hidapi
     make
     make DESTDIR=$PWD/root install
+    make clean
+- build-manual: |
+    cd hidapi/linux
+    make -f Makefile-manual
+    cd ../libusb
+    make -f Makefile-manual

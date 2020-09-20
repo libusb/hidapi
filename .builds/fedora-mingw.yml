@@ -16,3 +16,7 @@ tasks:
     cd hidapi
     make
     make DESTDIR=$PWD/root install
+    make clean
+- build-manual: |
+    cd hidapi/windows
+    make -f Makefile-manual OS=MINGW CC=x86_64-w64-mingw32-gcc
