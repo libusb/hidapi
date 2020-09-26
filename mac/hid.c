@@ -183,7 +183,7 @@ static void free_hid_device(hid_device *dev)
 }
 
 static	IOHIDManagerRef hid_mgr = 0x0;
-static	int is_macos_10_11_or_greater = 0;
+static	int is_macos_10_10_or_greater = 0;
 
 
 #if 0
@@ -384,7 +384,7 @@ static int init_hid_manager(void)
 int HID_API_EXPORT hid_init(void)
 {
 	if (!hid_mgr) {
-		is_macos_10_11_or_greater = (NSAppKitVersionNumber >= 1404); /* NSAppKitVersionNumber10_11 */
+		is_macos_10_10_or_greater = (NSAppKitVersionNumber >= 1343); /* NSAppKitVersionNumber10_10 */
 		return init_hid_manager();
 	}
 
@@ -1101,7 +1101,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	/* Disconnect the report callback before close.
 	   See comment below.
 	*/
-	if (is_macos_10_11_or_greater || !dev->disconnected) {
+	if (is_macos_10_10_or_greater || !dev->disconnected) {
 		IOHIDDeviceRegisterInputReportCallback(
 			dev->device_handle, dev->input_report_buf, dev->max_input_report_len,
 			NULL, dev);
@@ -1132,7 +1132,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	   crash happenes if IOHIDDeviceClose() is not called.
 	   Not leaking a resource in all tested environments.
 	*/
-	if (is_macos_10_11_or_greater || !dev->disconnected) {
+	if (is_macos_10_10_or_greater || !dev->disconnected) {
 		IOHIDDeviceClose(dev->device_handle, kIOHIDOptionsTypeSeizeDevice);
 	}
 
