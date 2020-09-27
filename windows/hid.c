@@ -179,7 +179,6 @@ static void free_hid_device(hid_device *dev)
 static void register_error(hid_device *dev, const char *op)
 {
 	WCHAR *ptr, *msg;
-
 	(void)op; // unreferenced  param
 	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
 		FORMAT_MESSAGE_FROM_SYSTEM |
@@ -212,6 +211,10 @@ static int lookup_functions()
 {
 	lib_handle = LoadLibraryA("hid.dll");
 	if (lib_handle) {
+#if defined(__GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 #define RESOLVE(x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) return -1;
 		RESOLVE(HidD_GetAttributes);
 		RESOLVE(HidD_GetSerialNumberString);
@@ -226,6 +229,9 @@ static int lookup_functions()
 		RESOLVE(HidP_GetCaps);
 		RESOLVE(HidD_SetNumInputBuffers);
 #undef RESOLVE
+#if defined(__GNUC__)
+# pragma GCC diagnostic pop
+#endif
 	}
 	else
 		return -1;
