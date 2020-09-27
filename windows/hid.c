@@ -79,6 +79,12 @@ extern "C" {
 extern "C" {
 #endif
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
 #ifndef HIDAPI_USE_DDK
 	/* Since we're not building with the DDK, and the HID header
 	   files aren't part of the SDK, we have to define all this
@@ -255,6 +261,16 @@ static HANDLE open_device(const char *path, BOOL open_rw)
 		0);
 
 	return handle;
+}
+
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+{
+	return &api_version;
+}
+
+HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+{
+	return HID_API_VERSION_STR;
 }
 
 int HID_API_EXPORT hid_init(void)

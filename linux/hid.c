@@ -69,6 +69,12 @@ struct hid_device_ {
 	wchar_t *last_error_str;
 };
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
 /* Global error message that is not specific to a device, e.g. for
    hid_open(). It is thread-local like errno. */
 __thread wchar_t *last_global_error_str = NULL;
@@ -372,6 +378,16 @@ end:
 	udev_unref(udev);
 
 	return ret;
+}
+
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+{
+	return &api_version;
+}
+
+HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+{
+	return HID_API_VERSION_STR;
 }
 
 int HID_API_EXPORT hid_init(void)

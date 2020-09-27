@@ -42,7 +42,15 @@ int main(int argc, char* argv[])
 #endif
 
 	struct hid_device_info *devs, *cur_dev;
-	
+
+	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
+	if (hid_version()->major == HID_API_VERSION_MAJOR && hid_version()->minor == HID_API_VERSION_MINOR && hid_version()->patch == HID_API_VERSION_PATCH) {
+		printf("Compile-time version matches runtime version of hidapi.\n\n");
+	}
+	else {
+		printf("Compile-time version is different than runtime version of hidapi.\n]n");
+	}
+
 	if (hid_init())
 		return -1;
 

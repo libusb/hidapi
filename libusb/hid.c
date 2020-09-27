@@ -180,6 +180,12 @@ struct hid_device_ {
 #endif
 };
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
 static libusb_context *usb_context = NULL;
 
 uint16_t get_usb_code_for_current_locale(void);
@@ -490,6 +496,15 @@ static char *make_path(libusb_device *dev, int interface_number)
 	return strdup(str);
 }
 
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+{
+	return &api_version;
+}
+
+HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+{
+	return HID_API_VERSION_STR;
+}
 
 int HID_API_EXPORT hid_init(void)
 {
