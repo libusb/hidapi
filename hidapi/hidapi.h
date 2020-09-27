@@ -58,7 +58,7 @@
 /* Helper macros */
 #define HID_API_AS_STR_IMPL(x) #x
 #define HID_API_AS_STR(x) HID_API_AS_STR_IMPL(x)
-#define HID_API_TO_VERSION_STR(v1, v2, v3) HID_API_AS_STR(v1##.##v2##.##v3)
+#define HID_API_TO_VERSION_STR(v1, v2, v3) HID_API_AS_STR(v1.v2.v3)
 
 /** @brief Static/compile-time string version of the library.
 
