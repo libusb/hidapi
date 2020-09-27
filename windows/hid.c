@@ -144,6 +144,7 @@ struct hid_device_ {
 		BOOL read_pending;
 		char *read_buf;
 		OVERLAPPED ol;
+		OVERLAPPED write_ol;			  
 };
 
 static hid_device *new_hid_device()
@@ -159,6 +160,8 @@ static hid_device *new_hid_device()
 	dev->read_buf = NULL;
 	memset(&dev->ol, 0, sizeof(dev->ol));
 	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
+	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
+	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*inital state f=nonsignaled*/, NULL);											  
 
 	return dev;
 }
@@ -166,6 +169,7 @@ static hid_device *new_hid_device()
 static void free_hid_device(hid_device *dev)
 {
 	CloseHandle(dev->ol.hEvent);
+	CloseHandle(dev->write_ol.hEvent);							   
 	CloseHandle(dev->device_handle);
 	LocalFree(dev->last_error_str);
 	free(dev->read_buf);
@@ -175,7 +179,7 @@ static void free_hid_device(hid_device *dev)
 static void register_error(hid_device *dev, const char *op)
 {
 	WCHAR *ptr, *msg;
-
+	(void)op; // unreferenced  param
 	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
 		FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -207,6 +211,10 @@ static int lookup_functions()
 {
 	lib_handle = LoadLibraryA("hid.dll");
 	if (lib_handle) {
+#if defined(__GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 #define RESOLVE(x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) return -1;
 		RESOLVE(HidD_GetAttributes);
 		RESOLVE(HidD_GetSerialNumberString);
@@ -221,6 +229,9 @@ static int lookup_functions()
 		RESOLVE(HidP_GetCaps);
 		RESOLVE(HidD_SetNumInputBuffers);
 #undef RESOLVE
+#if defined(__GNUC__)
+# pragma GCC diagnostic pop
+#endif
 	}
 	else
 		return -1;
@@ -629,12 +640,11 @@ err:
 
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
-	DWORD bytes_written;
+	DWORD bytes_written = 0;
 	BOOL res;
+	BOOL overlapped = FALSE;								 
 
-	OVERLAPPED ol;
 	unsigned char *buf;
-	memset(&ol, 0, sizeof(ol));
 
 	/* Make sure the right number of bytes are passed to WriteFile. Windows
 	   expects the number of bytes which are in the _longest_ report (plus
@@ -654,7 +664,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		length = dev->output_report_length;
 	}
 
-	res = WriteFile(dev->device_handle, buf, (DWORD) length, NULL, &ol);
+	res = WriteFile(dev->device_handle, buf, (DWORD) length, NULL, &dev->write_ol);
 	
 	if (!res) {
 		if (GetLastError() != ERROR_IO_PENDING) {
@@ -663,16 +673,28 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 			bytes_written = -1;
 			goto end_of_function;
 		}
+		overlapped = TRUE;
 	}
 
-	/* Wait here until the write is done. This makes
-	   hid_write() synchronous. */
-	res = GetOverlappedResult(dev->device_handle, &ol, &bytes_written, TRUE/*wait*/);
-	if (!res) {
-		/* The Write operation failed. */
-		register_error(dev, "WriteFile");
-		bytes_written = -1;
-		goto end_of_function;
+	if (overlapped) {
+		/* Wait for the transaction to complete */
+		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
+		if (res != WAIT_OBJECT_0) {
+		    	/* There was a Timeout. */
+				bytes_written = -1;
+				register_error(dev, "WriteFile/WaitForSingleObject Timeout");
+				goto end_of_function;
+		}
+
+		/* Wait here until the write is done. This makes
+		   hid_write() synchronous. */
+		 res = GetOverlappedResult(dev->device_handle, &dev->write_ol, &bytes_written, FALSE/*wait*/);
+		 if (!res) {
+			 /* The Write operation failed. */
+			 register_error(dev, "WriteFile");
+			 bytes_written = -1;
+			 goto end_of_function;
+		 }
 	}
 
 end_of_function:
@@ -688,6 +710,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	DWORD bytes_read = 0;
 	size_t copy_len = 0;
 	BOOL res;
+	BOOL overlapped = FALSE;
 
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
@@ -707,24 +730,29 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 				dev->read_pending = FALSE;
 				goto end_of_function;
 			}
-		}
+			overlapped = TRUE;	   
+		}																		   
+	}
+	else {
+		overlapped = TRUE;	
 	}
 
-	if (milliseconds >= 0) {
-		/* See if there is any data yet. */
-		res = WaitForSingleObject(ev, milliseconds);
-		if (res != WAIT_OBJECT_0) {
-			/* There was no data this time. Return zero bytes available,
-			   but leave the Overlapped I/O running. */
-			return 0;
+	if (overlapped) {
+		if (milliseconds >= 0) {
+			/* See if there is any data yet. */
+			res = WaitForSingleObject(ev, milliseconds);
+			if (res != WAIT_OBJECT_0) {
+				/* There was no data this time. Return zero bytes available,
+				   but leave the Overlapped I/O running. */
+				return 0;
+			}
 		}
-	}
 
-	/* Either WaitForSingleObject() told us that ReadFile has completed, or
-	   we are in non-blocking mode. Get the number of bytes read. The actual
-	   data has been copied to the data[] array which was passed to ReadFile(). */
-	res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE/*wait*/);
-	
+		/* Either WaitForSingleObject() told us that ReadFile has completed, or
+		   we are in non-blocking mode. Get the number of bytes read. The actual
+		   data has been copied to the data[] array which was passed to ReadFile(). */
+		res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE/*wait*/);
+	}
 	/* Set pending back to false, even if GetOverlappedResult() returned error. */
 	dev->read_pending = FALSE;
 
