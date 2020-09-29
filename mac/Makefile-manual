@@ -12,7 +12,7 @@ CC=gcc
 COBJS=hid.o ../hidtest/test.o
 OBJS=$(COBJS)
 CFLAGS+=-I../hidapi -Wall -g -c 
-LIBS=-framework IOKit -framework CoreFoundation
+LIBS=-framework IOKit -framework CoreFoundation -framework AppKit
 
 
 hidtest: $(OBJS)
