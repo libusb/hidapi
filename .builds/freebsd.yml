@@ -2,6 +2,7 @@ image: freebsd/latest
 packages:
 - autoconf
 - automake
+- gmake
 - libiconv
 - libtool
 - pkgconf
@@ -16,3 +17,7 @@ tasks:
     cd hidapi
     make
     make DESTDIR=$PWD/root install
+    make clean
+- build-manual: |
+    cd hidapi/libusb
+    gmake -f Makefile-manual

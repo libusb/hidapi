@@ -36,6 +36,9 @@
 
 #include "hidapi.h"
 
+/* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
+extern const double NSAppKitVersionNumber;
+
 /* Barrier implementation because Mac OSX doesn't have pthread_barrier.
    It also doesn't have clock_gettime(). So much for POSIX and SUSv2.
    This implementation came from Brent Priddy and was posted on
@@ -180,6 +183,7 @@ static void free_hid_device(hid_device *dev)
 }
 
 static	IOHIDManagerRef hid_mgr = 0x0;
+static	int is_macos_10_10_or_greater = 0;
 
 
 #if 0
@@ -189,6 +193,15 @@ static void register_error(hid_device *dev, const char *op)
 }
 #endif
 
+static CFArrayRef get_array_property(IOHIDDeviceRef device, CFStringRef key)
+{
+	CFTypeRef ref = IOHIDDeviceGetProperty(device, key);
+	if (ref != NULL && CFGetTypeID(ref) == CFArrayGetTypeID()) {
+		return (CFArrayRef)ref;
+	} else {
+		return NULL;
+	}
+}
 
 static int32_t get_int_property(IOHIDDeviceRef device, CFStringRef key)
 {
@@ -203,6 +216,11 @@ static int32_t get_int_property(IOHIDDeviceRef device, CFStringRef key)
 		}
 	}
 	return 0;
+}
+
+static CFArrayRef get_usage_pairs(IOHIDDeviceRef device)
+{
+	return get_array_property(device, CFSTR(kIOHIDDeviceUsagePairsKey));
 }
 
 static unsigned short get_vendor_id(IOHIDDeviceRef device)
@@ -305,7 +323,7 @@ static io_service_t hidapi_IOHIDDeviceGetService(IOHIDDeviceRef device)
 	 * and the fallback method will be used.
 	 */
 	if (iokit_framework == NULL) {
-		iokit_framework = dlopen("/System/Library/IOKit.framework/IOKit", RTLD_LAZY);
+		iokit_framework = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
 
 		if (iokit_framework != NULL)
 			dynamic_IOHIDDeviceGetService = (dynamic_IOHIDDeviceGetService_t) dlsym(iokit_framework, "IOHIDDeviceGetService");
@@ -366,6 +384,7 @@ static int init_hid_manager(void)
 int HID_API_EXPORT hid_init(void)
 {
 	if (!hid_mgr) {
+		is_macos_10_10_or_greater = (NSAppKitVersionNumber >= 1343); /* NSAppKitVersionNumber10_10 */
 		return init_hid_manager();
 	}
 
@@ -392,6 +411,125 @@ static void process_pending_events(void) {
 	} while(res != kCFRunLoopRunFinished && res != kCFRunLoopRunTimedOut);
 }
 
+static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev, int32_t usage_page, int32_t usage)
+{
+	unsigned short dev_vid;
+	unsigned short dev_pid;
+	int BUF_LEN = 256;
+	wchar_t buf[BUF_LEN];
+
+	struct hid_device_info *cur_dev;
+	io_object_t iokit_dev;
+	kern_return_t res;
+	io_string_t path;
+
+	if (dev == NULL) {
+		return NULL;
+	}
+
+	cur_dev = (struct hid_device_info *)calloc(1, sizeof(struct hid_device_info));
+	if (cur_dev == NULL) {
+		return NULL;
+	}
+
+	dev_vid = get_vendor_id(dev);
+	dev_pid = get_product_id(dev);
+
+	cur_dev->usage_page = usage_page;
+	cur_dev->usage = usage;
+
+	/* Fill out the record */
+	cur_dev->next = NULL;
+
+	/* Fill in the path (IOService plane) */
+	iokit_dev = hidapi_IOHIDDeviceGetService(dev);
+	res = IORegistryEntryGetPath(iokit_dev, kIOServicePlane, path);
+	if (res == KERN_SUCCESS)
+		cur_dev->path = strdup(path);
+	else
+		cur_dev->path = strdup("");
+
+	/* Serial Number */
+	get_serial_number(dev, buf, BUF_LEN);
+	cur_dev->serial_number = dup_wcs(buf);
+
+	/* Manufacturer and Product strings */
+	get_manufacturer_string(dev, buf, BUF_LEN);
+	cur_dev->manufacturer_string = dup_wcs(buf);
+	get_product_string(dev, buf, BUF_LEN);
+	cur_dev->product_string = dup_wcs(buf);
+
+	/* VID/PID */
+	cur_dev->vendor_id = dev_vid;
+	cur_dev->product_id = dev_pid;
+
+	/* Release Number */
+	cur_dev->release_number = get_int_property(dev, CFSTR(kIOHIDVersionNumberKey));
+
+	/* Interface Number */
+	/* We can only retrieve the interface number for USB HID devices.
+	 * IOKit always seems to return 0 when querying a standard USB device
+	 * for its interface. */
+	int is_usb_hid = get_int_property(dev, CFSTR(kUSBInterfaceClass)) == kUSBHIDClass;
+	if (is_usb_hid) {
+		/* Get the interface number */
+		cur_dev->interface_number = get_int_property(dev, CFSTR(kUSBInterfaceNumber));
+	} else {
+		cur_dev->interface_number = -1;
+	}
+
+	return cur_dev;
+}
+
+static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
+{
+	struct hid_device_info *root = NULL;
+	CFArrayRef usage_pairs = get_usage_pairs(device);
+
+	if (usage_pairs != NULL) {
+		struct hid_device_info *cur = NULL;
+		struct hid_device_info *next = NULL;
+		for (CFIndex i = 0; i < CFArrayGetCount(usage_pairs); i++) {
+			CFTypeRef dict = CFArrayGetValueAtIndex(usage_pairs, i);
+			if (CFGetTypeID(dict) != CFDictionaryGetTypeID()) {
+				continue;
+			}
+
+			CFTypeRef usage_page_ref, usage_ref;
+			int32_t usage_page, usage;
+
+			if (!CFDictionaryGetValueIfPresent((CFDictionaryRef)dict, CFSTR(kIOHIDDeviceUsagePageKey), &usage_page_ref) ||
+			    !CFDictionaryGetValueIfPresent((CFDictionaryRef)dict, CFSTR(kIOHIDDeviceUsageKey), &usage_ref) ||
+					CFGetTypeID(usage_page_ref) != CFNumberGetTypeID() ||
+					CFGetTypeID(usage_ref) != CFNumberGetTypeID() ||
+					!CFNumberGetValue((CFNumberRef)usage_page_ref, kCFNumberSInt32Type, &usage_page) ||
+					!CFNumberGetValue((CFNumberRef)usage_ref, kCFNumberSInt32Type, &usage)) {
+					continue;
+			}
+			next = create_device_info_with_usage(device, usage_page, usage);
+			if (cur == NULL) {
+				root = next;
+			}
+			else {
+				cur->next = next;
+			}
+			if (next != NULL) {
+				cur = next;
+			}
+		}
+	}
+
+	if (root == NULL) {
+		/* error when generating or parsing usage pairs */
+		int32_t usage_page = get_int_property(device, CFSTR(kIOHIDPrimaryUsagePageKey));
+		int32_t usage = get_int_property(device, CFSTR(kIOHIDPrimaryUsageKey));
+
+		root = create_device_info_with_usage(device, usage_page, usage);
+	}
+
+	return root;
+}
+
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
 	struct hid_device_info *root = NULL; /* return object */
@@ -407,7 +545,27 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	process_pending_events();
 
 	/* Get a list of the Devices */
-	IOHIDManagerSetDeviceMatching(hid_mgr, NULL);
+	CFMutableDictionaryRef matching = NULL;
+	if (vendor_id != 0 || product_id != 0) {
+		matching = CFDictionaryCreateMutable(kCFAllocatorDefault, kIOHIDOptionsTypeNone, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+
+		if (matching && vendor_id != 0) {
+			CFNumberRef v = CFNumberCreate(kCFAllocatorDefault, kCFNumberShortType, &vendor_id);
+			CFDictionarySetValue(matching, CFSTR(kIOHIDVendorIDKey), v);
+			CFRelease(v);
+		}
+
+		if (matching && product_id != 0) {
+			CFNumberRef p = CFNumberCreate(kCFAllocatorDefault, kCFNumberShortType, &product_id);
+			CFDictionarySetValue(matching, CFSTR(kIOHIDProductIDKey), p);
+			CFRelease(p);
+		}
+	}
+	IOHIDManagerSetDeviceMatching(hid_mgr, matching);
+	if (matching != NULL) {
+		CFRelease(matching);
+	}
+
 	CFSetRef device_set = IOHIDManagerCopyDevices(hid_mgr);
 
 	/* Convert the list into a C array so we can iterate easily. */
@@ -417,81 +575,28 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 	/* Iterate over each device, making an entry for it. */
 	for (i = 0; i < num_devices; i++) {
-		unsigned short dev_vid;
-		unsigned short dev_pid;
-		#define BUF_LEN 256
-		wchar_t buf[BUF_LEN];
 
 		IOHIDDeviceRef dev = device_array[i];
+		if (!dev) {
+			continue;
+		}
 
-        if (!dev) {
-            continue;
-        }
-		dev_vid = get_vendor_id(dev);
-		dev_pid = get_product_id(dev);
+		struct hid_device_info *tmp = create_device_info(dev);
+		if (tmp == NULL) {
+			continue;
+		}
 
-		/* Check the VID/PID against the arguments */
-		if ((vendor_id == 0x0 || vendor_id == dev_vid) &&
-		    (product_id == 0x0 || product_id == dev_pid)) {
-			struct hid_device_info *tmp;
-			bool is_usb_hid; /* Is this an actual HID usb device */
-			io_object_t iokit_dev;
-			kern_return_t res;
-			io_string_t path;
+		if (cur_dev) {
+			cur_dev->next = tmp;
+		}
+		else {
+			root = tmp;
+		}
+		cur_dev = tmp;
 
-			/* VID/PID match. Create the record. */
-			tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
-			if (cur_dev) {
-				cur_dev->next = tmp;
-			}
-			else {
-				root = tmp;
-			}
-			cur_dev = tmp;
-
-			is_usb_hid = get_int_property(dev, CFSTR(kUSBInterfaceClass)) == kUSBHIDClass;
-
-			/* Get the Usage Page and Usage for this device. */
-			cur_dev->usage_page = get_int_property(dev, CFSTR(kIOHIDPrimaryUsagePageKey));
-			cur_dev->usage = get_int_property(dev, CFSTR(kIOHIDPrimaryUsageKey));
-
-			/* Fill out the record */
-			cur_dev->next = NULL;
-
-			/* Fill in the path (IOService plane) */
-			iokit_dev = hidapi_IOHIDDeviceGetService(dev);
-			res = IORegistryEntryGetPath(iokit_dev, kIOServicePlane, path);
-			if (res == KERN_SUCCESS)
-				cur_dev->path = strdup(path);
-			else
-				cur_dev->path = strdup("");
-
-			/* Serial Number */
-			get_serial_number(dev, buf, BUF_LEN);
-			cur_dev->serial_number = dup_wcs(buf);
-
-			/* Manufacturer and Product strings */
-			get_manufacturer_string(dev, buf, BUF_LEN);
-			cur_dev->manufacturer_string = dup_wcs(buf);
-			get_product_string(dev, buf, BUF_LEN);
-			cur_dev->product_string = dup_wcs(buf);
-
-			/* VID/PID */
-			cur_dev->vendor_id = dev_vid;
-			cur_dev->product_id = dev_pid;
-
-			/* Release Number */
-			cur_dev->release_number = get_int_property(dev, CFSTR(kIOHIDVersionNumberKey));
-
-			/* We can only retrieve the interface number for USB HID devices.
-			 * IOKit always seems to return 0 when querying a standard USB device
-			 * for its interface. */
-			if (is_usb_hid) {
-				/* Get the interface number */
-				cur_dev->interface_number = get_int_property(dev, CFSTR(kUSBInterfaceNumber));
-			} else {
-				cur_dev->interface_number = -1;
-			}
+		/* move the pointer to the tail of returnd list */
+		while (cur_dev->next != NULL) {
+			cur_dev = cur_dev->next;
 		}
 	}
 
@@ -727,7 +832,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 		/* Create the Run Loop Mode for this device.
 		   printing the reference seems to work. */
-		sprintf(str, "HIDAPI_%p", dev->device_handle);
+		sprintf(str, "HIDAPI_%p", (void*) dev->device_handle);
 		dev->run_loop_mode =
 			CFStringCreateWithCString(NULL, str, kCFStringEncodingASCII);
 
@@ -817,7 +922,7 @@ static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data
 	                           report, &report_length);
 
 	if (res == kIOReturnSuccess) {
-		if (report_id == 0x0) { // 0 report number still present at the beginning
+		if (report_id == 0x0) { /* 0 report number still present at the beginning */
 			report_length++;
 		}
 		return report_length;
@@ -983,13 +1088,20 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return get_report(dev, kIOHIDReportTypeFeature, data, length);
 }
 
+int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
+{	
+	return get_report(dev, kIOHIDReportTypeInput, data, length);
+}
+
 void HID_API_EXPORT hid_close(hid_device *dev)
 {
 	if (!dev)
 		return;
 
-	/* Disconnect the report callback before close. */
-	if (!dev->disconnected) {
+	/* Disconnect the report callback before close.
+	   See comment below.
+	*/
+	if (is_macos_10_10_or_greater || !dev->disconnected) {
 		IOHIDDeviceRegisterInputReportCallback(
 			dev->device_handle, dev->input_report_buf, dev->max_input_report_len,
 			NULL, dev);
@@ -1013,8 +1125,14 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	/* Close the OS handle to the device, but only if it's not
 	   been unplugged. If it's been unplugged, then calling
-	   IOHIDDeviceClose() will crash. */
-	if (!dev->disconnected) {
+	   IOHIDDeviceClose() will crash.
+
+	   UPD: The crash part was true in/until some version of macOS.
+	   Starting with macOS 10.15, there is an opposite effect in some environments:
+	   crash happenes if IOHIDDeviceClose() is not called.
+	   Not leaking a resource in all tested environments.
+	*/
+	if (is_macos_10_10_or_greater || !dev->disconnected) {
 		IOHIDDeviceClose(dev->device_handle, kIOHIDOptionsTypeSeizeDevice);
 	}
 

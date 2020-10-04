@@ -13,22 +13,18 @@ libs: libhidapi-hidraw.so
 CC       ?= gcc
 CFLAGS   ?= -Wall -g -fpic
 
-CXX      ?= g++
-CXXFLAGS ?= -Wall -g -fpic
-
 LDFLAGS  ?= -Wall -g
 
 
 COBJS     = hid.o ../hidtest/test.o
-CPPOBJS   =
-OBJS      = $(COBJS) $(CPPOBJS)
+OBJS      = $(COBJS)
 LIBS_UDEV = `pkg-config libudev --libs` -lrt
 LIBS      = $(LIBS_UDEV)
 INCLUDES ?= -I../hidapi `pkg-config libusb-1.0 --cflags`
 
 
 # Console Test Program
-hidtest-hidraw: $(COBJS) $(CPPOBJS)
+hidtest-hidraw: $(COBJS)
 	$(CC) $(LDFLAGS) $^ $(LIBS_UDEV) -o $@
 
 # Shared Libs
@@ -39,11 +35,8 @@ libhidapi-hidraw.so: $(COBJS)
 $(COBJS): %.o: %.c
 	$(CC) $(CFLAGS) -c $(INCLUDES) $< -o $@
 
-$(CPPOBJS): %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $(INCLUDES) $< -o $@
-
 
 clean:
-	rm -f $(OBJS) hidtest-hidraw libhidapi-hidraw.so $(COBJS) $(CPPOBJS)
+	rm -f $(OBJS) hidtest-hidraw libhidapi-hidraw.so $(COBJS)
 
 .PHONY: clean libs

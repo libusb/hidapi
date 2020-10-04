@@ -77,6 +77,7 @@ function copydeps {
 }
 
 rm -f $EXEPATH/*
+mkdir -p $EXEPATH
 
 # Copy the binary into the bundle. Use ../libtool to do this if it's
 # available because if $EXE_NAME was built with autotools, it will be

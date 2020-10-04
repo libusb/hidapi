@@ -790,6 +790,11 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return res;
 }
 
+// Not supported by Linux HidRaw yet
+int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
+{
+	return -1;
+}
 
 void HID_API_EXPORT hid_close(hid_device *dev)
 {

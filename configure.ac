@@ -79,7 +79,7 @@ case $host in
 	backend="mac"
 	os="darwin"
 	threads="pthreads"
-	LIBS="${LIBS} -framework IOKit -framework CoreFoundation"
+	LIBS="${LIBS} -framework IOKit -framework CoreFoundation -framework AppKit"
 	;;
 *-freebsd*)
 	AC_MSG_RESULT([ (FreeBSD back-end)])
@@ -108,6 +108,19 @@ case $host in
 	PKG_CHECK_MODULES([libusb], [libusb-1.0 >= 1.0.9], true, [hidapi_lib_error libusb-1.0])
 	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} $libusb_LIBS"
 	CFLAGS_LIBUSB="${CFLAGS_LIBUSB} $libusb_CFLAGS"
+	;;
+*-*-haiku)
+	AC_MSG_RESULT([ (Haiku back-end)])
+	AC_DEFINE(OS_HAIKU, 1, [Haiku implementation])
+	AC_SUBST(OS_HAIKU)
+	backend="libusb"
+	os="haiku"
+	threads="pthreads"
+
+	PKG_CHECK_MODULES([libusb], [libusb-1.0 >= 1.0.9], true, [hidapi_lib_error libusb-1.0])
+	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} $libusb_LIBS"
+	CFLAGS_LIBUSB="${CFLAGS_LIBUSB} $libusb_CFLAGS"
+	AC_CHECK_LIB([iconv], [libiconv_open], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -liconv"], [hidapi_lib_error libiconv])
 	;;
 *-mingw*)
 	AC_MSG_RESULT([ (Windows back-end, using MinGW)])
@@ -215,6 +228,7 @@ AM_CONDITIONAL(OS_LINUX, test "x$os" = xlinux)
 AM_CONDITIONAL(OS_DARWIN, test "x$os" = xdarwin)
 AM_CONDITIONAL(OS_FREEBSD, test "x$os" = xfreebsd)
 AM_CONDITIONAL(OS_KFREEBSD, test "x$os" = xkfreebsd)
+AM_CONDITIONAL(OS_HAIKU, test "x$os" = xhaiku)
 AM_CONDITIONAL(OS_WINDOWS, test "x$os" = xwindows)
 
 AC_CONFIG_HEADERS([config.h])

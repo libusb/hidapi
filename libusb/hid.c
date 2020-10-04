@@ -45,13 +45,13 @@
 
 /* GNU / LibUSB */
 #include <libusb.h>
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(NO_ICONV)
 #include <iconv.h>
 #endif
 
 #include "hidapi.h"
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && __ANDROID_API__ < __ANDROID_API_N__
 
 /* Barrier implementation because Android/Bionic don't have pthread_barrier.
    This implementation came from Brent Priddy and was posted on
@@ -395,7 +395,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 	int len;
 	wchar_t *str = NULL;
 
-#ifndef __ANDROID__ /* we don't use iconv on Android */
+#if !defined(__ANDROID__) && !defined(NO_ICONV) /* we don't use iconv on Android, or when it is explicitly disabled */
 	wchar_t wbuf[256];
 	/* iconv variables */
 	iconv_t ic;
@@ -421,7 +421,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 	if (len < 0)
 		return NULL;
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(NO_ICONV)
 
 	/* Bionic does not have iconv support nor wcsdup() function, so it
 	   has to be done manually.  The following code will only work for
@@ -1245,6 +1245,35 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return res;
 }
 
+int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
+{
+	int res = -1;
+	int skipped_report_id = 0;
+	int report_number = data[0];
+
+	if (report_number == 0x0) {
+		/* Offset the return buffer by 1, so that the report ID
+		   will remain in byte 0. */
+		data++;
+		length--;
+		skipped_report_id = 1;
+	}
+	res = libusb_control_transfer(dev->device_handle,
+		LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_IN,
+		0x01/*HID get_report*/,
+		(1/*HID Input*/ << 8) | report_number,
+		dev->interface,
+		(unsigned char *)data, length,
+		1000/*timeout millis*/);
+
+	if (res < 0)
+		return -1;
+
+	if (skipped_report_id)
+		res++;
+
+	return res;
+}
 
 void HID_API_EXPORT hid_close(hid_device *dev)
 {
