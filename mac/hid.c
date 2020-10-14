@@ -182,6 +182,12 @@ static void free_hid_device(hid_device *dev)
 	free(dev);
 }
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
 static	IOHIDManagerRef hid_mgr = 0x0;
 static	int is_macos_10_10_or_greater = 0;
 
@@ -376,6 +382,16 @@ static int init_hid_manager(void)
 	}
 
 	return -1;
+}
+
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+{
+	return &api_version;
+}
+
+HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+{
+	return HID_API_VERSION_STR;
 }
 
 /* Initialize the IOHIDManager if necessary. This is the public function, and

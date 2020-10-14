@@ -39,9 +39,42 @@
 
 #define HID_API_EXPORT_CALL HID_API_EXPORT HID_API_CALL /**< API export and call macro*/
 
+/** @brief Static/compile-time major version of the library.
+
+	@ingroup API
+*/
+#define HID_API_VERSION_MAJOR 0
+/** @brief Static/compile-time minor version of the library.
+
+	@ingroup API
+*/
+#define HID_API_VERSION_MINOR 9
+/** @brief Static/compile-time patch version of the library.
+
+	@ingroup API
+*/
+#define HID_API_VERSION_PATCH 0
+
+/* Helper macros */
+#define HID_API_AS_STR_IMPL(x) #x
+#define HID_API_AS_STR(x) HID_API_AS_STR_IMPL(x)
+#define HID_API_TO_VERSION_STR(v1, v2, v3) HID_API_AS_STR(v1.v2.v3)
+
+/** @brief Static/compile-time string version of the library.
+
+	@ingroup API
+*/
+#define HID_API_VERSION_STR HID_API_TO_VERSION_STR(HID_API_VERSION_MAJOR, HID_API_VERSION_MINOR, HID_API_VERSION_PATCH)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+		struct hid_api_version {
+			int major;
+			int minor;
+			int patch;
+		};
+
 		struct hid_device_;
 		typedef struct hid_device_ hid_device; /**< opaque hidapi structure */
 
@@ -437,6 +470,25 @@ extern "C" {
 				which occurred or NULL if none has occurred.
 		*/
 		HID_API_EXPORT const wchar_t* HID_API_CALL hid_error(hid_device *dev);
+
+		/** @brief Get a runtime version of the library.
+
+			@ingroup API
+
+			@returns
+				Pointer to statically allocated struct, that contains version.
+		*/
+		HID_API_EXPORT const  struct hid_api_version* HID_API_CALL hid_version();
+
+
+		/** @brief Get a runtime version string of the library.
+
+			@ingroup API
+
+			@returns
+				Pointer to statically allocated string, that contains version string.
+		*/
+		HID_API_EXPORT const char* HID_API_CALL hid_version_str();
 
 #ifdef __cplusplus
 }
