@@ -53,6 +53,8 @@ typedef struct pthread_barrier {
 
 static int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count)
 {
+	(void) attr;
+
 	if(count == 0) {
 		errno = EINVAL;
 		return -1;
@@ -274,8 +276,8 @@ static int get_string_property(IOHIDDeviceRef device, CFStringRef prop, wchar_t 
 			len * sizeof(wchar_t),
 			&used_buf_len);
 
-		if (chars_copied == len)
-			buf[len] = 0; /* len is decremented above */
+		if (chars_copied <= 0)
+			buf[0] = 0;
 		else
 			buf[chars_copied] = 0;
 
@@ -674,6 +676,9 @@ hid_device * HID_API_EXPORT hid_open(unsigned short vendor_id, unsigned short pr
 static void hid_device_removal_callback(void *context, IOReturn result,
                                         void *sender)
 {
+	(void) result;
+	(void) sender;
+
 	/* Stop the Run Loop for this device. */
 	hid_device *d = (hid_device*) context;
 
@@ -688,6 +693,11 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
                          IOHIDReportType report_type, uint32_t report_id,
                          uint8_t *report, CFIndex report_length)
 {
+	(void) result;
+	(void) sender;
+	(void) report_type;
+	(void) report_id;
+
 	struct input_report *rpt;
 	hid_device *dev = (hid_device*) context;
 
@@ -1178,6 +1188,11 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
+	(void) dev;
+	(void) string_index;
+	(void) string;
+	(void) maxlen;
+
 	/* TODO: */
 
 	return 0;
@@ -1186,6 +1201,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
+	(void) dev;
 	/* TODO: */
 
 	return L"hid_error is not implemented yet";
