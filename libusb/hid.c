@@ -168,7 +168,7 @@ struct hid_device_ {
 	pthread_cond_t condition;
 	pthread_barrier_t barrier; /* Ensures correct startup sequence */
 	int shutdown_thread;
-	int cancelled;
+	int transfer_loop_finished;
 	struct libusb_transfer *transfer;
 
 	/* List of received input reports. */
@@ -178,6 +178,12 @@ struct hid_device_ {
 #ifdef DETACH_KERNEL_DRIVER
 	int is_driver_detached;
 #endif
+};
+
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
 };
 
 static libusb_context *usb_context = NULL;
@@ -490,6 +496,15 @@ static char *make_path(libusb_device *dev, int interface_number)
 	return strdup(str);
 }
 
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+{
+	return &api_version;
+}
+
+HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+{
+	return HID_API_VERSION_STR;
+}
 
 int HID_API_EXPORT hid_init(void)
 {
@@ -772,13 +787,9 @@ static void read_callback(struct libusb_transfer *transfer)
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
 		dev->shutdown_thread = 1;
-		dev->cancelled = 1;
-		return;
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
 		dev->shutdown_thread = 1;
-		dev->cancelled = 1;
-		return;
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_TIMED_OUT) {
 		//LOG("Timeout (normal)\n");
@@ -787,12 +798,17 @@ static void read_callback(struct libusb_transfer *transfer)
 		LOG("Unknown transfer code: %d\n", transfer->status);
 	}
 
+	if (dev->shutdown_thread) {
+		dev->transfer_loop_finished = 1;
+		return;
+	}
+
 	/* Re-submit the transfer object. */
 	res = libusb_submit_transfer(transfer);
 	if (res != 0) {
 		LOG("Unable to submit URB. libusb error code: %d\n", res);
 		dev->shutdown_thread = 1;
-		dev->cancelled = 1;
+		dev->transfer_loop_finished = 1;
 	}
 }
 
@@ -835,6 +851,7 @@ static void *read_thread(void *param)
 			    res != LIBUSB_ERROR_TIMEOUT &&
 			    res != LIBUSB_ERROR_OVERFLOW &&
 			    res != LIBUSB_ERROR_INTERRUPTED) {
+				dev->shutdown_thread = 1;
 				break;
 			}
 		}
@@ -844,8 +861,8 @@ static void *read_thread(void *param)
 	   if no transfers are pending, but that's OK. */
 	libusb_cancel_transfer(dev->transfer);
 
-	while (!dev->cancelled)
-		libusb_handle_events_completed(usb_context, &dev->cancelled);
+	while (!dev->transfer_loop_finished)
+		libusb_handle_events_completed(usb_context, &dev->transfer_loop_finished);
 
 	/* Now that the read thread is stopping, Wake any threads which are
 	   waiting on data (in hid_read_timeout()). Do this under a mutex to

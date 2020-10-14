@@ -79,6 +79,12 @@ extern "C" {
 extern "C" {
 #endif
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
 #ifndef HIDAPI_USE_DDK
 	/* Since we're not building with the DDK, and the HID header
 	   files aren't part of the SDK, we have to define all this
@@ -257,6 +263,16 @@ static HANDLE open_device(const char *path, BOOL open_rw)
 	return handle;
 }
 
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+{
+	return &api_version;
+}
+
+HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+{
+	return HID_API_VERSION_STR;
+}
+
 int HID_API_EXPORT hid_init(void)
 {
 #ifndef HIDAPI_USE_DDK
@@ -412,7 +428,6 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 			struct hid_device_info *tmp;
 			PHIDP_PREPARSED_DATA pp_data = NULL;
 			HIDP_CAPS caps;
-			BOOLEAN res;
 			NTSTATUS nt_res;
 			wchar_t wstr[WSTR_LEN]; /* TODO: Determine Size */
 			size_t len;
@@ -548,7 +563,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 		if (cur_dev->vendor_id == vendor_id &&
 		    cur_dev->product_id == product_id) {
 			if (serial_number) {
-				if (wcscmp(serial_number, cur_dev->serial_number) == 0) {
+				if (cur_dev->serial_number && wcscmp(serial_number, cur_dev->serial_number) == 0) {
 					path_to_open = cur_dev->path;
 					break;
 				}
@@ -641,8 +656,9 @@ err:
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
 	DWORD bytes_written = 0;
+	int function_result = -1;
 	BOOL res;
-	BOOL overlapped = FALSE;								 
+	BOOL overlapped = FALSE;
 
 	unsigned char *buf;
 
@@ -670,38 +686,38 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		if (GetLastError() != ERROR_IO_PENDING) {
 			/* WriteFile() failed. Return error. */
 			register_error(dev, "WriteFile");
-			bytes_written = -1;
 			goto end_of_function;
 		}
 		overlapped = TRUE;
 	}
 
 	if (overlapped) {
-		/* Wait for the transaction to complete */
+		/* Wait for the transaction to complete. This makes
+		   hid_write() synchronous. */
 		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
 		if (res != WAIT_OBJECT_0) {
-		    	/* There was a Timeout. */
-				bytes_written = -1;
-				register_error(dev, "WriteFile/WaitForSingleObject Timeout");
-				goto end_of_function;
+			/* There was a Timeout. */
+			register_error(dev, "WriteFile/WaitForSingleObject Timeout");
+			goto end_of_function;
 		}
 
-		/* Wait here until the write is done. This makes
-		   hid_write() synchronous. */
-		 res = GetOverlappedResult(dev->device_handle, &dev->write_ol, &bytes_written, FALSE/*wait*/);
-		 if (!res) {
-			 /* The Write operation failed. */
-			 register_error(dev, "WriteFile");
-			 bytes_written = -1;
-			 goto end_of_function;
-		 }
+		/* Get the result. */
+		res = GetOverlappedResult(dev->device_handle, &dev->write_ol, &bytes_written, FALSE/*wait*/);
+		if (res) {
+			function_result = bytes_written;
+		}
+		else {
+			/* The Write operation failed. */
+			register_error(dev, "WriteFile");
+			goto end_of_function;
+		}
 	}
 
 end_of_function:
 	if (buf != data)
 		free(buf);
 
-	return bytes_written;
+	return function_result;
 }
 
 
@@ -709,7 +725,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 {
 	DWORD bytes_read = 0;
 	size_t copy_len = 0;
-	BOOL res;
+	BOOL res = FALSE;
 	BOOL overlapped = FALSE;
 
 	/* Copy the handle for convenience. */
