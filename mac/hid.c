@@ -483,11 +483,19 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 
 static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
 {
-	struct hid_device_info *root = NULL;
+	const int32_t primary_usage_page = get_int_property(device, CFSTR(kIOHIDPrimaryUsagePageKey));
+	const int32_t primary_usage = get_int_property(device, CFSTR(kIOHIDPrimaryUsageKey));
+
+	/* Primary should always be first, to match previous behavior. */
+	struct hid_device_info *root = create_device_info_with_usage(device, primary_usage_page, primary_usage);
+	struct hid_device_info *cur = root;
+
+	if (!root)
+		return NULL;
+
 	CFArrayRef usage_pairs = get_usage_pairs(device);
 
 	if (usage_pairs != NULL) {
-		struct hid_device_info *cur = NULL;
 		struct hid_device_info *next = NULL;
 		for (CFIndex i = 0; i < CFArrayGetCount(usage_pairs); i++) {
 			CFTypeRef dict = CFArrayGetValueAtIndex(usage_pairs, i);
@@ -506,25 +514,15 @@ static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
 					!CFNumberGetValue((CFNumberRef)usage_ref, kCFNumberSInt32Type, &usage)) {
 					continue;
 			}
+			if (usage_page == primary_usage_page && usage == primary_usage)
+				continue; /* Already added. */
+
 			next = create_device_info_with_usage(device, usage_page, usage);
-			if (cur == NULL) {
-				root = next;
-			}
-			else {
-				cur->next = next;
-			}
+			cur->next = next;
 			if (next != NULL) {
 				cur = next;
 			}
 		}
-	}
-
-	if (root == NULL) {
-		/* error when generating or parsing usage pairs */
-		int32_t usage_page = get_int_property(device, CFSTR(kIOHIDPrimaryUsagePageKey));
-		int32_t usage = get_int_property(device, CFSTR(kIOHIDPrimaryUsageKey));
-
-		root = create_device_info_with_usage(device, usage_page, usage);
 	}
 
 	return root;
