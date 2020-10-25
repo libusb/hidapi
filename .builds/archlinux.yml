@@ -1,4 +1,10 @@
 image: archlinux
+packages:
+- autoconf
+- automake
+- libtool
+- libusb
+- libudev0
 sources:
 - https://github.com/libusb/hidapi
 tasks:
