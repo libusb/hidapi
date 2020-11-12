@@ -478,7 +478,7 @@ extern "C" {
 			@returns
 				Pointer to statically allocated struct, that contains version.
 		*/
-		HID_API_EXPORT const  struct hid_api_version* HID_API_CALL hid_version();
+		HID_API_EXPORT const  struct hid_api_version* HID_API_CALL hid_version(void);
 
 
 		/** @brief Get a runtime version string of the library.
@@ -488,7 +488,7 @@ extern "C" {
 			@returns
 				Pointer to statically allocated string, that contains version string.
 		*/
-		HID_API_EXPORT const char* HID_API_CALL hid_version_str();
+		HID_API_EXPORT const char* HID_API_CALL hid_version_str(void);
 
 #ifdef __cplusplus
 }
