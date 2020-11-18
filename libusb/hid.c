@@ -25,7 +25,12 @@
 
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
 
+#ifdef HAVE_CONFIG_H
 #include <config.h>
+#else
+// fixme need a better solution
+#define ICONV_CONST
+#endif
 
 /* C */
 #include <stdio.h>
