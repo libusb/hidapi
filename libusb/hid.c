@@ -27,8 +27,9 @@
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
-#else
-// fixme need a better solution
+#endif
+
+#ifndef ICONV_CONST
 #define ICONV_CONST
 #endif
 
