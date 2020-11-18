@@ -754,8 +754,8 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 			/* Usage Page and Usage */
 			int res;
 			struct hidraw_report_descriptor rpt_desc;
-			int device_handle = open(dev_path, O_RDWR);
-			if (device_handle > 0) {
+			int device_handle = open(dev_path, O_RDONLY);
+			if (device_handle >= 0) {
 				res = get_hid_report_descriptor(device_handle, &rpt_desc);
 				if (res >= 0) {
 					unsigned short page = 0, usage = 0;
