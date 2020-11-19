@@ -791,7 +791,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					cur_dev->path = strdup(dev_path);
 					cur_dev->vendor_id = dev_vid;
 					cur_dev->product_id = dev_pid;
-					cur_dev->serial_number = wcsdup(prev_dev->serial_number);
+					cur_dev->serial_number = prev_dev->serial_number? wcsdup(prev_dev->serial_number): NULL;
 					cur_dev->release_number = prev_dev->release_number;
 					cur_dev->interface_number = prev_dev->interface_number;
 					cur_dev->manufacturer_string = prev_dev->manufacturer_string? wcsdup(prev_dev->manufacturer_string): NULL;
