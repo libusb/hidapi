@@ -756,7 +756,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 			}
 
 			/* Construct <sysfs_path>/device/report_descriptor */
-			int rpt_path_len = strlen(sysfs_path) + 25 + 1;
+			size_t rpt_path_len = strlen(sysfs_path) + 25 + 1;
 			char *rpt_path = (char *)calloc(1, rpt_path_len);
 			snprintf(rpt_path, rpt_path_len, "%s/device/report_descriptor", sysfs_path);
 
