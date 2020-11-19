@@ -891,8 +891,15 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		/* Set device error to none */
 		register_device_error(dev, NULL);
 
-		/* Construct <sysfs_path>/device/report_descriptor using udev */
-		char *sysname = basename((char*)path);
+		/*
+		 * Construct <sysfs_path>/device/report_descriptor using udev
+		 * First we need to make sure the incoming path is the file path (and not a symlink).
+		 * From there we'll take the final /dev/hidraw* and take the basename to get hidraw*.
+		 * With hidraw* we can use udev to locate the sysfs path to the hidraw device.
+		 * And then finally locate the report_descriptor file.
+		 */
+		char *fullpath = realpath(path, NULL);
+		char *sysname = basename(fullpath);
 		struct udev *udev;
 		struct udev_device *udev_dev;
 		udev = udev_new();
@@ -914,6 +921,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 				uses_numbered_reports(rpt_desc.value,
 				                      rpt_desc.size);
 		}
+		free(fullpath);
 		free(rpt_path);
 
 		return dev;
