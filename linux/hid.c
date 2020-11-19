@@ -771,7 +771,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 				 * Parse the first usage and usage page
 				 * out of the report descriptor.
 				 */
-				while (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
+				if (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
 					cur_dev->usage_page = page;
 					cur_dev->usage = usage;
 				}
