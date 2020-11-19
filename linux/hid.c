@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <libgen.h>
 #include <locale.h>
 #include <errno.h>
 
@@ -364,27 +365,30 @@ static int get_next_hid_usage(__u8 *report_descriptor, __u32 size, unsigned int 
 /*
  * Retrieves the hidraw report descriptor
  */
-static int get_hid_report_descriptor(int device_handle, struct hidraw_report_descriptor *rpt_desc)
+static int get_hid_report_descriptor(char *rpt_path, struct hidraw_report_descriptor *rpt_desc)
 {
-	int res, desc_size = 0;
+	int res, rpt_handle;
 
+	rpt_handle = open(rpt_path, O_RDONLY);
+	if (rpt_handle == -1) {
+		register_global_error(strerror(errno));
+		return -1;
+	}
+
+	/*
+	 * Read in the Report Descriptor
+	 * The sysfs file has a maximum size of 4096 (which is the same as HID_MAX_DESCRIPTOR_SIZE) so we should always
+	 * be ok when reading the descriptor.
+	 * In practice if the HID descriptor is any larger I suspect many other things will break.
+	 */
 	memset(rpt_desc, 0x0, sizeof(*rpt_desc));
-
-	/* Get Report Descriptor Size */
-	res = ioctl(device_handle, HIDIOCGRDESCSIZE, &desc_size);
-	if (res < 0) {
-		register_global_error_format("ioctl (GRDESCSIZE): %s", strerror(errno));
-		return res;
+	res = read(rpt_handle, rpt_desc->value, HID_MAX_DESCRIPTOR_SIZE);
+	if (res == -1) {
+		register_global_error(strerror(errno));
 	}
+	rpt_desc->size = res;
 
-	/* Get Report Descriptor */
-	rpt_desc->size = desc_size;
-	res = ioctl(device_handle, HIDIOCGRDESC, rpt_desc);
-	if (res < 0) {
-		register_global_error_format("ioctl (GRDESC): %s", strerror(errno));
-		return res;
-	}
-
+	close(rpt_handle);
 	return res;
 }
 
@@ -751,51 +755,52 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					break;
 			}
 
+			/* Construct <sysfs_path>/device/report_descriptor */
+			char *rpt_path = (char *)calloc(1, strlen(sysfs_path) + 25);
+			sprintf(rpt_path, "%s/device/report_descriptor", sysfs_path);
+
 			/* Usage Page and Usage */
 			int res;
 			struct hidraw_report_descriptor rpt_desc;
-			int device_handle = open(dev_path, O_RDONLY);
-			if (device_handle >= 0) {
-				res = get_hid_report_descriptor(device_handle, &rpt_desc);
-				if (res >= 0) {
-					unsigned short page = 0, usage = 0;
-					unsigned int pos = 0, usage_count = 0;
-					/*
-					 * Parse the usage and usage page
-					 * out of the report descriptor.
-					 */
-					while (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
-						usage_count++;
+			res = get_hid_report_descriptor(rpt_path, &rpt_desc);
+			if (res >= 0) {
+				unsigned short page = 0, usage = 0;
+				unsigned int pos = 0, usage_count = 0;
+				/*
+				 * Parse the usage and usage page
+				 * out of the report descriptor.
+				 */
+				while (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
+					usage_count++;
 
-						/* First usage */
-						if (usage_count == 1)
-						{
-							cur_dev->usage_page = page;
-							cur_dev->usage = usage;
-							continue;
-						}
-
-						/* Create new record for additional usage pairs */
-						tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
-						cur_dev->next = tmp;
-						prev_dev = cur_dev;
-						cur_dev = tmp;
-
-						/* Update fields */
-						cur_dev->path = strdup(dev_path);
-						cur_dev->vendor_id = dev_vid;
-						cur_dev->product_id = dev_pid;
-						cur_dev->serial_number = utf8_to_wchar_t(serial_number_utf8);
-						cur_dev->release_number = prev_dev->release_number;
-						cur_dev->interface_number = prev_dev->interface_number;
-						cur_dev->manufacturer_string = prev_dev->manufacturer_string? wcsdup(prev_dev->manufacturer_string): NULL;
-						cur_dev->product_string = prev_dev->product_string? wcsdup(prev_dev->product_string): NULL;
+					/* First usage */
+					if (usage_count == 1)
+					{
 						cur_dev->usage_page = page;
 						cur_dev->usage = usage;
+						continue;
 					}
+
+					/* Create new record for additional usage pairs */
+					tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
+					cur_dev->next = tmp;
+					prev_dev = cur_dev;
+					cur_dev = tmp;
+
+					/* Update fields */
+					cur_dev->path = strdup(dev_path);
+					cur_dev->vendor_id = dev_vid;
+					cur_dev->product_id = dev_pid;
+					cur_dev->serial_number = utf8_to_wchar_t(serial_number_utf8);
+					cur_dev->release_number = prev_dev->release_number;
+					cur_dev->interface_number = prev_dev->interface_number;
+					cur_dev->manufacturer_string = prev_dev->manufacturer_string? wcsdup(prev_dev->manufacturer_string): NULL;
+					cur_dev->product_string = prev_dev->product_string? wcsdup(prev_dev->product_string): NULL;
+					cur_dev->usage_page = page;
+					cur_dev->usage = usage;
 				}
-				close(device_handle);
 			}
+			free(rpt_path);
 		}
 
 	next:
@@ -886,17 +891,30 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		/* Set device error to none */
 		register_device_error(dev, NULL);
 
+		/* Construct <sysfs_path>/device/report_descriptor using udev */
+		char *sysname = basename((char*)path);
+		struct udev *udev;
+		struct udev_device *udev_dev;
+		udev = udev_new();
+		udev_dev = udev_device_new_from_subsystem_sysname(udev, "hidraw", sysname);
+		const char *sysfs_path = udev_device_get_syspath(udev_dev);
+		char *rpt_path = (char *)calloc(1, strlen(sysfs_path) + 25);
+		sprintf(rpt_path, "%s/device/report_descriptor", sysfs_path);
+		udev_device_unref(udev_dev);
+		udev_unref(udev);
+
 		/* Get the report descriptor */
 		int res;
 		struct hidraw_report_descriptor rpt_desc;
 
-		res = get_hid_report_descriptor(dev->device_handle, &rpt_desc);
+		res = get_hid_report_descriptor(rpt_path, &rpt_desc);
 		if (res >= 0) {
 			/* Determine if this device uses numbered reports. */
 			dev->uses_numbered_reports =
 				uses_numbered_reports(rpt_desc.value,
 				                      rpt_desc.size);
 		}
+		free(rpt_path);
 
 		return dev;
 	}
