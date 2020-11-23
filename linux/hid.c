@@ -365,12 +365,13 @@ static int get_next_hid_usage(__u8 *report_descriptor, __u32 size, unsigned int 
  * Retrieves the hidraw report descriptor from a file.
  * When using this form, <sysfs_path>/device/report_descriptor, elevated priviledges are not required.
  */
-static int get_hid_report_descriptor(char *rpt_path, struct hidraw_report_descriptor *rpt_desc)
+static int get_hid_report_descriptor(const char *rpt_path, struct hidraw_report_descriptor *rpt_desc)
 {
-	int res, rpt_handle;
+	int rpt_handle;
+	ssize_t res;
 
 	rpt_handle = open(rpt_path, O_RDONLY);
-	if (rpt_handle == -1) {
+	if (rpt_handle < 0) {
 		register_global_error_format("open failed (%s): %s", rpt_path, strerror(errno));
 		return -1;
 	}
@@ -383,12 +384,26 @@ static int get_hid_report_descriptor(char *rpt_path, struct hidraw_report_descri
 	 */
 	memset(rpt_desc, 0x0, sizeof(*rpt_desc));
 	res = read(rpt_handle, rpt_desc->value, HID_MAX_DESCRIPTOR_SIZE);
-	if (res == -1) {
+	if (res < 0) {
 		register_global_error_format("read failed (%s): %s", rpt_path, strerror(errno));
 	}
-	rpt_desc->size = res;
+	rpt_desc->size = (__u32) res;
 
 	close(rpt_handle);
+	return (int) res;
+}
+
+static int get_hid_report_descriptor_from_sysfs(const char *sysfs_path, struct hidraw_report_descriptor *rpt_desc)
+{
+	int res = -1;
+	/* Construct <sysfs_path>/device/report_descriptor */
+	size_t rpt_path_len = strlen(sysfs_path) + 25 + 1;
+	char* rpt_path = (char*) calloc(1, rpt_path_len);
+	snprintf(rpt_path, rpt_path_len, "%s/device/report_descriptor", sysfs_path);
+
+	res = get_hid_report_descriptor(rpt_path, rpt_desc);
+	free(rpt_path);
+
 	return res;
 }
 
@@ -623,6 +638,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 		char *product_name_utf8 = NULL;
 		int bus_type;
 		int result;
+		struct hidraw_report_descriptor report_desc;
 
 		/* Get the filename of the /sys entry for the device
 		   and create a udev_device object (dev) representing it */
@@ -755,23 +771,16 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					break;
 			}
 
-			/* Construct <sysfs_path>/device/report_descriptor */
-			size_t rpt_path_len = strlen(sysfs_path) + 25 + 1;
-			char *rpt_path = (char *)calloc(1, rpt_path_len);
-			snprintf(rpt_path, rpt_path_len, "%s/device/report_descriptor", sysfs_path);
-
 			/* Usage Page and Usage */
-			int res;
-			struct hidraw_report_descriptor rpt_desc;
-			res = get_hid_report_descriptor(rpt_path, &rpt_desc);
-			if (res >= 0) {
+			result = get_hid_report_descriptor_from_sysfs(sysfs_path, &report_desc);
+			if (result >= 0) {
 				unsigned short page = 0, usage = 0;
 				unsigned int pos = 0;
 				/*
 				 * Parse the first usage and usage page
 				 * out of the report descriptor.
 				 */
-				if (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
+				if (!get_next_hid_usage(report_desc.value, report_desc.size, &pos, &page, &usage)) {
 					cur_dev->usage_page = page;
 					cur_dev->usage = usage;
 				}
@@ -780,7 +789,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 				 * Parse any additional usage and usage pages
 				 * out of the report descriptor.
 				 */
-				while (!get_next_hid_usage(rpt_desc.value, rpt_desc.size, &pos, &page, &usage)) {
+				while (!get_next_hid_usage(report_desc.value, report_desc.size, &pos, &page, &usage)) {
 					/* Create new record for additional usage pairs */
 					tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
 					cur_dev->next = tmp;
@@ -800,7 +809,6 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					cur_dev->usage = usage;
 				}
 			}
-			free(rpt_path);
 		}
 
 	next:
