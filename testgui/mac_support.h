@@ -1,9 +1,9 @@
 /*******************************
  Mac support for HID Test GUI
- 
+
  Alan Ott
  Signal 11 Software
- 
+
 *******************************/
 
 #ifndef MAC_SUPPORT_H__

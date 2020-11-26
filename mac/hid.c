@@ -1113,7 +1113,7 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 }
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
-{	
+{
 	return get_report(dev, kIOHIDReportTypeInput, data, length);
 }
 
