@@ -6,12 +6,17 @@ add_library(hidapi_libusb
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
 
+
+if(TARGET usb-1.0)
+    target_link_libraries(hidapi_libusb PRIVATE usb-1.0)
+else()
+    include(FindPkgConfig)
+    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
+    target_link_libraries(hidapi_libusb PRIVATE PkgConfig::libusb)
+endif()
+
 find_package(Threads REQUIRED)
-
-include(FindPkgConfig)
-pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
-
-target_link_libraries(hidapi_libusb PRIVATE PkgConfig::libusb Threads::Threads)
+target_link_libraries(hidapi_libusb PRIVATE Threads::Threads)
 
 set(HIDAPI_LIBNAME "hidapi")
 if(HIDAPI_LIBNAME_VERBOSE)
