@@ -6,6 +6,11 @@ ifeq ($(OS), Linux)
 	FILE=Makefile.linux
 endif
 
+# install pkg:/library/libusb-1
+ifeq ($(OS), SunOS)
+	FILE=Makefile.freebsd
+endif
+
 ifeq ($(OS), FreeBSD)
 	FILE=Makefile.freebsd
 endif
