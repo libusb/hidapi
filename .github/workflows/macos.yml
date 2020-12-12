@@ -19,6 +19,8 @@ jobs:
       run: |
         make
         make install
+    - name: Clean build
+      run: make clean
     - name: Build Manual makefile
       working-directory: mac
       run: make -f Makefile-manual
