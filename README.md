@@ -1,5 +1,7 @@
 ## HIDAPI library for Windows, Linux, FreeBSD and macOS
 
+This is a test
+
 | CI instance          | Status |
 |----------------------|--------|
 | `macOS master`       | [![Build Status](https://travis-ci.org/libusb/hidapi.svg?branch=master)](https://travis-ci.org/libusb/hidapi) |
