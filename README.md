@@ -37,12 +37,11 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 
 ## About
 
-HIDAPI has five back-ends:
+HIDAPI has four back-ends:
 * Windows (using `hid.dll`)
 * Linux/hidraw (using the Kernel's hidraw driver)
-* Linux/libusb (using libusb-1.0)
-* FreeBSD (using libusb-1.0)
-* Mac (using IOHidManager)
+* libusb (using libusb-1.0 - Linux/BSD/other UNIX systems)
+* macOS (using IOHidManager)
 
 On Linux, either the hidraw or the libusb back-end can be used. There are
 tradeoffs, and the functionality supported is slightly different.
