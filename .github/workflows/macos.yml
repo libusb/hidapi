@@ -1,0 +1,22 @@
+name: Check macOS Build
+
+on: [push, pull_request]
+
+jobs:
+  build-automake:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Configure Automake
+      run: |
+        ./bootstrap
+        ./configure --prefix=$(pwd)/install
+    - name: Build Automake
+      run: |
+        make
+        make install
+    - name: Build Manual makefile
+      working-directory: mac
+      run: make -f Makefile-manual
