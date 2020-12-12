@@ -9,6 +9,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Install build tools
+      run: brew install autoconf automake libtool
     - name: Configure Automake
       run: |
         ./bootstrap
