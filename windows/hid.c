@@ -146,6 +146,7 @@ struct hid_device_ {
 		USHORT output_report_length;
 		size_t input_report_length;
 		USHORT feature_report_length;
+		unsigned char *feature_buf;
 		void *last_error_str;
 		DWORD last_error_num;
 		BOOL read_pending;
@@ -162,6 +163,7 @@ static hid_device *new_hid_device()
 	dev->output_report_length = 0;
 	dev->input_report_length = 0;
 	dev->feature_report_length = 0;
+	dev->feature_buf = NULL;
 	dev->last_error_str = NULL;
 	dev->last_error_num = 0;
 	dev->read_pending = FALSE;
@@ -180,6 +182,7 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->write_ol.hEvent);							   
 	CloseHandle(dev->device_handle);
 	LocalFree(dev->last_error_str);
+	free(dev->feature_buf);
 	free(dev->read_buf);
 	free(dev);
 }
@@ -827,16 +830,15 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		buf = (unsigned char *) data;
 		length_to_send = length;
 	} else {
-		buf = (unsigned char *) malloc(dev->feature_report_length);
+		if (dev->feature_buf == NULL)
+			dev->feature_buf = (unsigned char *) malloc(dev->feature_report_length);
+		buf = dev->feature_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->feature_report_length - length);
 		length_to_send = dev->feature_report_length;
 	}
 
 	res = HidD_SetFeature(dev->device_handle, (PVOID)buf, (DWORD) length_to_send);
-
-	if (buf != data)
-		free(buf);
 
 	if (!res) {
 		register_error(dev, "HidD_SetFeature");
