@@ -15,7 +15,7 @@ elseif(NOT WIN32)
     endif()
 endif()
 
-option(BUILD_SHARED_LIBS "When set: build shared version of the libraries, otherwise - static" ON)
+option(BUILD_SHARED_LIBS "Build shared version of the libraries, otherwise build statically" ON)
 
 set(HIDAPI_INSTALL_TARGETS ON)
 
