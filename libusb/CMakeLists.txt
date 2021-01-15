@@ -6,7 +6,6 @@ add_library(hidapi_libusb
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
 
-
 if(TARGET usb-1.0)
     target_link_libraries(hidapi_libusb PRIVATE usb-1.0)
 else()
@@ -18,15 +17,10 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(hidapi_libusb PRIVATE Threads::Threads)
 
-set(HIDAPI_LIBNAME "hidapi")
-if(HIDAPI_LIBNAME_VERBOSE)
-    set(HIDAPI_LIBNAME "${HIDAPI_LIBNAME}-libusb")
-endif()
-
 set_target_properties(hidapi_libusb
     PROPERTIES
         EXPORT_NAME "libusb"
-        OUTPUT_NAME "${HIDAPI_LIBNAME}"
+        OUTPUT_NAME "hidapi-libusb"
         VERSION ${PROJECT_VERSION}
         SOVERSION ${PROJECT_VERSION_MAJOR}
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
@@ -40,8 +34,4 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-if(HIDAPI_LIBNAME_VERBOSE)
-    hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-libusb.pc.in")
-else()
-    hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
-endif()
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-libusb.pc.in")
