@@ -1,5 +1,20 @@
 cmake_minimum_required(VERSION 3.1.3 FATAL_ERROR)
-project(hidapi LANGUAGES C)
+
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_subdirectory(src)
+    return()
+endif()
+# All of the below in this file is meant for a standalone build.
+# When building as a subdirectory of a bigger project, most of the options may not make sence for it,
+# so it is up to developer to configure those, e.g.:
+#
+# # a subfolder of a master project, e.g.: 3rdparty/hidapi/CMakeLists.txt
+#
+# set(HIDAPI_WITH_HIDRAW OFF)
+# set(CMAKE_FRAMEWORK ON)
+# # and keep everything else to their defaults
+# add_subdirectory(hidapi)
+#
 
 set(DEFAULT_CMAKE_BUILD_TYPES "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 if(NOT DEFINED CMAKE_BUILD_TYPE OR NOT CMAKE_BUILD_TYPE)
@@ -13,6 +28,8 @@ if(${_build_type_index} GREATER -1)
 endif()
 unset(_build_type_index)
 #
+
+project(hidapi LANGUAGES C)
 
 if(APPLE)
     option(CMAKE_FRAMEWORK "Build macOS/iOS Framework version of the library" OFF)
