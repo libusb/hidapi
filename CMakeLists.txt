@@ -1,10 +1,18 @@
 cmake_minimum_required(VERSION 3.1.3 FATAL_ERROR)
 project(hidapi LANGUAGES C)
 
-if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Debug;Release;MinSizeRel;RelWithDebInfo" FORCE)
+set(DEFAULT_CMAKE_BUILD_TYPES "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+if(NOT DEFINED CMAKE_BUILD_TYPE OR NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "${DEFAULT_CMAKE_BUILD_TYPES}" FORCE)
 endif()
-set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+# This part is for convenience, when used one of the standard build types with cmake-gui
+list(FIND DEFAULT_CMAKE_BUILD_TYPES "${CMAKE_BUILD_TYPE}" _build_type_index)
+if(${_build_type_index} GREATER -1)
+    # set it optionally, so a custom CMAKE_BUILD_TYPE can be used as well, if needed
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS ${DEFAULT_CMAKE_BUILD_TYPES})
+endif()
+unset(_build_type_index)
+#
 
 if(APPLE)
     option(CMAKE_FRAMEWORK "Build macOS/iOS Framework version of the library" OFF)
