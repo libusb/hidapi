@@ -309,14 +309,16 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 
-	/* Windows objects for interacting with the driver. */
+	/* Hard-coded GUID retreived by HidD_GetHidGuid */
 	GUID InterfaceClassGuid = {0x4d1e55b2, 0xf16f, 0x11cf, {0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30} };
+
+	/* Windows objects for interacting with the driver. */
 	SP_DEVINFO_DATA devinfo_data;
 	SP_DEVICE_INTERFACE_DATA device_interface_data;
 	SP_DEVICE_INTERFACE_DETAIL_DATA_A *device_interface_detail_data = NULL;
 	HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
+	char driver_name[256];
 	int device_index = 0;
-	int i;
 
 	if (hid_init() < 0)
 		return NULL;
@@ -378,32 +380,18 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 			goto cont;
 		}
 
-		/* Make sure this device is of Setup Class "HIDClass" and has a
-		   driver bound to it. */
-		for (i = 0; ; i++) {
-			char driver_name[256];
+		/* Populate devinfo_data. This function will return failure
+		   when the device with such index doesn't exist. We've already checked it does. */
+		res = SetupDiEnumDeviceInfo(device_info_set, device_index, &devinfo_data);
+		if (!res)
+			goto cont;
 
-			/* Populate devinfo_data. This function will return failure
-			   when there are no more interfaces left. */
-			res = SetupDiEnumDeviceInfo(device_info_set, i, &devinfo_data);
-			if (!res)
-				goto cont;
 
-			res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
-			               SPDRP_CLASS, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
-			if (!res)
-				goto cont;
-
-			if ((strcmp(driver_name, "HIDClass") == 0) ||
-				(strcmp(driver_name, "Mouse") == 0) ||
-				(strcmp(driver_name, "Keyboard") == 0)) {
-				/* See if there's a driver bound. */
-				res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
-				           SPDRP_DRIVER, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
-				if (res)
-					break;
-			}
-		}
+		/* Make sure this device has a driver bound to it. */
+		res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
+			   SPDRP_DRIVER, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
+		if (!res)
+			goto cont;
 
 		//wprintf(L"HandleName: %s\n", device_interface_detail_data->DevicePath);
 
