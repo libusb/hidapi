@@ -144,6 +144,7 @@ struct hid_device_ {
 		HANDLE device_handle;
 		BOOL blocking;
 		USHORT output_report_length;
+		unsigned char *write_buf;
 		size_t input_report_length;
 		USHORT feature_report_length;
 		unsigned char *feature_buf;
@@ -161,6 +162,7 @@ static hid_device *new_hid_device()
 	dev->device_handle = INVALID_HANDLE_VALUE;
 	dev->blocking = TRUE;
 	dev->output_report_length = 0;
+	dev->write_buf = NULL;
 	dev->input_report_length = 0;
 	dev->feature_report_length = 0;
 	dev->feature_buf = NULL;
@@ -182,6 +184,7 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->write_ol.hEvent);							   
 	CloseHandle(dev->device_handle);
 	LocalFree(dev->last_error_str);
+	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
 	free(dev);
@@ -661,14 +664,14 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	   one for the report number) bytes even if the data is a report
 	   which is shorter than that. Windows gives us this value in
 	   caps.OutputReportByteLength. If a user passes in fewer bytes than this,
-	   create a temporary buffer which is the proper size. */
+	   use cached temporary buffer which is the proper size. */
 	if (length >= dev->output_report_length) {
 		/* The user passed the right number of bytes. Use the buffer as-is. */
 		buf = (unsigned char *) data;
 	} else {
-		/* Create a temporary buffer and copy the user's data
-		   into it, padding the rest with zeros. */
-		buf = (unsigned char *) malloc(dev->output_report_length);
+		if (dev->write_buf == NULL)
+			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+		buf = dev->write_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->output_report_length - length);
 		length = dev->output_report_length;
@@ -708,9 +711,6 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	}
 
 end_of_function:
-	if (buf != data)
-		free(buf);
-
 	return function_result;
 }
 
