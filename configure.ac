@@ -121,6 +121,13 @@ case $host in
 	threads="windows"
 	win_implementation="mingw"
 	;;
+*-msys*)
+	AC_MSG_RESULT([ (Windows back-end, using MSYS2)])
+	backend="windows"
+	os="windows"
+	threads="windows"
+	win_implementation="mingw"
+	;;
 *-cygwin*)
 	AC_MSG_RESULT([ (Windows back-end, using Cygwin)])
 	backend="windows"
