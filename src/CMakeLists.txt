@@ -22,6 +22,13 @@ if(NOT DEFINED CMAKE_POSITION_INDEPENDENT_CODE)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
+get_directory_property(IS_EXCLUDE_FROM_ALL EXCLUDE_FROM_ALL)
+if(IS_EXCLUDE_FROM_ALL)
+    if(HIDAPI_INSTALL_TARGETS)
+        message(WARNING "Installing EXCLUDE_FROM_ALL targets in an undefined behavior in CMake.\nDon't add 'hidapi' sundirectory with 'EXCLUDE_FROM_ALL' property, or don't set 'HIDAPI_INSTALL_TARGETS' to TRUE.")
+    endif()
+endif()
+
 # Helper(s)
 
 function(hidapi_configure_pc PC_IN_FILE)
