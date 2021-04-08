@@ -45,8 +45,13 @@
 
 #include "hidapi.h"
 
-/* Definitions from linux/hidraw.h. Since these are new, some distros
-   may not have header files which contain them. */
+#ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
+/* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.
+    hidapi doesn't support kernels older than that,
+    so we don't define macros below explicitly, to fail builds on old kernels.
+    For those who really need this as a workaround (e.g. to be able to build on old build machines),
+    can workaround by defining the macro above.
+*/
 #ifndef HIDIOCSFEATURE
 #define HIDIOCSFEATURE(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x06, len)
 #endif
@@ -54,6 +59,7 @@
 #define HIDIOCGFEATURE(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x07, len)
 #endif
 
+#endif
 
 
 /* USB HID device property names */
