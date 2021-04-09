@@ -25,24 +25,40 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+      <PlatformToolset Condition="'$(VisualStudioVersion)'=='11'">v110_xp</PlatformToolset>
+      <PlatformToolset Condition="'$(VisualStudioVersion)'=='12'">v120_xp</PlatformToolset>
+      <PlatformToolset Condition="'$(VisualStudioVersion)'=='14'">v140_xp</PlatformToolset>
+      <PlatformToolset Condition="'$(VisualStudioVersion)'=='15'">v141_xp</PlatformToolset>
+      <PlatformToolset Condition="'$(VisualStudioVersion)'=='16'">v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='11'">v110_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='12'">v120_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='14'">v140_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='15'">v141_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='16'">v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='11'">v110_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='12'">v120_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='14'">v140_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='15'">v141_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='16'">v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='11'">v110_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='12'">v120_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='14'">v140_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='15'">v141_xp</PlatformToolset>
+    <PlatformToolset Condition="'$(VisualStudioVersion)'=='16'">v142</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
