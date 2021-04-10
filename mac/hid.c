@@ -304,6 +304,22 @@ static int get_product_string(IOHIDDeviceRef device, wchar_t *buf, size_t len)
 }
 
 
+/*
+ * Retrieves the HID report descriptor
+ */
+static int get_hid_report_descriptor(IOHIDDeviceRef device, wchar_t* buf, size_t len)
+{
+	CFDataRef report_descriptor = (CFDataRef)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDReportDescriptorKey));
+	if (report_descriptor) {
+		len = (size_t) CFDataGetLength(descriptor);  // returns: CFIndex
+		buf = (wchar_t*) CFDataGetBytePtr(descriptor); // returns: const UInt8*
+		return 0;
+	}
+	else {
+		return -1;
+	}
+}
+
 /* Implementation of wcsdup() for Mac. */
 static wchar_t *dup_wcs(const wchar_t *s)
 {
