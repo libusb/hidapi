@@ -502,7 +502,7 @@ static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
 /// <param name="list">Chained list of report descriptor bytes</param>
 /// <param name="list_len">Length in bytes of report descriptor list</param>
 /// <returns>Returns 0 if successful, -1 for error</returns>
-static int rd_write_short_item(enum RD_ITEMS rd_item, LONG64 data, struct rd_item_byte** list) {
+static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byte** list) {
 	if (rd_item & 0x03) {
 		return -1; // Invaid input data
 	}
