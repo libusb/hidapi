@@ -144,6 +144,7 @@ struct hid_device_ {
 		HANDLE device_handle;
 		BOOL blocking;
 		USHORT output_report_length;
+		unsigned char *write_buf;
 		size_t input_report_length;
 		USHORT feature_report_length;
 		unsigned char *feature_buf;
@@ -161,6 +162,7 @@ static hid_device *new_hid_device()
 	dev->device_handle = INVALID_HANDLE_VALUE;
 	dev->blocking = TRUE;
 	dev->output_report_length = 0;
+	dev->write_buf = NULL;
 	dev->input_report_length = 0;
 	dev->feature_report_length = 0;
 	dev->feature_buf = NULL;
@@ -182,6 +184,7 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->write_ol.hEvent);							   
 	CloseHandle(dev->device_handle);
 	LocalFree(dev->last_error_str);
+	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
 	free(dev);
@@ -309,14 +312,16 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 
-	/* Windows objects for interacting with the driver. */
+	/* Hard-coded GUID retreived by HidD_GetHidGuid */
 	GUID InterfaceClassGuid = {0x4d1e55b2, 0xf16f, 0x11cf, {0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30} };
+
+	/* Windows objects for interacting with the driver. */
 	SP_DEVINFO_DATA devinfo_data;
 	SP_DEVICE_INTERFACE_DATA device_interface_data;
 	SP_DEVICE_INTERFACE_DETAIL_DATA_A *device_interface_detail_data = NULL;
 	HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
+	char driver_name[256];
 	int device_index = 0;
-	int i;
 
 	if (hid_init() < 0)
 		return NULL;
@@ -378,32 +383,18 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 			goto cont;
 		}
 
-		/* Make sure this device is of Setup Class "HIDClass" and has a
-		   driver bound to it. */
-		for (i = 0; ; i++) {
-			char driver_name[256];
+		/* Populate devinfo_data. This function will return failure
+		   when the device with such index doesn't exist. We've already checked it does. */
+		res = SetupDiEnumDeviceInfo(device_info_set, device_index, &devinfo_data);
+		if (!res)
+			goto cont;
 
-			/* Populate devinfo_data. This function will return failure
-			   when there are no more interfaces left. */
-			res = SetupDiEnumDeviceInfo(device_info_set, i, &devinfo_data);
-			if (!res)
-				goto cont;
 
-			res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
-			               SPDRP_CLASS, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
-			if (!res)
-				goto cont;
-
-			if ((strcmp(driver_name, "HIDClass") == 0) ||
-				(strcmp(driver_name, "Mouse") == 0) ||
-				(strcmp(driver_name, "Keyboard") == 0)) {
-				/* See if there's a driver bound. */
-				res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
-				           SPDRP_DRIVER, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
-				if (res)
-					break;
-			}
-		}
+		/* Make sure this device has a driver bound to it. */
+		res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
+			   SPDRP_DRIVER, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
+		if (!res)
+			goto cont;
 
 		//wprintf(L"HandleName: %s\n", device_interface_detail_data->DevicePath);
 
@@ -673,14 +664,14 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	   one for the report number) bytes even if the data is a report
 	   which is shorter than that. Windows gives us this value in
 	   caps.OutputReportByteLength. If a user passes in fewer bytes than this,
-	   create a temporary buffer which is the proper size. */
+	   use cached temporary buffer which is the proper size. */
 	if (length >= dev->output_report_length) {
 		/* The user passed the right number of bytes. Use the buffer as-is. */
 		buf = (unsigned char *) data;
 	} else {
-		/* Create a temporary buffer and copy the user's data
-		   into it, padding the rest with zeros. */
-		buf = (unsigned char *) malloc(dev->output_report_length);
+		if (dev->write_buf == NULL)
+			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+		buf = dev->write_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->output_report_length - length);
 		length = dev->output_report_length;
@@ -720,9 +711,6 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	}
 
 end_of_function:
-	if (buf != data)
-		free(buf);
-
 	return function_result;
 }
 

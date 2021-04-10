@@ -3,7 +3,7 @@
 | CI instance          | Status |
 |----------------------|--------|
 | `macOS master`       | ![macOS Build](https://github.com/libusb/hidapi/workflows/macOS%20Build/badge.svg?branch=master) |
-| `Windows master` | [![Build status](https://ci.appveyor.com/api/projects/status/r482aevuigmi86rk/branch/master?svg=true)](https://ci.appveyor.com/project/Youw/hidapi/branch/master) |
+| `Windows master` | [![Build status](https://ci.appveyor.com/api/projects/status/xfmr5fo8w0re8ded/branch/master?svg=true)](https://ci.appveyor.com/project/libusb/hidapi/branch/master) |
 | `Linux/BSD, last build (branch/PR)` | [![builds.sr.ht status](https://builds.sr.ht/~qbicz/hidapi.svg)](https://builds.sr.ht/~qbicz/hidapi?) |
 
 HIDAPI is a multi-platform library which allows an application to interface
