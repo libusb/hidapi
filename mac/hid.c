@@ -311,8 +311,8 @@ static int get_hid_report_descriptor(IOHIDDeviceRef device, wchar_t* buf, size_t
 {
 	CFDataRef report_descriptor = (CFDataRef)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDReportDescriptorKey));
 	if (report_descriptor) {
-		len = (size_t) CFDataGetLength(descriptor);  // returns: CFIndex
-		buf = (wchar_t*) CFDataGetBytePtr(descriptor); // returns: const UInt8*
+		len = (size_t) CFDataGetLength(report_descriptor);  // returns: CFIndex
+		buf = (wchar_t*) CFDataGetBytePtr(report_descriptor); // returns: const UInt8*
 		return 0;
 	}
 	else {
