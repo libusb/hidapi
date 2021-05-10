@@ -45,7 +45,7 @@
 
 #include "hidapi.h"
 
-#error "test CI blabla blub"
+//#error "test CI blabla blub"
 
 #ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
 /* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.
