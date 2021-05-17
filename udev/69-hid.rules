@@ -17,8 +17,10 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uacce
 # HIDAPI/hidraw
 KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
-# Once done, optionally rename this file for your device, and drop it into
-# /etc/udev/rules.d. Then, replug your device or run:
+# Once done, optionally rename this file for your application, and drop it into
+# /etc/udev/rules.d. Note that these rules must have priorty before 70-uaccess.rules
+# for example, name the file /etc/udev/rules.d/69-my-application-hid.rules.
+# Then, replug your device or run:
 # sudo udevadm control --reload-rules && sudo udevadm trigger
 
 # Note that the hexadecimal values for VID and PID are case sensitive and
