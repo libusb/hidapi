@@ -18,8 +18,8 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uacce
 KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
 # Once done, optionally rename this file for your device, and drop it into
-# /etc/udev/rules.d and unplug and re-plug your device. This is all that is
-# necessary to see the new permissions. Udev does not have to be restarted.
+# /etc/udev/rules.d. Then, replug your device or run:
+# sudo udevadm control --reload-rules && sudo udevadm trigger
 
 # Note that the hexadecimal values for VID and PID are case sensitive and
 # must be lower case.
