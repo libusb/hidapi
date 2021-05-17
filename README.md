@@ -47,6 +47,11 @@ HIDAPI has five back-ends:
 On Linux, either the hidraw or the libusb back-end can be used. There are
 tradeoffs, and the functionality supported is slightly different.
 
+Note that you will need to install a udev rule file with your application
+for unprivileged users to be able to access HID devices with hidapi. Refer
+to the [69-hid-udev.rules](udev/69-hid-udev.rules) file in the `udev` directory
+for an example.
+
 __Linux/hidraw__ (`linux/hid.c`):
 
 This back-end uses the hidraw interface in the Linux kernel, and supports
