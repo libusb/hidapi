@@ -1,6 +1,6 @@
-# This is a sample udev file for HIDAPI devices which changes the permissions
-# to 0666 (world readable/writable) for a specified device on Linux systems.
-
+# This is a sample udev file for HIDAPI devices which lets unprivileged
+# users who are physically present at the system (not remote users) access
+# HID devices.
 
 # If you are using the libusb implementation of hidapi (libusb/hid.c), then
 # use something like the following line, substituting the VID and PID with
@@ -9,15 +9,14 @@
 # (one each way) for compatibility with older systems.
 
 # HIDAPI/libusb
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", MODE="0666"
-
+SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
 # If you are using the hidraw implementation (linux/hid.c), then do something
 # like the following, substituting the VID and PID with your device. Busnum 1
 # is USB.
 
 # HIDAPI/hidraw
-KERNEL=="hidraw*", ATTRS{busnum}=="1", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", MODE="0666"
+KERNEL=="hidraw*", ATTRS{busnum}=="1", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
 # Once done, optionally rename this file for your device, and drop it into
 # /etc/udev/rules.d and unplug and re-plug your device. This is all that is
@@ -26,8 +25,10 @@ KERNEL=="hidraw*", ATTRS{busnum}=="1", ATTRS{idVendor}=="04d8", ATTRS{idProduct}
 # Note that the hexadecimal values for VID and PID are case sensitive and
 # must be lower case.
 
-# If you think permissions of 0666 are too loose, then see:
-# http://reactivated.net/writing_udev_rules.html for more information on finer
-# grained permission setting. For example, it might be sufficient to just
-# set the group or user owner for specific devices (for example the plugdev
-# group on some systems).
+# TAG+="uaccess" only gives permission to physically present users, which
+# is appropriate in most scenarios. If you require remote access to the
+# device, add
+# GROUP="plugdev", MODE="660"
+# to the end of the udev rule lines, add your user to the plugdev group with:
+# usermod -aG plugdev USERNAME
+# then log out and log back in (or restart the system).
