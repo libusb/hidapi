@@ -1,7 +1,7 @@
 Pod::Spec.new do |spec|
 
   spec.name         = "hidapi"
-  spec.version      = "0.9.0"
+  spec.version      = File.read('../VERSION')
   spec.summary      = "A Simple library for communicating with USB and Bluetooth HID devices on Linux, Mac and Windows."
 
   spec.description  = <<-DESC
@@ -26,6 +26,6 @@ Pod::Spec.new do |spec|
 
   spec.public_header_files = "hidapi/hidapi.h"
 
-  spec.frameworks   = "IOKit", "CoreFoundation"
+  spec.frameworks   = "IOKit", "CoreFoundation", "AppKit"
 
 end

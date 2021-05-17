@@ -9,11 +9,10 @@
 all: hidtest
 
 CC=gcc
-CXX=g++
 COBJS=hid.o ../hidtest/test.o
 OBJS=$(COBJS)
 CFLAGS+=-I../hidapi -Wall -g -c 
-LIBS=-framework IOKit -framework CoreFoundation
+LIBS=-framework IOKit -framework CoreFoundation -framework AppKit
 
 
 hidtest: $(OBJS)
@@ -22,10 +21,7 @@ hidtest: $(OBJS)
 $(COBJS): %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
-$(CPPOBJS): %.o: %.cpp
-	$(CXX) $(CFLAGS) $< -o $@
-
 clean:
-	rm -f *.o hidtest $(CPPOBJS)
+	rm -f *.o hidtest
 
 .PHONY: clean
