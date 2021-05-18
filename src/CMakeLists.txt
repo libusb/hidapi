@@ -108,6 +108,10 @@ else()
         set(HIDAPI_WITH_LIBUSB ON)
     endif()
     if(HIDAPI_WITH_LIBUSB)
+        target_include_directories(hidapi_include INTERFACE
+            "$<BUILD_INTERFACE:${PROJECT_ROOT}/libusb>"
+        )
+        list(APPEND HIDAPI_PUBLIC_HEADERS "${PROJECT_ROOT}/libusb/hidapi_libusb.h")
         add_subdirectory("${PROJECT_ROOT}/libusb" libusb)
         list(APPEND EXPORT_COMPONENTS libusb)
         set(EXPORT_ALIAS libusb)
