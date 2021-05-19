@@ -900,7 +900,7 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 	IOReturn res;
 	unsigned char report_id;
 
-	if (!data || (length <= 0)) {
+	if (!data || (length == 0)) {
 		return -1;
 	}
 
