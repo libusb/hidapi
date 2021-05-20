@@ -1047,7 +1047,6 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 	int skipped_report_id = 0;
 
 	if (!data || (length ==0)) {
-		errno = EINVAL;
 		return -1;
 	}
 
