@@ -660,7 +660,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	unsigned char *buf;
 
 	if (!data || (length==0)) {
-		register_error(dev, "Zero length buffer")
+		register_error(dev, "Zero length buffer");
 		return function_result;
 	}
 
