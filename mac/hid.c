@@ -898,7 +898,13 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 	const unsigned char *data_to_send = data;
 	CFIndex length_to_send = length;
 	IOReturn res;
-	const unsigned char report_id = data[0];
+	unsigned char report_id;
+
+	if (!data || (length == 0)) {
+		return -1;
+	}
+
+	report_id = data[0];
 
 	if (report_id == 0x0) {
 		/* Not using numbered Reports.
