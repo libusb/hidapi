@@ -43,6 +43,7 @@ endif()
 option(BUILD_SHARED_LIBS "Build shared version of the libraries, otherwise build statically" ON)
 
 set(HIDAPI_INSTALL_TARGETS ON)
+set(HIDAPI_PRINT_VERSION ON)
 
 add_subdirectory(src)
 

@@ -1,12 +1,24 @@
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
 # Read version from file
-file(READ "${PROJECT_ROOT}/VERSION" VERSION_STR)
-string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)(.*)" VERSION_STR "${VERSION_STR}")
+file(READ "${PROJECT_ROOT}/VERSION" RAW_VERSION_STR)
+string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)(.*)" VERSION_STR "${RAW_VERSION_STR}")
+
+if(NOT VERSION_STR)
+    message(FATAL_ERROR "Broken VERSION file, couldn't parse '${PROJECT_ROOT}/VERSION' with content: '${RAW_VERSION_STR}'")
+endif()
 
 set(VERSION "${CMAKE_MATCH_1}")
 string(STRIP "${CMAKE_MATCH_2}" VERSION_SUFFIX)
 #
+
+if(DEFINED HIDAPI_PRINT_VERSION AND HIDAPI_PRINT_VERSION)
+    set(HIDAPI_PRINT_VERSION "hidapi: v${VERSION}")
+    if(VERSION_SUFFIX)
+        set(HIDAPI_PRINT_VERSION "${HIDAPI_PRINT_VERSION} (${VERSION_SUFFIX})")
+    endif()
+    message(STATUS "${HIDAPI_PRINT_VERSION}")
+endif()
 
 project(hidapi VERSION "${VERSION}" LANGUAGES C)
 
