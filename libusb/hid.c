@@ -1043,8 +1043,14 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
 	int res;
-	int report_number = data[0];
+	int report_number;
 	int skipped_report_id = 0;
+
+	if (!data || (length ==0)) {
+		return -1;
+	}
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		data++;

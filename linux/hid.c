@@ -963,6 +963,12 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 {
 	int bytes_written;
 
+	if (!data || (length == 0)) {
+		errno = EINVAL;
+		register_device_error(dev, strerror(errno));
+		return -1;
+	}
+
 	bytes_written = write(dev->device_handle, data, length);
 
 	register_device_error(dev, (bytes_written == -1)? strerror(errno): NULL);
