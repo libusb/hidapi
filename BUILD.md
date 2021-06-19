@@ -80,7 +80,7 @@ Check the manual makefiles for a simple example/reference of what are the depend
 NOTE: if your have a CMake-based project, you're likely be able to use
 HIDAPI directly as a subdirectory. Check [BUILD.cmake.md](BUILD.cmake.md) for details.
 
-## Building the manual way on Unix platforms:
+## Building the manual way on Unix platforms
 
 Manual Makefiles are provided mostly to give the user an idea what it takes
 to build a program which embeds HIDAPI directly inside of it. These should
@@ -94,16 +94,15 @@ cd linux/
 make -f Makefile-manual
 ```
 
-## Building on Windows:
+## Building on Windows
 
 To build the HIDAPI DLL on Windows using Visual Studio, build the `.sln` file
-in the `windows/` directory. Note: this solution is generated for MSVC 2015.
-
-If you need a solution for different version of Visual Studio you may generate
-one using [CMake](BUILD.cmake.md).
+in the `windows/` directory.
 
 To build HIDAPI using MinGW or Cygwin using Autotools, use a general Autotools
  [instruction](BUILD.autotools.md).
+
+Any windows builds (MSVC or MinGW/Cygwin) are also supported by [CMake](BUILD.cmake.md).
 
 HIDAPI can also be built using the Windows DDK (now also called the Windows
 Driver Kit or WDK). This method was originally required for the HIDAPI build

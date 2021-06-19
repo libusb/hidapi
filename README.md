@@ -68,7 +68,7 @@ which HIDAPI supports.  Since it relies on a 3rd party library, building it
 is optional but recommended because it is so useful when debugging hardware.
 
 NOTE: Test GUI based on Fox Toolkit is not actively developed nor supported
-by hidapi team. It is kept as a historical artifact. It may even work sometime
+by HIDAPI team. It is kept as a historical artifact. It may even work sometime
 or on some platforms, but it is not going to get any new features or bugfixes.
 
 Instructions for installing Fox-Toolkit on each platform is not provided.
