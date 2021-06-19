@@ -26,6 +26,11 @@ set_target_properties(hidapi_libusb
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
+# compatibility with find_package()
+add_library(hidapi::libusb ALIAS hidapi_libusb)
+# compatibility with raw library link
+add_library(hidapi-libusb ALIAS hidapi_libusb)
+
 if(HIDAPI_INSTALL_TARGETS)
     install(TARGETS hidapi_libusb EXPORT hidapi
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"

@@ -15,6 +15,11 @@ set_target_properties(hidapi_winapi
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
+# compatibility with find_package()
+add_library(hidapi::winapi ALIAS hidapi_winapi)
+# compatibility with raw library link
+add_library(hidapi ALIAS hidapi_winapi)
+
 if(HIDAPI_INSTALL_TARGETS)
     install(TARGETS hidapi_winapi EXPORT hidapi
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"

@@ -77,6 +77,8 @@ target_include_directories(hidapi_include INTERFACE
 set_target_properties(hidapi_include PROPERTIES EXPORT_NAME "include")
 set(HIDAPI_PUBLIC_HEADERS "${PROJECT_ROOT}/hidapi/hidapi.h")
 
+add_library(hidapi::include ALIAS hidapi_include)
+
 if(HIDAPI_INSTALL_TARGETS)
     include(GNUInstallDirs)
     install(TARGETS hidapi_include EXPORT hidapi)
@@ -134,7 +136,7 @@ else()
     endif()
 endif()
 
-add_library(hidapi ALIAS hidapi_${EXPORT_ALIAS})
+add_library(hidapi::hidapi ALIAS hidapi_${EXPORT_ALIAS})
 
 if(HIDAPI_INSTALL_TARGETS)
     include(CMakePackageConfigHelpers)

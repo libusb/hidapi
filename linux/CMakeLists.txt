@@ -22,6 +22,11 @@ set_target_properties(hidapi_hidraw
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
+# compatibility with find_package()
+add_library(hidapi::hidraw ALIAS hidapi_hidraw)
+# compatibility with raw library link
+add_library(hidapi-hidraw ALIAS hidapi_hidraw)
+
 if(HIDAPI_INSTALL_TARGETS)
     install(TARGETS hidapi_hidraw EXPORT hidapi
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"

@@ -24,6 +24,11 @@ set_target_properties(hidapi_darwin
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
+# compatibility with find_package()
+add_library(hidapi::darwin ALIAS hidapi_darwin)
+# compatibility with raw library link
+add_library(hidapi ALIAS hidapi_darwin)
+
 set(PUBLIC_HEADER_DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 if(NOT CMAKE_FRAMEWORK)
     set(PUBLIC_HEADER_DESTINATION "${PUBLIC_HEADER_DESTINATION}/hidapi")
