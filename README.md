@@ -4,7 +4,7 @@
 |----------------------|--------|
 | `macOS master`       | ![macOS Build](https://github.com/libusb/hidapi/workflows/macOS%20Build/badge.svg?branch=master) |
 | `Windows master` | [![Build status](https://ci.appveyor.com/api/projects/status/xfmr5fo8w0re8ded/branch/master?svg=true)](https://ci.appveyor.com/project/libusb/hidapi/branch/master) |
-| `Linux/BSD, last build (branch/PR)` | [![builds.sr.ht status](https://builds.sr.ht/~qbicz/hidapi.svg)](https://builds.sr.ht/~qbicz/hidapi?) |
+| `Linux/BSD, last build (branch/PR)` | [![builds.sr.ht status](https://builds.sr.ht/~z3ntu/hidapi.svg)](https://builds.sr.ht/~z3ntu/hidapi) |
 
 HIDAPI is a multi-platform library which allows an application to interface
 with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
@@ -45,7 +45,15 @@ HIDAPI has five back-ends:
 * Mac (using IOHidManager)
 
 On Linux, either the hidraw or the libusb back-end can be used. There are
-tradeoffs, and the functionality supported is slightly different.
+tradeoffs, and the functionality supported is slightly different. Both are
+built by default. It is up to the application linking to hidapi to choose
+the backend at link time by linking to either `libhidapi-libusb` or
+`libhidapi-hidraw`.
+
+Note that you will need to install a udev rule file with your application
+for unprivileged users to be able to access HID devices with hidapi. Refer
+to the [69-hid-udev.rules](udev/69-hid-udev.rules) file in the `udev` directory
+for an example.
 
 __Linux/hidraw__ (`linux/hid.c`):
 

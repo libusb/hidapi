@@ -595,6 +595,17 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							res = libusb_open(dev, &handle);
 
 							if (res >= 0) {
+#ifdef __ANDROID__
+								/* There is (a potential) libusb Android backend, in which
+								   device descriptor is not accurate up until the device is opened.
+								   https://github.com/libusb/libusb/pull/874#discussion_r632801373
+								   A workaround is to re-read the descriptor again.
+								   Even if it is not going to be accepted into libusb master,
+								   having it here won't do any harm, since reading the device descriptor
+								   is as cheap as copy 18 bytes of data. */
+								libusb_get_device_descriptor(dev, &desc);
+#endif
+
 								/* Serial Number */
 								if (desc.iSerialNumber > 0)
 									cur_dev->serial_number =
@@ -927,6 +938,12 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 							break;
 						}
 						good_open = 1;
+
+#ifdef __ANDROID__
+						/* See remark in hid_enumerate */
+						libusb_get_device_descriptor(usb_dev, &desc);
+#endif
+
 #ifdef DETACH_KERNEL_DRIVER
 						/* Detach the kernel driver, but only if the
 						   device is managed by the kernel */
@@ -1026,8 +1043,14 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
 	int res;
-	int report_number = data[0];
+	int report_number;
 	int skipped_report_id = 0;
+
+	if (!data || (length ==0)) {
+		return -1;
+	}
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		data++;
