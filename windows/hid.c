@@ -1926,6 +1926,22 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 					cur_dev->usage = caps.Usage;
 				}
 
+				// *******************************************
+				// Temporaray debug output on request by mcuee
+				wstr[0] = 0x0000;
+				res = HidD_GetManufacturerString(write_handle, wstr, sizeof(wstr));
+				wstr[WSTR_LEN - 1] = 0x0000;
+				if (res) {
+					printf("Manufacturer (VID): %S   ", wstr);
+				}
+
+				wstr[0] = 0x0000;
+				res = HidD_GetProductString(write_handle, wstr, sizeof(wstr));
+				wstr[WSTR_LEN - 1] = 0x0000;
+				if (res) {
+					printf("Product (PID): %S\n", wstr);
+				}
+				// *******************************************
 
 				unsigned char* report_descriptor;
 				unsigned int report_descriptor_len;
