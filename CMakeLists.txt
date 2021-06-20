@@ -2,10 +2,12 @@ cmake_minimum_required(VERSION 3.1.3 FATAL_ERROR)
 
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(src)
+    # compatinility with find_package() vs add_subdirectory
+    set(hidapi_VERSION "${hidapi_VERSION}" PARENT_SCOPE)
     return()
 endif()
 # All of the below in this file is meant for a standalone build.
-# When building as a subdirectory of a bigger project, most of the options may not make sence for it,
+# When building as a subdirectory of a larger project, most of the options may not make sence for it,
 # so it is up to developer to configure those, e.g.:
 #
 # # a subfolder of a master project, e.g.: 3rdparty/hidapi/CMakeLists.txt
