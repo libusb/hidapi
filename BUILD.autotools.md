@@ -1,8 +1,8 @@
 # Building HIDAPI using Autotools
 
-To be able to use Autotools to build HIDAPI, it has to be installed/available in the system.
+To be able to use Autotools to build HIDAPI, it has to be [installed](#installing-autotools)/available in the system.
 
-Also, make sure you've checked [prerequisites](README.md#prerequisites) and installed all required dependencies.
+Make sure you've checked [prerequisites](BUILD.md#prerequisites) and installed all required dependencies.
 
 ## Installing Autotools
 
