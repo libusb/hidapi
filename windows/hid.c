@@ -308,6 +308,81 @@ static struct hid_api_version api_version = {
 	static BOOLEAN initialized = FALSE;
 #endif /* HIDAPI_USE_DDK */
 
+	typedef struct _hid_preparsed_data {
+		UINT64 MagicKey;
+		USAGE Usage;
+		USAGE UsagePage;
+		USHORT Reserved[3];	//USHORT NumberLinkCollectionNodes;
+		USHORT NumberInputCaps;
+		USHORT Reserved2;
+		USHORT InputReportByteLength;
+		USHORT NumberOutputCaps;
+		USHORT Reserved3;
+		USHORT OutputReportByteLength;
+		USHORT NumberFeatureCaps;
+		USHORT NumberCaps;
+		USHORT FeatureReportByteLength;
+		USHORT CapsByteLength;
+		USHORT Reserved4;
+	} hid_preparse_data, *phid_preparsed_data;
+
+
+typedef struct _hid_caps {	
+		USAGE   UsagePage;
+		UCHAR   ReportID;
+		UCHAR   BitPosition;
+		USHORT  BitSize; // WIN32 term for Report Size
+		USHORT  ReportCount;
+		USHORT  BytePosition;
+		USHORT  ByteSize;
+		USHORT  BitCount;
+		// BOOLEAN IsAlias; ???
+		ULONG   BitField; // Not 2x USHORT??
+		ULONG   Reserved;
+		//USHORT  LinkCollection;
+		USAGE   LinkUsage;
+		USAGE   LinkUsagePage;
+		/*
+		BOOLEAN IsRange;
+		BOOLEAN IsStringRange;
+		BOOLEAN IsDesignatorRange;
+		BOOLEAN IsAbsolute;
+		BOOLEAN HasNull;
+		UCHAR   Reserved;
+		USHORT  Reserved2[5];*/
+		ULONG   Reserved2[9];
+		union {
+			struct {
+				USAGE  UsageMin;
+				USAGE  UsageMax;
+				USHORT StringMin;
+				USHORT StringMax;
+				USHORT DesignatorMin;
+				USHORT DesignatorMax;
+				USHORT DataIndexMin;
+				USHORT DataIndexMax;
+			} Range;
+			struct {
+				USAGE  Usage;
+				USAGE  Reserved1;
+				USHORT StringIndex;
+				USHORT Reserved2;
+				USHORT DesignatorIndex;
+				USHORT Reserved3;
+				USHORT DataIndex;
+				USHORT Reserved4;
+			} NotRange;
+		ULONG   Reserved3;
+		LONG    LogicalMin;
+		LONG    LogicalMax;
+		LONG    PhysicalMin;
+		LONG    PhysicalMax;
+		ULONG   Units;
+		ULONG   UnitsExp;		
+		};
+} hid_caps, *phid_caps;
+
+
 struct hid_device_ {
 		HANDLE device_handle;
 		BOOL blocking;
