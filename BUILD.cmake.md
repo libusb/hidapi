@@ -8,7 +8,7 @@ HIDAPI CMake build system allows you to build HIDAPI in two generally different 
 1) As a [standalone package/library](#standalone-package-build);
 2) As [part of a larger CMake project](#hidapi-as-a-subdirectory).
 
-**TL;DR**: if you're experienced developer and have been working with CMake projects or have been written some your own -
+**TL;DR**: if you're experienced developer and have been working with CMake projects or have been written some of your own -
 most of this document may not be of interest for you; just check variables names, its default values and the target names.
 
 ## Installing CMake
@@ -28,27 +28,46 @@ On macOS CMake may be installed by Homebrew/MacPorts or using the installer from
 
 To build HIDAPI as a standalone package, you follow [general steps](https://cmake.org/runningcmake/) of building any CMake project.
 
-An example of building CMake using Ninja:
+An example of building HIDAPI with CMake:
+```sh
+cd <build dir>
+# configure the build
+cmake <HIDAPI source dir>
+# build it!
+cmake --build .
+# install library; by default installs into /usr/local/
+cmake --build . --target install
+# NOTE: you need to run install command as root, to be able to install into /usr/local/
+```
+Such invocation will use the default (as per CMake magic) compiler/build environment available in your system.
+
+You may pass some additional CMake variables to control the build configuration as `-D<CMake Variable>=value`.
+E.g.:
+```sh
+# install command now would install things into /usr
+cmake <HIDAPI source dir> -DCMAKE_INSTALL_PREFIX=/usr
+```
+
+<details>
+  <summary>Using a specific CMake generator</summary>
+
+An example of using `Ninja` as a CMake generator:
+
 ```sh
 cd <build dir>
 # configure the build
 cmake -GNinja <HIDAPI source dir>
-# build it!
+# we know, that CMake has generated build files for Ninja,
+# so we can use `ninja` directly, instead of `cmake --build .`
 ninja
-# by default installs into /usr/local/
+# install library
 ninja install
-# NOTE: you need to run `ninja install` command as root, to be able to install into /usr/local/
 ```
 
 `-G` here specifies a native build system CMake would generate build files for.
 Check [CMake Documentation](https://cmake.org/cmake/help/latest/manual/cmake-generators.7.html) for a list of available generators (system-specific).
 
-You may pass some additional CMake variables to control the build configuration as `-D<CMake Variable>=value`.
-E.g.:
-```sh
-# `ninja install` command now would install things into /usr
-cmake -GNinja <HIDAPI source dir> -DCMAKE_INSTALL_PREFIX=/usr
-```
+</details><br>
 
 Some of the [standard](https://cmake.org/cmake/help/latest/manual/cmake-variables.7.html) CMake variables you may want to use to configure a build:
 
@@ -62,10 +81,8 @@ Some of the [standard](https://cmake.org/cmake/help/latest/manual/cmake-variable
   - [`CMAKE_FRAMEWORK`](https://cmake.org/cmake/help/latest/variable/CMAKE_FRAMEWORK.html) - (since CMake 3.15) when set to TRUE, HIDAPI is built as a framework library, otherwise build as a regular static/shared library; Defaults to `FALSE` for HIDAPI, if not specified;
   - [`CMAKE_OSX_DEPLOYMENT_TARGET`](https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_DEPLOYMENT_TARGET.html) - minimum version of the target platform (e.g. macOS or iOS) on which the target binaries are to be deployed; defaults to a maximum supported target platform by currently used XCode/Toolchain;
 
-</details>
+</details><br>
 
-
-<br/>
 HIDAPI-specific CMake variables:
 
 - `HIDAPI_BUILD_HIDTEST` - when set to TRUE, build a small test application `hidtest`;
@@ -78,9 +95,7 @@ HIDAPI-specific CMake variables:
 
   **NOTE**: at least one of `HIDAPI_WITH_HIDRAW` or `HIDAPI_WITH_LIBUSB` has to be set to TRUE.
 
-</details>
-
-<br/>
+</details><br>
 
 To see all most-useful CMake variables available for HIDAPI, one of the most convenient ways is too use [`cmake-gui`](https://cmake.org/cmake/help/latest/manual/cmake-gui.1.html) tool ([example](https://cmake.org/runningcmake/)).
 
@@ -92,7 +107,7 @@ It is possible to build a CMake project (including HIDAPI) using MSVC compiler a
 For that:
 1) Open cmd.exe;
 2) Setup MSVC build environment variables, e.g.: `vcvarsall.bat x64`, where:
-	- `vcvarsall.bat` is an environment setup script of your MSVC toolchain installation;<br/>For MSVC 2019 Community edition it is located at: `C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\`;
+	- `vcvarsall.bat` is an environment setup script of your MSVC toolchain installation;<br>For MSVC 2019 Community edition it is located at: `C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\`;
 	- `x64` -a target architecture to build;
 3) Follow general build steps, and use `Ninja` as a generator.
 
