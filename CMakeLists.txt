@@ -7,7 +7,7 @@ if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     return()
 endif()
 # All of the below in this file is meant for a standalone build.
-# When building as a subdirectory of a larger project, most of the options may not make sence for it,
+# When building as a subdirectory of a larger project, most of the options may not make sense for it,
 # so it is up to developer to configure those, e.g.:
 #
 # # a subfolder of a master project, e.g.: 3rdparty/hidapi/CMakeLists.txt
