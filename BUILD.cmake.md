@@ -8,6 +8,9 @@ HIDAPI CMake build system allows you to build HIDAPI in two generally different 
 1) As a [standalone package/library](#standalone-package-build);
 2) As [part of a larger CMake project](#hidapi-as-a-subdirectory).
 
+**TL;DR**: if you're experienced developer and have been working with CMake projects or have been written some your own -
+most of this document may not be of interest for you; just check variables names, its default values and the target names.
+
 ## Installing CMake
 
 CMake can be installed either using your system's package manager,
@@ -122,11 +125,11 @@ Available CMake targets after successful `find_package(hidapi)`:
 - `hidapi::libusb` - available when libusb backend is used/available;
 - `hidapi::hidraw` - available when hidraw backend is used/available on Linux;
 
-**NOTE**: on Linux often both `hidapi::libusb` and `hidapi::hidraw` backends are available; in that case `hidapi::hidapi` is an alias for **`hidapi::libusb`**. The motivation is that hidraw backend doesn't have an implementation of all of the HIDAPI functions due to lack of Linux kernel support. If libusb backend isn't built at all (`hidapi::hidraw` is the only target) - `hidapi::hidapi` is an alias for `hidapi::hidraw`.
-If you're developing a cross-platform application and you are sure you need to use hidraw backend on Linux, the simple way to achieve this is:
+**NOTE**: on Linux often both `hidapi::libusb` and `hidapi::hidraw` backends are available; in that case `hidapi::hidapi` is an alias for **`hidapi::hidraw`**. The motivation is that `hidraw` backend is a native Linux kernel implementation of HID protocol, and supports various HID devices (USB, Bluetooth, I2C, etc.). If `hidraw` backend isn't built at all (`hidapi::libusb` is the only target) - `hidapi::hidapi` is an alias for `hidapi::libusb`.
+If you're developing a cross-platform application and you are sure you need to use `libusb` backend on Linux, the simple way to achieve this is:
 ```cmake
-if(TARGET hidapi::hidraw)
-    target_link_libraries(my_project PRIVATE hidapi::hidraw)
+if(TARGET hidapi::libusb)
+    target_link_libraries(my_project PRIVATE hidapi::libusb)
 else()
     target_link_libraries(my_project PRIVATE hidapi::hidapi)
 endif()
@@ -170,18 +173,18 @@ When HIDAPI is built as a _subdirectory_ - **_none of the variables are marked f
 This is done to let the host project's developer decide what is important (what needs to be highlighted) and what's not.
 
 2) The default behavior/default value for some of the variables is a bit different:
-	- by default, none of HIDAPI targets are [installed](https://cmake.org/cmake/help/latest/command/install.html); if required, HIDAPI targets can be installed by host project _after_ including HIDAPI subdirectory (requires CMake 3.13 or later); **or**, the default installation can be enabled by setting `HIDAPI_INSTALL_TARGETS` variable _before_ including HIDAPI subdirectory, e.g.:
-		HIDAPI uses [GNUInstallDirs](https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html) to specify install locations. Variables like `CMAKE_INSTALL_LIBDIR` can be used to control HIDAPI's installation locations;
+	- by default, none of HIDAPI targets are [installed](https://cmake.org/cmake/help/latest/command/install.html); if required, HIDAPI targets can be installed by host project _after_ including HIDAPI subdirectory (requires CMake 3.13 or later); **or**, the default installation can be enabled by setting `HIDAPI_INSTALL_TARGETS` variable _before_ including HIDAPI subdirectory.
+		HIDAPI uses [GNUInstallDirs](https://cmake.org/cmake/help/latest/module/GNUInstallDirs.html) to specify install locations. Variables like `CMAKE_INSTALL_LIBDIR` can be used to control HIDAPI's installation locations. E.g.:
 		```cmake
 		# enable the installation if you need it
 		set(HIDAPI_INSTALL_TARGETS ON)
-		# change default installation locations if it makes sense for your target platform, etc.
+		# (optionally) change default installation locations if it makes sense for your target platform, etc.
 		set(CMAKE_INSTALL_LIBDIR "lib64")
 		add_subdirectory(hidapi)
 		```
 	- HIDAPI prints its version during the configuration when built as a standalone package; to enable this for subdirectory builds - set `HIDAPI_PRINT_VERSION` to TRUE before including HIDAPI;
 
-Available CMake targets after `add_subdirectory(hidapi)` _are the same as in case of [standalone build](#standalone-package-build)_, and a few additional one:
+Available CMake targets after `add_subdirectory(hidapi)` _are the same as in case of [standalone build](#standalone-package-build)_, and a few additional ones:
 - `hidapi_include` - the interface library; `hidapi::hidapi` is an alias of it;
 - `hidapi_winapi` - library target on Windows; `hidapi::winapi` is an alias of it;
 - `hidapi_darwin` - library target on macOS; `hidapi::darwin` is an alias of it;
