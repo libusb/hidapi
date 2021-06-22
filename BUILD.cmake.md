@@ -30,6 +30,8 @@ To build HIDAPI as a standalone package, you follow [general steps](https://cmak
 
 An example of building HIDAPI with CMake:
 ```sh
+# precondition: create a <build dir> somewhere on the filesystem (preferably outside of the HIDAPI source)
+# this is the place where all intermediate/build files are going to be located
 cd <build dir>
 # configure the build
 cmake <HIDAPI source dir>
