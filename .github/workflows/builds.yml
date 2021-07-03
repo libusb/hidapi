@@ -1,0 +1,148 @@
+name: GitHub Builds
+
+on: [push, pull_request]
+
+jobs:
+  macos-automake:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install build tools
+      run: brew install autoconf automake libtool
+    - name: Configure Automake
+      run: |
+        ./bootstrap
+        ./configure --prefix=$(pwd)/install
+    - name: Build Automake
+      run: |
+        make
+        make install
+    - name: Clean build
+      run: make clean
+    - name: Build Manual makefile
+      working-directory: mac
+      run: make -f Makefile-manual
+
+  macos-cmake:
+
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        path: hidapisrc
+    - name: Configure CMake
+      run: |
+        rm -rf build install
+        cmake -B build/shared -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/shared
+        cmake -B build/framework -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/framework -DCMAKE_FRAMEWORK=ON
+    - name: Build CMake Shared
+      working-directory: build/shared
+      run: make install
+    - name: Build CMake Framework
+      working-directory: build/framework
+      run: make install
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "install/shared/lib/libhidapi.dylib, install/shared/include/hidapi/hidapi.h, install/framework/lib/hidapi.framework/hidapi, install/framework/lib/hidapi.framework/Headers/hidapi.h"
+        allow_failure: true
+
+  ubuntu-cmake:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        path: hidapisrc
+    - name: Install dependencies
+      run: sudo apt install libudev-dev libusb-1.0-0-dev
+    - name: Configure CMake
+      run: |
+        rm -rf build install
+        cmake -B build/shared -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/shared
+        cmake -B build/static -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE
+    - name: Build CMake Shared
+      working-directory: build/shared
+      run: make install
+    - name: Build CMake Static
+      working-directory: build/static
+      run: make install
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "install/shared/lib/libhidapi-libusb.so, install/shared/lib/libhidapi-hidraw.so, install/shared/include/hidapi/hidapi.h, install/static/lib/libhidapi-libusb.a, install/static/lib/libhidapi-hidraw.a, install/static/include/hidapi/hidapi.h"
+        allow_failure: true
+
+  windows-cmake-msvc:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        path: hidapisrc
+    - name: Configure CMake
+      shell: cmd
+      run: |
+        RMDIR /Q /S build install
+        cmake -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
+    - name: Build CMake
+      working-directory: build
+      run: cmake --build . --target install
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
+        allow_failure: true
+
+  windows-cmake-nmake:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        path: hidapisrc
+    - name: Configure CMake
+      shell: cmd
+      run: |
+        RMDIR /Q /S build install
+        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake -G"NMake Makefiles" -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
+    - name: Build CMake
+      working-directory: build
+      shell: cmd
+      run: |
+        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        nmake install
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
+        allow_failure: true
+
+  windows-cmake-mingw:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        path: hidapisrc
+    - name: Configure CMake
+      shell: cmd
+      run: |
+        RMDIR /Q /S build install
+        cmake -G"MinGW Makefiles" -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
+    - name: Build CMake
+      working-directory: build
+      run: cmake --build . --target install
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "install/lib/libhidapi.dll.a, install/bin/libhidapi.dll, install/include/hidapi/hidapi.h"
+        allow_failure: true
