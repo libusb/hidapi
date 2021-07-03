@@ -179,7 +179,7 @@ set(BUILD_SHARED_LIBS FALSE) # HIDAPI as static library on all platforms
 add_subdirectory(hidapi)
 ```
 
-There is two important differences in the behavior of HIDAPI CMake build system when CMake is built as standalone package vs subdirectory build:
+There are several important differences in the behavior of HIDAPI CMake build system when CMake is built as standalone package vs subdirectory build:
 
 1) In _standalone build_ a number of standard and HIDAPI-specific variables are marked as _cache variables_ or _options_.
 This is done for convenience: when you're building HIDAPI as a standalone package and using tools like `cmake-gui` - those are highlighted as variables that can be changed and has some short description/documentation. E.g.:
@@ -200,6 +200,10 @@ This is done to let the host project's developer decide what is important (what 
 		add_subdirectory(hidapi)
 		```
 	- HIDAPI prints its version during the configuration when built as a standalone package; to enable this for subdirectory builds - set `HIDAPI_PRINT_VERSION` to TRUE before including HIDAPI;
+
+3) In a subdirectory build, HIDAPI _doesn't modify or set any of the CMake variables_ that may change the build behavior.
+    For instance, in a _standalone build_, if CMAKE_BUILD_TYPE or BUILD_SHARED_LIBS variables are not set, those are defaulted to "Release" and "TRUE" explicitly.
+    In a _subdirectory build_, even if not set, those variables remain unchanged, so a host project's developer has a full control over the HIDAPI build configuration.
 
 Available CMake targets after `add_subdirectory(hidapi)` _are the same as in case of [standalone build](#standalone-package-build)_, and a few additional ones:
 - `hidapi_include` - the interface library; `hidapi::hidapi` is an alias of it;
