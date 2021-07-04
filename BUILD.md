@@ -1,38 +1,16 @@
 # Building HIDAPI from Source
 
-## Table of content
+## Table of contents
 
-* [Intro](#intro)
 * [Prerequisites](#prerequisites)
     * [Linux](#linux)
     * [FreeBSD](#freebsd)
     * [Mac](#mac)
     * [Windows](#windows)
+* [Building](#building)
 * [Integrating hidapi directly into your source tree](#integrating-hidapi-directly-into-your-source-tree)
-* [Building the manual way on Unix platforms](#building-the-manual-way-on-unix-platforms)
-* [Building on Windows](#building-on-windows)
-
-## Intro
-
-For various reasons you may need to build HIDAPI on your own.
-
-It can be done in several different ways:
-- using [Autotools](BUILD.autotools.md);
-- using [CMake](BUILD.cmake.md);
-- using [manual makefiles](#building-the-manual-way-on-unix-platforms).
-
-**Autotools** build system is historically first mature build system for
-HIDAPI. Most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).
-
-**CMake** build system is de facto an industry standard for many open-source and proprietary projects and solutions.
-HIDAPI is one of the projects which uses the power of CMake for its advantage.
-More documentation is available in its separate README: [BUILD.cmake.md](BUILD.cmake.md).
-
-If you don't know where to start to build HIDAPI, we recommend starting with [CMake](BUILD.cmake.md) build.
 
 ## Prerequisites:
-
-Regardless of what build system system you choose to use, there are specific dependencies for each platform/backend.
 
 ### Linux:
 
@@ -66,6 +44,10 @@ On Mac make sure you have XCode installed and its Command Line Tools.
 On Windows you just need a compiler. You may use Visual Studio or Cygwin/MinGW,
 depending on which environment is best for your needs.
 
+## Building
+
+hidapi uses the CMake build system. Refer to [BUILD.cmake.md](BUILD.cmake.md) for details.
+
 ## Integrating HIDAPI directly into your source tree
 
 Instead of using one of the provided build systems, you may want to integrate
@@ -79,20 +61,6 @@ Check the manual makefiles for a simple example/reference of what are the depend
 
 NOTE: if your have a CMake-based project, you're likely be able to use
 HIDAPI directly as a subdirectory. Check [BUILD.cmake.md](BUILD.cmake.md) for details.
-
-## Building the manual way on Unix platforms
-
-Manual Makefiles are provided mostly to give the user an idea what it takes
-to build a program which embeds HIDAPI directly inside of it. These should
-really be used as examples only. If you want to build a system-wide shared
-library, use one of the build systems mentioned above.
-
-To build HIDAPI using the manual Makefiles, change to the directory
-of your platform and run make. For example, on Linux run:
-```sh
-cd linux/
-make -f Makefile-manual
-```
 
 ## Building on Windows
 
