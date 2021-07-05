@@ -707,6 +707,9 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 						/* Interface Number */
 						cur_dev->interface_number = interface_num;
+						
+						/* Bus Type */
+						cur_dev->bus_type = HID_API_BUS_USB;
 					}
 				} /* altsettings */
 			} /* interfaces */

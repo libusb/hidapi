@@ -793,6 +793,9 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					cur_dev->manufacturer_string = copy_udev_string(usb_dev, device_string_names[DEVICE_STRING_MANUFACTURER]);
 					cur_dev->product_string = copy_udev_string(usb_dev, device_string_names[DEVICE_STRING_PRODUCT]);
 
+					/* Bus Type */
+					cur_dev->bus_type = HID_API_BUS_USB;
+
 					/* Release Number */
 					str = udev_device_get_sysattr_value(usb_dev, "bcdDevice");
 					cur_dev->release_number = (str)? strtol(str, NULL, 16): 0x0;
@@ -810,10 +813,21 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					break;
 
 				case BUS_BLUETOOTH:
+					/* Manufacturer and Product strings */
+					cur_dev->manufacturer_string = wcsdup(L"");
+					cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
+
+					/* Bus Type */
+					cur_dev->bus_type = HID_API_BUS_BLUETOOTH;
+
+					break;
 				case BUS_I2C:
 					/* Manufacturer and Product strings */
 					cur_dev->manufacturer_string = wcsdup(L"");
 					cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
+
+					/* Bus Type */
+					cur_dev->bus_type = HID_API_BUS_I2C;
 
 					break;
 
@@ -859,6 +873,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					cur_dev->product_string = prev_dev->product_string? wcsdup(prev_dev->product_string): NULL;
 					cur_dev->usage_page = page;
 					cur_dev->usage = usage;
+					cur_dev->bus_type = prev_dev->bus_type;
 				}
 			}
 		}

@@ -100,6 +100,37 @@ extern "C" {
 		struct hid_device_;
 		typedef struct hid_device_ hid_device; /**< opaque hidapi structure */
 
+		/** @brief HID underlying bus types.
+
+			@ingroup API
+		*/
+		typedef enum {
+			/* Unknown bus type */
+			HID_API_BUS_UNKNOWN = 0x00,
+
+			/* USB bus
+			   Specifications:
+			   https://usb.org/hid */
+			HID_API_BUS_USB = 0x01,
+
+			/* Bluetooth or Bluetooth LE bus
+			   Specifications:
+			   https://www.bluetooth.com/specifications/specs/human-interface-device-profile-1-1-1/
+			   https://www.bluetooth.com/specifications/specs/hid-service-1-0/
+			   https://www.bluetooth.com/specifications/specs/hid-over-gatt-profile-1-0/ */
+			HID_API_BUS_BLUETOOTH = 0x02,
+
+			/* I2C bus
+			   Specifications:
+			   https://docs.microsoft.com/previous-versions/windows/hardware/design/dn642101(v=vs.85) */
+			HID_API_BUS_I2C = 0x03,
+
+			/* SPI bus
+			   Specifications:
+			   https://www.microsoft.com/download/details.aspx?id=103325 */
+			HID_API_BUS_SPI = 0x04,
+		} hid_bus_type;
+
 		/** hidapi info structure */
 		struct hid_device_info {
 			/** Platform-specific device path */
@@ -132,6 +163,8 @@ extern "C" {
 				* Valid on the Mac implementation if and only if the device
 				  is a USB HID device. */
 			int interface_number;
+			/** Underlying bus type */
+			hid_bus_type bus_type;
 
 			/** Pointer to the next device */
 			struct hid_device_info *next;
