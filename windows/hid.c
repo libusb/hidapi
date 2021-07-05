@@ -337,7 +337,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	/* Iterate over each device in the HID class, looking for the right one. */
 
 	for (;;) {
-		HANDLE write_handle = INVALID_HANDLE_VALUE;
+		HANDLE read_handle = INVALID_HANDLE_VALUE;
 		DWORD required_size = 0;
 		HIDD_ATTRIBUTES attrib;
 
@@ -398,11 +398,11 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 		//wprintf(L"HandleName: %s\n", device_interface_detail_data->DevicePath);
 
-		/* Open a handle to the device */
-		write_handle = open_device(device_interface_detail_data->DevicePath, FALSE);
+		/* Open read-only handle to the device */
+		read_handle = open_device(device_interface_detail_data->DevicePath, FALSE);
 
-		/* Check validity of write_handle. */
-		if (write_handle == INVALID_HANDLE_VALUE) {
+		/* Check validity of read_handle. */
+		if (read_handle == INVALID_HANDLE_VALUE) {
 			/* Unable to open the device. */
 			//register_error(dev, "CreateFile");
 			goto cont_close;
@@ -411,7 +411,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 		/* Get the Vendor ID and Product ID for this device. */
 		attrib.Size = sizeof(HIDD_ATTRIBUTES);
-		HidD_GetAttributes(write_handle, &attrib);
+		HidD_GetAttributes(read_handle, &attrib);
 		//wprintf(L"Product/Vendor: %x %x\n", attrib.ProductID, attrib.VendorID);
 
 		/* Check the VID/PID to see if we should add this
@@ -439,7 +439,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 			cur_dev = tmp;
 
 			/* Get the Usage Page and Usage for this device. */
-			res = HidD_GetPreparsedData(write_handle, &pp_data);
+			res = HidD_GetPreparsedData(read_handle, &pp_data);
 			if (res) {
 				nt_res = HidP_GetCaps(pp_data, &caps);
 				if (nt_res == HIDP_STATUS_SUCCESS) {
@@ -464,19 +464,19 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 			/* Serial Number */
 			wstr[0]= L'\0';
-			res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
+			res = HidD_GetSerialNumberString(read_handle, wstr, sizeof(wstr));
 			wstr[WSTR_LEN-1] = L'\0';
 			cur_dev->serial_number = _wcsdup(wstr);
 
 			/* Manufacturer String */
 			wstr[0]= L'\0';
-			res = HidD_GetManufacturerString(write_handle, wstr, sizeof(wstr));
+			res = HidD_GetManufacturerString(read_handle, wstr, sizeof(wstr));
 			wstr[WSTR_LEN-1] = L'\0';
 			cur_dev->manufacturer_string = _wcsdup(wstr);
 
 			/* Product String */
 			wstr[0]= L'\0';
-			res = HidD_GetProductString(write_handle, wstr, sizeof(wstr));
+			res = HidD_GetProductString(read_handle, wstr, sizeof(wstr));
 			wstr[WSTR_LEN-1] = L'\0';
 			cur_dev->product_string = _wcsdup(wstr);
 
@@ -508,7 +508,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		}
 
 cont_close:
-		CloseHandle(write_handle);
+		CloseHandle(read_handle);
 cont:
 		/* We no longer need the detail data. It can be freed */
 		free(device_interface_detail_data);
