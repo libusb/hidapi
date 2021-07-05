@@ -110,6 +110,7 @@ static struct hid_api_version api_version = {
 	typedef void* PHIDP_PREPARSED_DATA;
 	#define HIDP_STATUS_SUCCESS 0x110000
 
+	typedef void (__stdcall *HidD_GetHidGuid_)(LPGUID hid_guid);
 	typedef BOOLEAN (__stdcall *HidD_GetAttributes_)(HANDLE device, PHIDD_ATTRIBUTES attrib);
 	typedef BOOLEAN (__stdcall *HidD_GetSerialNumberString_)(HANDLE device, PVOID buffer, ULONG buffer_len);
 	typedef BOOLEAN (__stdcall *HidD_GetManufacturerString_)(HANDLE handle, PVOID buffer, ULONG buffer_len);
@@ -123,6 +124,7 @@ static struct hid_api_version api_version = {
 	typedef NTSTATUS (__stdcall *HidP_GetCaps_)(PHIDP_PREPARSED_DATA preparsed_data, HIDP_CAPS *caps);
 	typedef BOOLEAN (__stdcall *HidD_SetNumInputBuffers_)(HANDLE handle, ULONG number_buffers);
 
+	static HidD_GetHidGuid_ HidD_GetHidGuid;
 	static HidD_GetAttributes_ HidD_GetAttributes;
 	static HidD_GetSerialNumberString_ HidD_GetSerialNumberString;
 	static HidD_GetManufacturerString_ HidD_GetManufacturerString;
@@ -230,6 +232,7 @@ static int lookup_functions()
 # pragma GCC diagnostic ignored "-Wcast-function-type"
 #endif
 #define RESOLVE(x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) return -1;
+		RESOLVE(HidD_GetHidGuid);
 		RESOLVE(HidD_GetAttributes);
 		RESOLVE(HidD_GetSerialNumberString);
 		RESOLVE(HidD_GetManufacturerString);
@@ -311,9 +314,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	BOOL res;
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
-
-	/* Hard-coded GUID retreived by HidD_GetHidGuid */
-	GUID InterfaceClassGuid = {0x4d1e55b2, 0xf16f, 0x11cf, {0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30} };
+	GUID interface_class_guid;
 
 	/* Windows objects for interacting with the driver. */
 	SP_DEVINFO_DATA devinfo_data;
@@ -326,13 +327,17 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	if (hid_init() < 0)
 		return NULL;
 
+	/* Retrieve HID Interface Class GUID
+	   https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
+	HidD_GetHidGuid(&interface_class_guid);
+
 	/* Initialize the Windows objects. */
 	memset(&devinfo_data, 0x0, sizeof(devinfo_data));
 	devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
 	device_interface_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
 	/* Get information for all the devices belonging to the HID class. */
-	device_info_set = SetupDiGetClassDevsA(&InterfaceClassGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+	device_info_set = SetupDiGetClassDevsA(&interface_class_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 
 	/* Iterate over each device in the HID class, looking for the right one. */
 
@@ -343,7 +348,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 		res = SetupDiEnumDeviceInterfaces(device_info_set,
 			NULL,
-			&InterfaceClassGuid,
+			&interface_class_guid,
 			device_index,
 			&device_interface_data);
 
