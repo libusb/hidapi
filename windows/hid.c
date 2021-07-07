@@ -207,8 +207,8 @@ static void register_error(hid_device *dev, const char *op)
 	   end of the message. Thanks Microsoft! */
 	ptr = msg;
 	while (*ptr) {
-		if (*ptr == '\r') {
-			*ptr = 0x0000;
+		if (*ptr == L'\r') {
+			*ptr = L'\0';
 			break;
 		}
 		ptr++;
@@ -463,28 +463,22 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 				cur_dev->path = NULL;
 
 			/* Serial Number */
-			wstr[0]= 0x0000;
+			wstr[0]= L'\0';
 			res = HidD_GetSerialNumberString(write_handle, wstr, sizeof(wstr));
-			wstr[WSTR_LEN-1] = 0x0000;
-			if (res) {
-				cur_dev->serial_number = _wcsdup(wstr);
-			}
+			wstr[WSTR_LEN-1] = L'\0';
+			cur_dev->serial_number = _wcsdup(wstr);
 
 			/* Manufacturer String */
-			wstr[0]= 0x0000;
+			wstr[0]= L'\0';
 			res = HidD_GetManufacturerString(write_handle, wstr, sizeof(wstr));
-			wstr[WSTR_LEN-1] = 0x0000;
-			if (res) {
-				cur_dev->manufacturer_string = _wcsdup(wstr);
-			}
+			wstr[WSTR_LEN-1] = L'\0';
+			cur_dev->manufacturer_string = _wcsdup(wstr);
 
 			/* Product String */
-			wstr[0]= 0x0000;
+			wstr[0]= L'\0';
 			res = HidD_GetProductString(write_handle, wstr, sizeof(wstr));
-			wstr[WSTR_LEN-1] = 0x0000;
-			if (res) {
-				cur_dev->product_string = _wcsdup(wstr);
-			}
+			wstr[WSTR_LEN-1] = L'\0';
+			cur_dev->product_string = _wcsdup(wstr);
 
 			/* VID/PID */
 			cur_dev->vendor_id = attrib.VendorID;
