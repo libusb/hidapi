@@ -314,64 +314,6 @@ static wchar_t *dup_wcs(const wchar_t *s)
 	return ret;
 }
 
-/* hidapi_IOHIDDeviceGetService()
- *
- * Return the io_service_t corresponding to a given IOHIDDeviceRef, either by:
- * - on OS X 10.6 and above, calling IOHIDDeviceGetService()
- * - on OS X 10.5, extract it from the IOHIDDevice struct
- */
-static io_service_t hidapi_IOHIDDeviceGetService(IOHIDDeviceRef device)
-{
-	static void *iokit_framework = NULL;
-	typedef io_service_t (*dynamic_IOHIDDeviceGetService_t)(IOHIDDeviceRef device);
-	static dynamic_IOHIDDeviceGetService_t dynamic_IOHIDDeviceGetService = NULL;
-
-	/* Use dlopen()/dlsym() to get a pointer to IOHIDDeviceGetService() if it exists.
-	 * If any of these steps fail, dynamic_IOHIDDeviceGetService will be left NULL
-	 * and the fallback method will be used.
-	 */
-	if (iokit_framework == NULL) {
-		iokit_framework = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
-
-		if (iokit_framework != NULL)
-			dynamic_IOHIDDeviceGetService = (dynamic_IOHIDDeviceGetService_t) dlsym(iokit_framework, "IOHIDDeviceGetService");
-	}
-
-	if (dynamic_IOHIDDeviceGetService != NULL) {
-		/* Running on OS X 10.6 and above: IOHIDDeviceGetService() exists */
-		return dynamic_IOHIDDeviceGetService(device);
-	}
-	else
-	{
-		/* Running on OS X 10.5: IOHIDDeviceGetService() doesn't exist.
-		 *
-		 * Be naughty and pull the service out of the IOHIDDevice.
-		 * IOHIDDevice is an opaque struct not exposed to applications, but its
-		 * layout is stable through all available versions of OS X.
-		 * Tested and working on OS X 10.5.8 i386, x86_64, and ppc.
-		 */
-		struct IOHIDDevice_internal {
-			/* The first field of the IOHIDDevice struct is a
-			 * CFRuntimeBase (which is a private CF struct).
-			 *
-			 * a, b, and c are the 3 fields that make up a CFRuntimeBase.
-			 * See http://opensource.apple.com/source/CF/CF-476.18/CFRuntime.h
-			 *
-			 * The second field of the IOHIDDevice is the io_service_t we're looking for.
-			 */
-			uintptr_t a;
-			uint8_t b[4];
-#if __LP64__
-			uint32_t c;
-#endif
-			io_service_t service;
-		};
-		struct IOHIDDevice_internal *tmp = (struct IOHIDDevice_internal *) device;
-
-		return tmp->service;
-	}
-}
-
 /* Initialize the IOHIDManager. Return 0 for success and -1 for failure. */
 static int init_hid_manager(void)
 {
@@ -460,7 +402,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	cur_dev->next = NULL;
 
 	/* Fill in the path (IOService plane) */
-	iokit_dev = hidapi_IOHIDDeviceGetService(dev);
+	iokit_dev = IOHIDDeviceGetService(dev);
 	res = IORegistryEntryGetPath(iokit_dev, kIOServicePlane, path);
 	if (res == KERN_SUCCESS)
 		cur_dev->path = strdup(path);
@@ -898,7 +840,13 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 	const unsigned char *data_to_send = data;
 	CFIndex length_to_send = length;
 	IOReturn res;
-	const unsigned char report_id = data[0];
+	unsigned char report_id;
+
+	if (!data || (length == 0)) {
+		return -1;
+	}
+
+	report_id = data[0];
 
 	if (report_id == 0x0) {
 		/* Not using numbered Reports.

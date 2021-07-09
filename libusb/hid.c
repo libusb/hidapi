@@ -484,15 +484,29 @@ err:
 	return str;
 }
 
-static char *make_path(libusb_device *dev, int interface_number)
+static char *make_path(libusb_device *dev, int interface_number, int config_number)
 {
-	char str[64];
-	snprintf(str, sizeof(str), "%04x:%04x:%02x",
-		libusb_get_bus_number(dev),
-		libusb_get_device_address(dev),
-		interface_number);
-	str[sizeof(str)-1] = '\0';
+	char str[64]; /* max length "000-000.000.000.000.000.000.000:000.000" */
+	/* Note that USB3 port count limit is 7; use 8 here for alignment */
+	uint8_t port_numbers[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+	int num_ports = libusb_get_port_numbers(dev, port_numbers, 8);
 
+	if (num_ports > 0) {
+		int n = snprintf(str, sizeof("000-000"), "%u-%u", libusb_get_bus_number(dev), port_numbers[0]);
+		for (uint8_t i = 1; i < num_ports; i++) {
+			n += snprintf(&str[n], sizeof(".000"), ".%u", port_numbers[i]);
+		}
+		n += snprintf(&str[n], sizeof(":000.000"), ":%u.%u", (uint8_t)config_number, (uint8_t)interface_number);
+		str[n] = '\0';
+	} else {
+		/* USB3.0 specs limit number of ports to 7 and buffer size here is 8 */
+		if (num_ports == LIBUSB_ERROR_OVERFLOW) {
+			LOG("make_path() failed. buffer overflow error\n");
+		} else {
+			LOG("make_path() failed. unknown error\n");
+		}
+		str[0] = '\0';
+	}
 	return strdup(str);
 }
 
@@ -590,11 +604,22 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 							/* Fill out the record */
 							cur_dev->next = NULL;
-							cur_dev->path = make_path(dev, interface_num);
+							cur_dev->path = make_path(dev, interface_num, conf_desc->bConfigurationValue);
 
 							res = libusb_open(dev, &handle);
 
 							if (res >= 0) {
+#ifdef __ANDROID__
+								/* There is (a potential) libusb Android backend, in which
+								   device descriptor is not accurate up until the device is opened.
+								   https://github.com/libusb/libusb/pull/874#discussion_r632801373
+								   A workaround is to re-read the descriptor again.
+								   Even if it is not going to be accepted into libusb master,
+								   having it here won't do any harm, since reading the device descriptor
+								   is as cheap as copy 18 bytes of data. */
+								libusb_get_device_descriptor(dev, &desc);
+#endif
+
 								/* Serial Number */
 								if (desc.iSerialNumber > 0)
 									cur_dev->serial_number =
@@ -915,7 +940,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 				const struct libusb_interface_descriptor *intf_desc;
 				intf_desc = &intf->altsetting[k];
 				if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID) {
-					char *dev_path = make_path(usb_dev, intf_desc->bInterfaceNumber);
+					char *dev_path = make_path(usb_dev, intf_desc->bInterfaceNumber, conf_desc->bConfigurationValue);
 					if (!strcmp(dev_path, path)) {
 						/* Matched Paths. Open this device */
 
@@ -927,6 +952,12 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 							break;
 						}
 						good_open = 1;
+
+#ifdef __ANDROID__
+						/* See remark in hid_enumerate */
+						libusb_get_device_descriptor(usb_dev, &desc);
+#endif
+
 #ifdef DETACH_KERNEL_DRIVER
 						/* Detach the kernel driver, but only if the
 						   device is managed by the kernel */
@@ -1026,8 +1057,14 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
 	int res;
-	int report_number = data[0];
+	int report_number;
 	int skipped_report_id = 0;
+
+	if (!data || (length ==0)) {
+		return -1;
+	}
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		data++;
