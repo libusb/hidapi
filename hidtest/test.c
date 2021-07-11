@@ -86,7 +86,7 @@ int main(int argc, char* argv[])
 			hid_close(device);
 		}
 		else {
-			printf("  Descriptor: not available.\n");
+			printf("  Report Descriptor: not available.\n");
 		}
 
 		printf("\n");
