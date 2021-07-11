@@ -67,7 +67,7 @@ int main(int argc, char* argv[])
 		if (device) {
 			unsigned char buf[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
 
-			printf("  Descriptor: ");
+			printf("  Report Descriptor: ");
 			res = hid_get_report_descriptor(device, buf, sizeof(buf));
 			if (res < 0) {
 				printf("error getting.");
