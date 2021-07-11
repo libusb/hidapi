@@ -1149,6 +1149,30 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	return 0;
 }
 
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
+{
+	CFTypeRef ref = IOHIDDeviceGetProperty(dev->device_handle, CFSTR(kIOHIDReportDescriptorKey));
+	if (ref != NULL && CFGetTypeID(ref) == CFDataGetTypeID()) {
+		CFDataRef report_descriptor = (CFDataRef) ref;
+		const UInt8 *descriptor_buf = CFDataGetBytePtr(report_descriptor);
+		CFIndex descriptor_buf_len = CFDataGetLength(report_descriptor);
+		size_t copy_len = (size_t) descriptor_buf_len;
+
+		if (descriptor_buf == NULL || descriptor_buf_len < 0) {
+			return -1;
+		}
+
+		if (buf_size < copy_len) {
+			copy_len = buf_size;
+		}
+
+		memcpy(buf, descriptor_buf, copy_len);
+		return copy_len;
+	}
+	else {
+		return -1;
+	}
+}
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {

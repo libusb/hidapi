@@ -62,6 +62,33 @@ int main(int argc, char* argv[])
 		printf("  Release:      %hx\n", cur_dev->release_number);
 		printf("  Interface:    %d\n",  cur_dev->interface_number);
 		printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
+
+		hid_device *device = hid_open_path(cur_dev->path);
+		if (device) {
+			unsigned char buf[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+
+			printf("  Descriptor: ");
+			res = hid_get_report_descriptor(device, buf, sizeof(buf));
+			if (res < 0) {
+				printf("error getting.");
+			}
+			else {
+				printf("(%d bytes)", res);
+			}
+			for (int i = 0; i < res; i++) {
+				if (i % 10 == 0) {
+					printf("\n");
+				}
+				printf("0x%02x, ", buf[i]);
+			}
+			printf("\n");
+
+			hid_close(device);
+		}
+		else {
+			printf("  Descriptor: not available.\n");
+		}
+
 		printf("\n");
 		cur_dev = cur_dev->next;
 	}
