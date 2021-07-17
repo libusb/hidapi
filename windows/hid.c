@@ -868,7 +868,13 @@ static void rd_determine_value_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP_
 
 		if (HidP_SetData(report_type, &dummy_hidp_data, &dummy_datalength, pp_data, dummy_report, max_report_length) == HIDP_STATUS_SUCCESS) {
 			*(first_bit) = rd_find_first_one_bit(dummy_report, max_report_length);
-			*(last_bit) = *(first_bit)+(value_cap->ReportCount * value_cap->BitSize) - 1;
+
+			if (!value_cap->IsRange) {
+				*(last_bit) = *(first_bit)+(value_cap->ReportCount * value_cap->BitSize) - 1;
+			}
+			else {
+				*(last_bit) = *(first_bit)+((value_cap->Range.DataIndexMax - value_cap->Range.DataIndexMin + 1) * value_cap->BitSize) - 1;
+			}
 		}
 	}
 	else {
@@ -884,7 +890,12 @@ static void rd_determine_value_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP_
 
 		if (HidP_SetUsageValueArray(report_type, value_cap->UsagePage, value_cap->LinkCollection, value_cap->Range.UsageMin, usage_value, number_of_dummy_usage_bits / 8, pp_data, dummy_report, max_report_length) == HIDP_STATUS_SUCCESS) {
 			*(first_bit) = rd_find_first_one_bit(dummy_report, max_report_length);
-			*(last_bit) = *(first_bit)+((value_cap->Range.DataIndexMax - value_cap->Range.DataIndexMin + 1) * value_cap->BitSize) - 1;
+			if (!value_cap->IsRange) {
+				*(last_bit) = *(first_bit)+(value_cap->ReportCount * value_cap->BitSize) - 1;
+			}
+			else {
+				*(last_bit) = *(first_bit)+((value_cap->Range.DataIndexMax - value_cap->Range.DataIndexMin + 1) * value_cap->BitSize) - 1;
+			}
 		}
 		free(usage_value);
 		// EXPERIMENTAL - No device available for test
@@ -2344,15 +2355,12 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						printf("Usage Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMin);
 						rd_write_short_item(rd_local_usage_maximum, value_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
 						printf("Usage Maximum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMax);
+						// In case of an Usage  Range array overwrite Report Count
+						value_caps[rt_idx][caps_idx].ReportCount = value_caps[rt_idx][caps_idx].Range.DataIndexMax - value_caps[rt_idx][caps_idx].Range.DataIndexMin + 1;
 					}
 					else {
 						rd_write_short_item(rd_local_usage, value_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
 						printf("Usage (%d)\n", value_caps[rt_idx][caps_idx].NotRange.Usage);
-					}
-
-					if ((value_caps[rt_idx][caps_idx].BitField & 0x02) != 0x02) {
-						// In case of an value array overwrite Report Count
-						value_caps[rt_idx][caps_idx].ReportCount = value_caps[rt_idx][caps_idx].Range.DataIndexMax - value_caps[rt_idx][caps_idx].Range.DataIndexMin + 1;
 					}
 
 					// Print only local report items for each cap, if ReportCount > 1
