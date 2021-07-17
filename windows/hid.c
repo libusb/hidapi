@@ -716,7 +716,7 @@ static void rd_determine_button_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP
 
 		int report_count = -1;
 
-		for (ULONG report_count_idx = 0; report_count_idx <= (button_cap->Range.UsageMax - button_cap->Range.UsageMin); report_count_idx++) {
+		for (ULONG report_count_idx = 0; report_count_idx <= (ULONG)(button_cap->Range.UsageMax - button_cap->Range.UsageMin); report_count_idx++) {
 
 			for (unsigned int i = 1; i < max_report_length; i++) {
 				dummy_report[i] = 0x00;
@@ -730,6 +730,7 @@ static void rd_determine_button_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP
 			status = HidP_SetUsages(report_type, button_cap->UsagePage, button_cap->LinkCollection, usage_list, &usage_len, pp_data, dummy_report, max_report_length);
 			free(usage_list);
 			if (status == HIDP_STATUS_BUFFER_TOO_SMALL) {
+				printf("HIDP_STATUS_BUFFER_TOO_SMALL\n");
 				report_count = report_count_idx;
 				break;
 			}
@@ -798,6 +799,9 @@ static void rd_determine_button_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP
 			if (status == HIDP_STATUS_SUCCESS) {
 				first_element_last_bit = rd_find_last_one_bit(dummy_report, max_report_length);
 			}
+			else {
+				printf("first_element_last_bit detection failed: %d", status);
+			}
 			
 
 			// fill first array element with data (first usage => UsageMax-1)
@@ -814,6 +818,9 @@ static void rd_determine_button_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP
 			status = HidP_SetUsages(report_type, button_cap->UsagePage, button_cap->LinkCollection, &usage_list[0], &usage_len, pp_data, dummy_report, max_report_length);
 			if (status == HIDP_STATUS_SUCCESS) {
 				second_element_last_bit = rd_find_last_one_bit(dummy_report, max_report_length);
+			}
+			else {
+				printf("second_element_last_bit detection failed: %d", status);
 			}
 			int bit_distance_between_array_elements = second_element_last_bit - first_element_last_bit;
 			*(last_bit) = *(first_bit)+(report_count * bit_distance_between_array_elements) - 1;
@@ -875,9 +882,9 @@ static void rd_determine_value_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP_
 
 		for (int i = 0; i < number_of_dummy_usage_bits / 8; i++) { usage_value[i] = 0xFF; }
 
-		if (HidP_SetUsageValueArray(report_type, value_cap->UsagePage, value_cap->LinkCollection, value_cap->NotRange.Usage, usage_value, number_of_dummy_usage_bits / 8, pp_data, dummy_report, max_report_length) == HIDP_STATUS_SUCCESS) {
+		if (HidP_SetUsageValueArray(report_type, value_cap->UsagePage, value_cap->LinkCollection, value_cap->Range.UsageMin, usage_value, number_of_dummy_usage_bits / 8, pp_data, dummy_report, max_report_length) == HIDP_STATUS_SUCCESS) {
 			*(first_bit) = rd_find_first_one_bit(dummy_report, max_report_length);
-			*(last_bit) = *(first_bit)+(value_cap->ReportCount * value_cap->BitSize) - 1;
+			*(last_bit) = *(first_bit)+((value_cap->Range.DataIndexMax - value_cap->Range.DataIndexMin + 1) * value_cap->BitSize) - 1;
 		}
 		free(usage_value);
 		// EXPERIMENTAL - No device available for test
@@ -2331,7 +2338,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						last_usage_page = value_caps[rt_idx][caps_idx].UsagePage;
 					}
 
-					// Print only local report items for each cap, if ReportCount > 1
+
 					if (value_caps[rt_idx][caps_idx].IsRange) {
 						rd_write_short_item(rd_local_usage_minimum, value_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
 						printf("Usage Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMin);
@@ -2343,6 +2350,12 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						printf("Usage (%d)\n", value_caps[rt_idx][caps_idx].NotRange.Usage);
 					}
 
+					if ((value_caps[rt_idx][caps_idx].BitField & 0x02) != 0x02) {
+						// In case of an value array overwrite Report Count
+						value_caps[rt_idx][caps_idx].ReportCount = value_caps[rt_idx][caps_idx].Range.DataIndexMax - value_caps[rt_idx][caps_idx].Range.DataIndexMin + 1;
+					}
+
+					// Print only local report items for each cap, if ReportCount > 1
 					if ((main_item_list->next != NULL) &&
 						(main_item_list->next->MainItemType == rt_idx) &&
 						(main_item_list->next->TypeOfNode == rd_item_node_value) &&
