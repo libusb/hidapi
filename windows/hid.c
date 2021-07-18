@@ -1890,9 +1890,13 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 
 			// Fill the lookup table where caps exist
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
-				for (USHORT caps_idx = 0; caps_idx < value_caps_len[rt_idx]; caps_idx++) {
+				for (USHORT caps_idx = 0; caps_idx < pp_data->caps_info[rt_idx].NumberOfCaps; caps_idx++) {
 					int first_bit, last_bit;
-					rd_determine_value_bitpositions(rt_idx, &value_caps[rt_idx][caps_idx], &first_bit, &last_bit, max_datalist_len[rt_idx], pp_data);
+					//rd_determine_value_bitpositions(rt_idx, &value_caps[rt_idx][caps_idx], &first_bit, &last_bit, max_datalist_len[rt_idx], pp_data);
+					first_bit = (pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].BytePosition - 1) * 8 +
+						         pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].BitPosition;
+					last_bit = first_bit + pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].BitSize *
+						                   pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].ReportCount - 1;
 					if (coll_bit_range[value_caps[rt_idx][caps_idx].LinkCollection][value_caps[rt_idx][caps_idx].ReportID][rt_idx]->FirstBit == -1 ||
 						coll_bit_range[value_caps[rt_idx][caps_idx].LinkCollection][value_caps[rt_idx][caps_idx].ReportID][rt_idx]->FirstBit > first_bit) {
 						coll_bit_range[value_caps[rt_idx][caps_idx].LinkCollection][value_caps[rt_idx][caps_idx].ReportID][rt_idx]->FirstBit = first_bit;
@@ -2100,7 +2104,11 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 				for (USHORT caps_idx = 0; caps_idx < value_caps_len[rt_idx]; caps_idx++) {
 					struct rd_main_item_node* coll_begin = coll_begin_lookup[value_caps[rt_idx][caps_idx].LinkCollection];
 					int first_bit, last_bit;
-					rd_determine_value_bitpositions(rt_idx, &value_caps[rt_idx][caps_idx], &first_bit, &last_bit, max_datalist_len[rt_idx], pp_data);
+					//rd_determine_value_bitpositions(rt_idx, &value_caps[rt_idx][caps_idx], &first_bit, &last_bit, max_datalist_len[rt_idx], pp_data);
+					first_bit = (pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].BytePosition - 1) * 8 +
+						pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].BitPosition;
+					last_bit = first_bit + pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].BitSize *
+						pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].ReportCount - 1;
 
 					for (int child_idx = 0; child_idx < coll_number_of_direct_childs[value_caps[rt_idx][caps_idx].LinkCollection]; child_idx++) {
 						// Determine in which section before/between/after child collection the item should be inserted
