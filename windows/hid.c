@@ -151,8 +151,7 @@ static struct hid_api_version api_version = {
 		UCHAR Reserved[3];
 		ULONG BitField; ///< Specifies the data part of the global item.
 	} HIDP_UNKNOWN_TOKEN, * PHIDP_UNKNOWN_TOKEN;
-	static_assert(sizeof(HIDP_UNKNOWN_TOKEN) == 8, "Unexpected structure size");
-
+	
 #define HIDP_STATUS_SUCCESS 0x110000
 #define	HIDP_STATUS_NULL 0x80110001
 #define HIDP_STATUS_INVALID_PREPARSED_DATA 0xc0110001
@@ -250,8 +249,7 @@ static struct hid_api_version api_version = {
 		ULONG   UnitsExp;
 
 	} hid_pp_cap, * phid_pp_cap;
-	static_assert(sizeof(hid_pp_cap) == 104, "Unexpected structure size");
-
+	
 	typedef struct _hid_preparsed_data {
 		UCHAR MagicKey[8];
 		USAGE Usage;
@@ -262,15 +260,15 @@ static struct hid_api_version api_version = {
 		hid_pp_caps_info caps_info[3];
 
 		USHORT FirstByteOfLinkCollectionArray;
-		USHORT SizeOfLinkCollectionArray;
+		USHORT NumberLinkCollectionNodes;
 
-		union {
+		// MINGW: flexible array member in union not supported - but works with MSVC
+		//union {
 			hid_pp_cap caps[];
-			UCHAR LinkCollectionArray[];
-		};
+			//UCHAR LinkCollectionArray[];
+		//};
 
 	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
-	//static_assert(sizeof(HIDP_PREPARSED_DATA) == 44, "Unexpected structure size");
 
 	typedef BOOLEAN (__stdcall *HidD_GetAttributes_)(HANDLE device, PHIDD_ATTRIBUTES attrib);
 	typedef BOOLEAN (__stdcall *HidD_GetSerialNumberString_)(HANDLE device, PVOID buffer, ULONG buffer_len);
