@@ -2413,13 +2413,36 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].ReportCount = pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].Range.DataIndexMax - pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].Range.DataIndexMin + 1;
 					}
 
+					// LogicalMin and LogicalMax depends on, if it's a Button or Value cap
+					int LogicalMin, LogicalMax;
+					if (pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].IsButtonCap) {
+						// Button
+						if ((pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].Button.LogicalMin == 0) &&
+							(pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].Button.LogicalMax == 0)) {
+							// Single Button has always zero in pp_data
+							LogicalMin = 0;
+							LogicalMax = 1;
+						}
+						else {
+							// Button array has LogicMin/Max defined
+							LogicalMin = pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].Button.LogicalMin;
+							LogicalMax = pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].Button.LogicalMax;
+						}
+					}
+					else {
+						// Value cap has LogicMin/Max always defined
+						LogicalMin = pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMin;
+						LogicalMax = pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMax;
+					}
+
+
 					// Print only local report items for each cap, if ReportCount > 1
 					if ((main_item_list->next != NULL) &&
 						(main_item_list->next->MainItemType == rt_idx) &&
 						(main_item_list->next->TypeOfNode == rd_item_node_value) &&
 						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].UsagePage == pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].UsagePage) &&
-						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].LogicalMin == pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMin) &&
-						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].LogicalMax == pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMax) &&
+						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].LogicalMin == LogicalMin) &&
+						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].LogicalMax == LogicalMax) &&
 						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].PhysicalMin == pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.PhysicalMin) &&
 						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].PhysicalMax == pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.PhysicalMax) &&
 						(value_caps[main_item_list->next->MainItemType][main_item_list->next->CapsIndex].UnitsExp == pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].UnitsExp) &&
@@ -2435,11 +2458,11 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					}
 					else {
 
-						rd_write_short_item(rd_global_logical_minimum, pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMin, &byte_list);
-						printf("Logical Minimum (%d)\n", pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMin);
+						rd_write_short_item(rd_global_logical_minimum, LogicalMin, &byte_list);
+						printf("Logical Minimum (%d)\n", LogicalMin);
 
-						rd_write_short_item(rd_global_logical_maximum, pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMax, &byte_list);
-						printf("Logical Maximum (%d)\n", pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.LogicalMax);
+						rd_write_short_item(rd_global_logical_maximum, LogicalMax, &byte_list);
+						printf("Logical Maximum (%d)\n", LogicalMax);
 
 						if ((last_physical_min != pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.PhysicalMin) ||
 							(last_physical_max != pp_data->caps[pp_data->caps_info[rt_idx].FirstCap + caps_idx].NotButton.PhysicalMax)) {
