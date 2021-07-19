@@ -640,11 +640,11 @@ static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int las
 
 static struct rd_main_item_node* rd_insert_main_item_node(int search_bit, int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
 	struct rd_main_item_node* new_list_node;
-	// Determine last node in the list
+	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit is greater or equal the search bit
 	
 	while (((*list)->next->MainItemType != rd_collection) &&
 		   ((*list)->next->MainItemType != rd_collection_end) &&
-		   !(((*list)->next->FirstBit > search_bit) &&
+		   !(((*list)->next->LastBit >= search_bit) &&
 		   ((*list)->next->ReportID == report_id) &&
 		   ((*list)->next->MainItemType == main_item_type))
 		)
@@ -1697,10 +1697,8 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					}
 				}
 
-				struct rd_main_item_node* list;
-				list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
-				list = main_item_list; // List root
-
+				struct rd_main_item_node* list = main_item_list; // List root;
+				
 				while (list->next != NULL)
 				{
 					if ((list->MainItemType >= rd_input) &&
