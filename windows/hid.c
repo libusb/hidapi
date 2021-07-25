@@ -640,7 +640,7 @@ static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int las
 
 static struct rd_main_item_node* rd_insert_main_item_node(int search_bit, int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
 	struct rd_main_item_node* new_list_node;
-	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit is greater or equal the search bit
+	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
 	
 	while (((*list)->next->MainItemType != rd_collection) &&
 		   ((*list)->next->MainItemType != rd_collection_end) &&
@@ -1720,7 +1720,11 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						if (last_bit_position[rt_idx][reportid_idx] != -1) {
 							int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 							if (padding < 8) {
-								rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, rt_idx, reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+								// Insert padding item after item referenced in last_report_item_lookup
+								struct rd_main_item_node* next_item = last_report_item_lookup[rt_idx][reportid_idx]->next;
+								last_report_item_lookup[rt_idx][reportid_idx]->next = NULL;
+								rd_append_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, rt_idx, reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+								last_report_item_lookup[rt_idx][reportid_idx]->next->next = next_item;
 							}
 						}
 					}
