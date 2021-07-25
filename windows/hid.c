@@ -1453,7 +1453,20 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 				for (USHORT caps_idx = pp_data->caps_info[rt_idx].FirstCap; caps_idx < pp_data->caps_info[rt_idx].LastCap; caps_idx++) {
 					int first_bit, last_bit;
-					first_bit = (pp_data->caps[ + caps_idx].BytePosition - 1) * 8 +
+					printf("DEBUG:ReportType %d\n", rt_idx);
+					printf("DEBUG:BytePosition %d\n", pp_data->caps[caps_idx].BytePosition);
+					printf("DEBUG:BitPosition %d\n", pp_data->caps[caps_idx].BitPosition);
+					printf("DEBUG:BitSize %d\n", pp_data->caps[caps_idx].BitSize);
+					printf("DEBUG:ReportCount %d\n", pp_data->caps[caps_idx].ReportCount);
+					printf("DEBUG:ReportID %d\n", pp_data->caps[caps_idx].ReportID);
+					printf("DEBUG:LinkUsage %d\n", pp_data->caps[caps_idx].LinkUsage);
+					printf("DEBUG:IsMultipleItemsForArray %d\n", pp_data->caps[caps_idx].IsMultipleItemsForArray);
+					printf("DEBUG:NextBytePosition %d\n", pp_data->caps[caps_idx].NextBytePosition);
+					printf("DEBUG:IsAlias %d\n", pp_data->caps[caps_idx].IsAlias);
+					printf("DEBUG:IsRange %d\n", pp_data->caps[caps_idx].IsRange);
+					printf("DEBUG:IsPadding %d\n", pp_data->caps[caps_idx].IsPadding);
+					printf("DEBUG:BitField %x\n", pp_data->caps[caps_idx].BitField);
+					first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8 +
 						         pp_data->caps[caps_idx].BitPosition;
 					last_bit = first_bit + pp_data->caps[caps_idx].BitSize *
 						                   pp_data->caps[caps_idx].ReportCount - 1;
