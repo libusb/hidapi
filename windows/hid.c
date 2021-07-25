@@ -1459,7 +1459,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					printf("DEBUG:BitSize %d\n", pp_data->caps[caps_idx].BitSize);
 					printf("DEBUG:ReportCount %d\n", pp_data->caps[caps_idx].ReportCount);
 					printf("DEBUG:ReportID %d\n", pp_data->caps[caps_idx].ReportID);
-					printf("DEBUG:LinkUsage %d\n", pp_data->caps[caps_idx].LinkUsage);
+					printf("DEBUG:NotRange.Usage %d\n", pp_data->caps[caps_idx].NotRange.Usage);
 					printf("DEBUG:IsMultipleItemsForArray %d\n", pp_data->caps[caps_idx].IsMultipleItemsForArray);
 					printf("DEBUG:NextBytePosition %d\n", pp_data->caps[caps_idx].NextBytePosition);
 					printf("DEBUG:IsAlias %d\n", pp_data->caps[caps_idx].IsAlias);
@@ -1718,7 +1718,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						(list->MainItemType <= rd_feature)) {
 						// INPUT, OUTPUT or FEATURE
 						if (list->FirstBit != -1) {
-							if (last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) {
+							if ((last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) &&
+								(last_report_item_lookup[list->MainItemType][list->ReportID]->FirstBit != list->FirstBit) // Happens in case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array
+							   ) {
 								rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
 							}
 							last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
@@ -1796,22 +1798,22 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					// Padding 
 
 					rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit), &byte_list);
-					printf("Report Size (%d)\n", (main_item_list->LastBit - main_item_list->FirstBit));
+					printf("Report Size (%d)  Padding\n", (main_item_list->LastBit - main_item_list->FirstBit));
 
 					rd_write_short_item(rd_global_report_count, 1, &byte_list);
-					printf("Report Count (%d)\n", 1);
+					printf("Report Count (%d) Padding\n", 1);
 
 					if (rt_idx == HidP_Input) {
 						rd_write_short_item(rd_main_input, 0x03, &byte_list); // Const / Abs
-						printf("Input (0x%02X) Padding\n", 0x03);
+						printf("Input (0x%02X)     Padding\n", 0x03);
 					}
 					else if (rt_idx == HidP_Output) {
 						rd_write_short_item(rd_main_output, 0x03, &byte_list); // Const / Abs
-						printf("Output (0x%02X) Padding\n", 0x03);
+						printf("Output (0x%02X)    Padding\n", 0x03);
 					}
 					else if (rt_idx == HidP_Feature) {
 						rd_write_short_item(rd_main_feature, 0x03, &byte_list); // Const / Abs
-						printf("Feature (0x%02X) Padding\n", 0x03);
+						printf("Feature (0x%02X)   Padding\n", 0x03);
 					}
 					report_count = 0;
 				}
@@ -1852,10 +1854,13 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						(!pp_data->caps[main_item_list->next->CapsIndex].IsRange) && // Next node in list is no array
 						(pp_data->caps[main_item_list->next->CapsIndex].UsagePage == pp_data->caps[caps_idx].UsagePage) &&
 						(pp_data->caps[main_item_list->next->CapsIndex].ReportID == pp_data->caps[caps_idx].ReportID) &&
-						(pp_data->caps[main_item_list->next->CapsIndex].BitField == pp_data->caps[caps_idx].BitField)
+						(pp_data->caps[main_item_list->next->CapsIndex].BitField == pp_data->caps[caps_idx].BitField) &&
+						(pp_data->caps[main_item_list->next->CapsIndex].IsMultipleItemsForArray == pp_data->caps[caps_idx].IsMultipleItemsForArray)
 						) {
-						// Skip global items until any of them changes, than use ReportCount item to write the count of identical report fields
-						report_count++;
+						if (!(pp_data->caps[main_item_list->next->CapsIndex].IsMultipleItemsForArray)) {
+							// Skip global items until any of them changes, than use ReportCount item to write the count of identical report fields
+							report_count++;
+						}
 					}
 					else {
 
