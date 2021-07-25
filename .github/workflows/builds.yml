@@ -59,7 +59,9 @@ jobs:
       with:
         path: hidapisrc
     - name: Install dependencies
-      run: sudo apt install libudev-dev libusb-1.0-0-dev
+      run: |
+        sudo apt update
+        sudo apt install libudev-dev libusb-1.0-0-dev
     - name: Configure CMake
       run: |
         rm -rf build install
