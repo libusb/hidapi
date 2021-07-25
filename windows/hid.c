@@ -330,7 +330,7 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 	if (path) {
 		size_t len = strlen(path);
 		dev->path = (char*)calloc(len + 1, sizeof(char));
-		strncpy(dev->path, path, len + 1);
+		strcpy(dev->path, path);
 		dev->path[len] = '\0';
 	}
 	else
