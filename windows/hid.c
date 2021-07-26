@@ -70,11 +70,6 @@ extern "C" {
 #undef MIN
 #define MIN(x,y) ((x) < (y)? (x): (y))
 
-#ifdef _MSC_VER
-	/* Thanks Microsoft, but I know how to use strncpy(). */
-	#pragma warning(disable:4996)
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
