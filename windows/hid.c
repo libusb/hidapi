@@ -233,16 +233,7 @@ static struct hid_api_version api_version = {
 		UCHAR Reserved[3];
 		ULONG BitField; ///< Specifies the data part of the global item.
 	} HIDP_UNKNOWN_TOKEN, * PHIDP_UNKNOWN_TOKEN;
-	/// <summary>
-	/// Contains global report descriptor items for that the HID parser did not recognized, for HID control
-	/// </summary>
-	typedef struct _HIDP_EXTENDED_ATTRIBUTES {
-		UCHAR               NumGlobalUnknowns;
-		UCHAR               Reserved[3];
-		PHIDP_UNKNOWN_TOKEN GlobalUnknowns;
-		ULONG               Data[1];
-	} HIDP_EXTENDED_ATTRIBUTES, * PHIDP_EXTENDED_ATTRIBUTES;
-
+	
 #define HIDP_STATUS_SUCCESS 0x110000
 #define	HIDP_STATUS_NULL 0x80110001
 #define HIDP_STATUS_INVALID_PREPARSED_DATA 0xc0110001
@@ -282,7 +273,6 @@ static struct hid_api_version api_version = {
 	typedef NTSTATUS (__stdcall *HidP_SetData_)(HIDP_REPORT_TYPE report_type, PHIDP_DATA data_list, PULONG data_length, PHIDP_PREPARSED_DATA preparsed_data, PCHAR report, ULONG report_length);
 	typedef NTSTATUS (__stdcall* HidP_SetUsageValueArray_)(HIDP_REPORT_TYPE report_type, USAGE usage_page, USHORT link_collection, USAGE usage, PCHAR usage_value,	USHORT usage_value_byte_length, PHIDP_PREPARSED_DATA preparsed_data, PCHAR report, ULONG report_length);
 	typedef NTSTATUS (__stdcall* HidP_SetUsages_)(HIDP_REPORT_TYPE report_type, USAGE usage_page, USHORT link_collection, PUSAGE usage_list, PULONG usage_length, PHIDP_PREPARSED_DATA preparsed_data, PCHAR report, ULONG report_length);
-	typedef NTSTATUS (__stdcall* HidP_GetExtendedAttributes_)(HIDP_REPORT_TYPE report_type, USHORT data_index, PHIDP_PREPARSED_DATA preparsed_data, PHIDP_EXTENDED_ATTRIBUTES attributes, PULONG length_attributes);
 
 	static HidD_GetAttributes_ HidD_GetAttributes;
 	static HidD_GetSerialNumberString_ HidD_GetSerialNumberString;
@@ -302,7 +292,6 @@ static struct hid_api_version api_version = {
 	static HidP_SetData_ HidP_SetData;
 	static HidP_SetUsageValueArray_ HidP_SetUsageValueArray;
 	static HidP_SetUsages_ HidP_SetUsages;
-	static HidP_GetExtendedAttributes_ HidP_GetExtendedAttributes;
 
 	static HMODULE lib_handle = NULL;
 	static BOOLEAN initialized = FALSE;
@@ -416,7 +405,6 @@ static int lookup_functions()
 		RESOLVE(HidP_SetData);
 		RESOLVE(HidP_SetUsageValueArray);
 		RESOLVE(HidP_SetUsages);
-		RESOLVE(HidP_GetExtendedAttributes);
 #undef RESOLVE
 #if defined(__GNUC__)
 # pragma GCC diagnostic pop
@@ -730,7 +718,6 @@ static void rd_determine_button_bitpositions(HIDP_REPORT_TYPE report_type, PHIDP
 			status = HidP_SetUsages(report_type, button_cap->UsagePage, button_cap->LinkCollection, usage_list, &usage_len, pp_data, dummy_report, max_report_length);
 			free(usage_list);
 			if (status == HIDP_STATUS_BUFFER_TOO_SMALL) {
-				printf("HIDP_STATUS_BUFFER_TOO_SMALL\n");
 				report_count = report_count_idx;
 				break;
 			}
@@ -967,9 +954,17 @@ static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int las
 	return new_list_node;
 }
 
-static struct rd_main_item_node* rd_insert_main_item_node(int search_bit, int first_bit, int last_bit, int button_array_count, int button_array_size, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
-	struct rd_main_item_node* new_list_node;
-	// Determine last node in the list
+static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, int button_array_count, int button_array_size, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+	// Insert item after the main item node referenced by list
+	struct rd_main_item_node* next_item = (*list)->next;
+	(*list)->next = NULL;
+	rd_append_main_item_node(first_bit, last_bit, button_array_count, button_array_size, type_of_node, caps_index, collection_index, main_item_type, report_id, list);
+	(*list)->next->next = next_item;
+	return (*list)->next;
+}
+
+static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
 	
 	while (((*list)->next->MainItemType != rd_collection) &&
 		   ((*list)->next->MainItemType != rd_collection_end) &&
@@ -980,21 +975,7 @@ static struct rd_main_item_node* rd_insert_main_item_node(int search_bit, int fi
 	{
 		list = &(*list)->next;
 	}
-
-	new_list_node = malloc(sizeof(*new_list_node)); // Create new list entry
-	new_list_node->FirstBit = first_bit;
-	new_list_node->LastBit= last_bit;
-	new_list_node->ButtonArrayCount = button_array_count;
-	new_list_node->ButtonArraySize = button_array_size;
-	new_list_node->TypeOfNode = type_of_node;
-	new_list_node->CapsIndex = caps_index;
-	new_list_node->CollectionIndex = collection_index;
-	new_list_node->MainItemType = main_item_type;
-	new_list_node->ReportID = report_id;
-	new_list_node->next = (*list)->next;
-
-	(*list)->next = new_list_node;
-	return new_list_node;
+	return *list;
 }
 
 static HANDLE open_device(const char *path, BOOL open_rw)
@@ -2052,8 +2033,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						}
 						coll_begin = coll_end_lookup[coll_child_order[button_caps[rt_idx][caps_idx].LinkCollection][child_idx]];
 					}
-
-					rd_insert_main_item_node(first_bit, first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rt_idx, button_caps[rt_idx][caps_idx].ReportID, &coll_begin);
+					struct rd_main_item_node* list_node;
+					list_node = rd_search_main_item_list_for_bit_position(first_bit, rt_idx, button_caps[rt_idx][caps_idx].ReportID, &coll_begin);
+					rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rt_idx, button_caps[rt_idx][caps_idx].ReportID, &list_node);
 				}
 				// Add all value caps to node list
 				for (USHORT caps_idx = 0; caps_idx < value_caps_len[rt_idx]; caps_idx++) {
@@ -2070,7 +2052,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						}
 						coll_begin = coll_end_lookup[coll_child_order[value_caps[rt_idx][caps_idx].LinkCollection][child_idx]];
 					}
-					rd_insert_main_item_node(first_bit, first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rt_idx, value_caps[rt_idx][caps_idx].ReportID, &coll_begin);
+					struct rd_main_item_node* list_node;
+					list_node = rd_search_main_item_list_for_bit_position(first_bit, rt_idx, value_caps[rt_idx][caps_idx].ReportID, &coll_begin);
+					rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rt_idx, value_caps[rt_idx][caps_idx].ReportID, &list_node);
 				}
 			}
 
@@ -2089,18 +2073,20 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					}
 				}
 
-				struct rd_main_item_node* list;
-				list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
-				list = main_item_list; // List root
-
+				struct rd_main_item_node* list = main_item_list; // List root;
+				
 				while (list->next != NULL)
 				{
 					if ((list->MainItemType >= rd_input) &&
 						(list->MainItemType <= rd_feature)) {
 						// INPUT, OUTPUT or FEATURE
 						if (list->FirstBit != -1) {
-							if (last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) {
-								rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, -1, -1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
+							if ((last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) &&
+								(last_report_item_lookup[list->MainItemType][list->ReportID]->FirstBit != list->FirstBit) // Happens in case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array
+							   ) {
+								struct rd_main_item_node* list_node;
+								list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
+								rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, -1, -1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
 							}
 							last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
 							last_report_item_lookup[list->MainItemType][list->ReportID] = list;
@@ -2114,7 +2100,8 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						if (last_bit_position[rt_idx][reportid_idx] != -1) {
 							int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 							if (padding < 8) {
-								rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, -1, -1, rd_item_node_padding, -1, 0, rt_idx, reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+								// Insert padding item after item referenced in last_report_item_lookup
+								rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, -1, -1, rd_item_node_padding, -1, 0, rt_idx, reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
 							}
 						}
 					}
@@ -2173,22 +2160,22 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					// Padding 
 
 					rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit), &byte_list);
-					printf("Report Size (%d)\n", (main_item_list->LastBit - main_item_list->FirstBit));
+					printf("Report Size (%d)  Padding\n", (main_item_list->LastBit - main_item_list->FirstBit));
 
 					rd_write_short_item(rd_global_report_count, 1, &byte_list);
-					printf("Report Count (%d)\n", 1);
+					printf("Report Count (%d) Padding\n", 1);
 
 					if (rt_idx == HidP_Input) {
 						rd_write_short_item(rd_main_input, 0x03, &byte_list); // Const / Abs
-						printf("Input (0x%02X) Padding\n", 0x03);
+						printf("Input (0x%02X)     Padding\n", 0x03);
 					}
 					else if (rt_idx == HidP_Output) {
 						rd_write_short_item(rd_main_output, 0x03, &byte_list); // Const / Abs
-						printf("Output (0x%02X) Padding\n", 0x03);
+						printf("Output (0x%02X)    Padding\n", 0x03);
 					}
 					else if (rt_idx == HidP_Feature) {
 						rd_write_short_item(rd_main_feature, 0x03, &byte_list); // Const / Abs
-						printf("Feature (0x%02X) Padding\n", 0x03);
+						printf("Feature (0x%02X)   Padding\n", 0x03);
 					}
 					report_count = 0;
 				}
@@ -2220,18 +2207,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						rd_write_short_item(rd_local_usage, button_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
 						printf("Usage (%d)\n", button_caps[rt_idx][caps_idx].NotRange.Usage);
 					}
-					// EXPERIMENTAL - No device available for test
-					NTSTATUS status;
-					ULONG data[10];
-					HIDP_EXTENDED_ATTRIBUTES attribs;
-					attribs.Data[0] = data[0];
-					ULONG attrib_len = sizeof(HIDP_EXTENDED_ATTRIBUTES);
-					status = HidP_GetExtendedAttributes(rt_idx, button_caps[rt_idx][caps_idx].NotRange.DataIndex, pp_data, &attribs, &attrib_len);
-					if (attribs.NumGlobalUnknowns > 0) {
-						printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Found Global HID items unknown by Windows hidpi - these are now stored in HIDP_EXTENDED_ATTRIBUTES structure");
-					}
-					// EXPERIMENTAL - No device available for test
-
+					
 					if ((main_item_list->next != NULL) &&
 						(main_item_list->next->MainItemType == rt_idx) &&
 						(main_item_list->next->TypeOfNode == rd_item_node_button) &&
@@ -2323,17 +2299,6 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					}
 				}
 				else {
-					// EXPERIMENTAL - No device available for test
-					NTSTATUS status;
-					ULONG data[10];
-					HIDP_EXTENDED_ATTRIBUTES attribs;
-					attribs.Data[0] = data[0];
-					ULONG attrib_len = sizeof(HIDP_EXTENDED_ATTRIBUTES);
-					status = HidP_GetExtendedAttributes(rt_idx, value_caps[rt_idx][caps_idx].NotRange.DataIndex, pp_data, &attribs, &attrib_len);
-					if (attribs.NumGlobalUnknowns > 0) {
-						printf("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Found Global HID items unknown by Windows hidpi - these are now stored in HIDP_EXTENDED_ATTRIBUTES structure");
-					}
-					// EXPERIMENTAL - No device available for test
 
 					if (last_report_id != value_caps[rt_idx][caps_idx].ReportID) {
 						// Write Report ID if changed
