@@ -638,8 +638,16 @@ static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int las
 	return new_list_node;
 }
 
-static struct rd_main_item_node* rd_insert_main_item_node(int search_bit, int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
-	struct rd_main_item_node* new_list_node;
+static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+	// Insert item after the main item node referenced by list
+	struct rd_main_item_node* next_item = (*list)->next;
+	(*list)->next = NULL;
+	rd_append_main_item_node(first_bit, last_bit, type_of_node, caps_index, collection_index, main_item_type, report_id, list);
+	(*list)->next->next = next_item;
+	return (*list)->next;
+}
+
+static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
 	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
 	
 	while (((*list)->next->MainItemType != rd_collection) &&
@@ -651,19 +659,7 @@ static struct rd_main_item_node* rd_insert_main_item_node(int search_bit, int fi
 	{
 		list = &(*list)->next;
 	}
-
-	new_list_node = malloc(sizeof(*new_list_node)); // Create new list entry
-	new_list_node->FirstBit = first_bit;
-	new_list_node->LastBit= last_bit;
-	new_list_node->TypeOfNode = type_of_node;
-	new_list_node->CapsIndex = caps_index;
-	new_list_node->CollectionIndex = collection_index;
-	new_list_node->MainItemType = main_item_type;
-	new_list_node->ReportID = report_id;
-	new_list_node->next = (*list)->next;
-
-	(*list)->next = new_list_node;
-	return new_list_node;
+	return *list;
 }
 
 static HANDLE open_device(const char *path, BOOL open_rw)
@@ -1453,19 +1449,19 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 				for (USHORT caps_idx = pp_data->caps_info[rt_idx].FirstCap; caps_idx < pp_data->caps_info[rt_idx].LastCap; caps_idx++) {
 					int first_bit, last_bit;
-					printf("DEBUG:ReportType %d\n", rt_idx);
-					printf("DEBUG:BytePosition %d\n", pp_data->caps[caps_idx].BytePosition);
-					printf("DEBUG:BitPosition %d\n", pp_data->caps[caps_idx].BitPosition);
-					printf("DEBUG:BitSize %d\n", pp_data->caps[caps_idx].BitSize);
-					printf("DEBUG:ReportCount %d\n", pp_data->caps[caps_idx].ReportCount);
-					printf("DEBUG:ReportID %d\n", pp_data->caps[caps_idx].ReportID);
-					printf("DEBUG:NotRange.Usage %d\n", pp_data->caps[caps_idx].NotRange.Usage);
-					printf("DEBUG:IsMultipleItemsForArray %d\n", pp_data->caps[caps_idx].IsMultipleItemsForArray);
-					printf("DEBUG:NextBytePosition %d\n", pp_data->caps[caps_idx].NextBytePosition);
-					printf("DEBUG:IsAlias %d\n", pp_data->caps[caps_idx].IsAlias);
-					printf("DEBUG:IsRange %d\n", pp_data->caps[caps_idx].IsRange);
-					printf("DEBUG:IsPadding %d\n", pp_data->caps[caps_idx].IsPadding);
-					printf("DEBUG:BitField %x\n", pp_data->caps[caps_idx].BitField);
+					//printf("DEBUG:ReportType %d\n", rt_idx);
+					//printf("DEBUG:BytePosition %d\n", pp_data->caps[caps_idx].BytePosition);
+					//printf("DEBUG:BitPosition %d\n", pp_data->caps[caps_idx].BitPosition);
+					//printf("DEBUG:BitSize %d\n", pp_data->caps[caps_idx].BitSize);
+					//printf("DEBUG:ReportCount %d\n", pp_data->caps[caps_idx].ReportCount);
+					//printf("DEBUG:ReportID %d\n", pp_data->caps[caps_idx].ReportID);
+					//printf("DEBUG:NotRange.Usage %d\n", pp_data->caps[caps_idx].NotRange.Usage);
+					//printf("DEBUG:IsMultipleItemsForArray %d\n", pp_data->caps[caps_idx].IsMultipleItemsForArray);
+					//printf("DEBUG:NextBytePosition %d\n", pp_data->caps[caps_idx].NextBytePosition);
+					//printf("DEBUG:IsAlias %d\n", pp_data->caps[caps_idx].IsAlias);
+					//printf("DEBUG:IsRange %d\n", pp_data->caps[caps_idx].IsRange);
+					//printf("DEBUG:IsPadding %d\n", pp_data->caps[caps_idx].IsPadding);
+					//printf("DEBUG:BitField %x\n", pp_data->caps[caps_idx].BitField);
 					first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8 +
 						         pp_data->caps[caps_idx].BitPosition;
 					last_bit = first_bit + pp_data->caps[caps_idx].BitSize *
@@ -1691,7 +1687,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						}
 						coll_begin = coll_end_lookup[coll_child_order[pp_data->caps[caps_idx].LinkCollection][child_idx]];
 					}
-					rd_insert_main_item_node(first_bit, first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rt_idx, pp_data->caps[caps_idx].ReportID, &coll_begin);
+					struct rd_main_item_node* list_node;
+					list_node = rd_search_main_item_list_for_bit_position(first_bit, rt_idx, pp_data->caps[caps_idx].ReportID, &coll_begin);
+					rd_insert_main_item_node(first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rt_idx, pp_data->caps[caps_idx].ReportID, &list_node);
 				}
 			}
 
@@ -1721,7 +1719,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 							if ((last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) &&
 								(last_report_item_lookup[list->MainItemType][list->ReportID]->FirstBit != list->FirstBit) // Happens in case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array
 							   ) {
-								rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
+								struct rd_main_item_node* list_node;
+								list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
+								rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
 							}
 							last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
 							last_report_item_lookup[list->MainItemType][list->ReportID] = list;
@@ -1736,10 +1736,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 							int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 							if (padding < 8) {
 								// Insert padding item after item referenced in last_report_item_lookup
-								struct rd_main_item_node* next_item = last_report_item_lookup[rt_idx][reportid_idx]->next;
-								last_report_item_lookup[rt_idx][reportid_idx]->next = NULL;
-								rd_append_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, rt_idx, reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
-								last_report_item_lookup[rt_idx][reportid_idx]->next->next = next_item;
+								rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, rt_idx, reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
 							}
 						}
 					}
@@ -1854,10 +1851,11 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						(!pp_data->caps[main_item_list->next->CapsIndex].IsRange) && // Next node in list is no array
 						(pp_data->caps[main_item_list->next->CapsIndex].UsagePage == pp_data->caps[caps_idx].UsagePage) &&
 						(pp_data->caps[main_item_list->next->CapsIndex].ReportID == pp_data->caps[caps_idx].ReportID) &&
-						(pp_data->caps[main_item_list->next->CapsIndex].BitField == pp_data->caps[caps_idx].BitField) &&
-						(pp_data->caps[main_item_list->next->CapsIndex].IsMultipleItemsForArray == pp_data->caps[caps_idx].IsMultipleItemsForArray)
+						(pp_data->caps[main_item_list->next->CapsIndex].BitField == pp_data->caps[caps_idx].BitField)
 						) {
-						if (!(pp_data->caps[main_item_list->next->CapsIndex].IsMultipleItemsForArray)) {
+						if (main_item_list->next->FirstBit != main_item_list->FirstBit) {
+							// In case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array, the report count should be incremented 
+							
 							// Skip global items until any of them changes, than use ReportCount item to write the count of identical report fields
 							report_count++;
 						}
