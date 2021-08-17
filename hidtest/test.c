@@ -18,7 +18,8 @@
 #include <wchar.h>
 #include <string.h>
 #include <stdlib.h>
-#include "hidapi.h"
+
+#include <hidapi.h>
 
 // Headers needed for sleeping.
 #ifdef _WIN32
@@ -175,7 +176,7 @@ int main(int argc, char* argv[])
 			printf("waiting...\n");
 		if (res < 0)
 			printf("Unable to read()\n");
-		#ifdef WIN32
+		#ifdef _WIN32
 		Sleep(500);
 		#else
 		usleep(500*1000);
@@ -193,7 +194,7 @@ int main(int argc, char* argv[])
 	/* Free static HIDAPI objects. */
 	hid_exit();
 
-#ifdef WIN32
+#ifdef _WIN32
 	system("pause");
 #endif
 
