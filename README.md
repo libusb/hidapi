@@ -91,7 +91,7 @@ device spec. Writing data at random to your HID devices can break them.**
 #endif
 #include <stdio.h>
 #include <stdlib.h>
-#include "hidapi.h"
+#include <hidapi/hidapi.h>
 
 #define MAX_STR 255
 
