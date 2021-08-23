@@ -16,7 +16,7 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uacce
 KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
 # Once done, optionally rename this file for your application, and drop it into
-# /etc/udev/rules.d.
+# /etc/udev/rules.d/.
 # NOTE: these rules must have priorty before 73-seat-late.rules.
 # (Small discussion/explanation in systemd repo:
 #  https://github.com/systemd/systemd/issues/4288#issuecomment-348166161)
