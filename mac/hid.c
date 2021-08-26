@@ -381,7 +381,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	struct hid_device_info *cur_dev;
 	io_object_t iokit_dev;
 	kern_return_t res;
-	io_string_t path;
+	uint64_t entry_id;
 
 	if (dev == NULL) {
 		return NULL;
@@ -401,13 +401,30 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	/* Fill out the record */
 	cur_dev->next = NULL;
 
-	/* Fill in the path (IOService plane) */
+	/* Fill in the path (as a unique ID of the service entry) */
+	cur_dev->path = NULL;
 	iokit_dev = IOHIDDeviceGetService(dev);
-	res = IORegistryEntryGetPath(iokit_dev, kIOServicePlane, path);
-	if (res == KERN_SUCCESS)
-		cur_dev->path = strdup(path);
-	else
+	if (iokit_dev != MACH_PORT_NULL) {
+		res = IORegistryEntryGetRegistryEntryID(iokit_dev, &entry_id);
+	}
+	else {
+		res = KERN_INVALID_ARGUMENT;
+	}
+
+	if (res == KERN_SUCCESS) {
+		/* max value of entry_id(uint64_t) is 18446744073709551615 which is 20 characters long,
+		   so for (max) "path" string 'DevSrvsID:18446744073709551615' we would need
+		   9+1+20+1=31 bytes byffer, but allocate 32 for simple alignment */
+		cur_dev->path = calloc(1, 32);
+		if (cur_dev->path != NULL) {
+			sprintf(cur_dev->path, "DevSrvsID:%llu", entry_id);
+		}
+	}
+
+	if (cur_dev->path == NULL) {
+		/* for whatever reason, trying to keep it a non-NULL string */
 		cur_dev->path = strdup("");
+	}
 
 	/* Serial Number */
 	get_serial_number(dev, buf, BUF_LEN);
@@ -759,11 +776,33 @@ static void *read_thread(void *param)
 	return NULL;
 }
 
-/* hid_open_path()
- *
- * path must be a valid path to an IOHIDDevice in the IOService plane
- * Example: "IOService:/AppleACPIPlatformExpert/PCI0@0/AppleACPIPCI/EHC1@1D,7/AppleUSBEHCI/PLAYSTATION(R)3 Controller@fd120000/IOUSBInterface@0/IOUSBHIDDriver"
- */
+/* \p path must be one of:
+     - in format 'DevSrvsID:<RegistryEntryID>' (as returned by hid_enumerate);
+     - a valid path to an IOHIDDevice in the IOService plane (as returned by IORegistryEntryGetPath,
+       e.g.: "IOService:/AppleACPIPlatformExpert/PCI0@0/AppleACPIPCI/EHC1@1D,7/AppleUSBEHCI/PLAYSTATION(R)3 Controller@fd120000/IOUSBInterface@0/IOUSBHIDDriver");
+   Second format is for compatibility with paths accepted by older versions of HIDAPI.
+*/
+static io_registry_entry_t hid_open_service_registry_from_path(const char *path)
+{
+	if (path == NULL)
+		return MACH_PORT_NULL;
+
+	/* Get the IORegistry entry for the given path */
+	if (strncmp("DevSrvsID:", path, 10) == 0) {
+		char *endptr;
+		uint64_t entry_id = strtoull(path + 10, &endptr, 10);
+		if (*endptr == '\0') {
+			return IOServiceGetMatchingService(kIOMasterPortDefault, IORegistryEntryIDMatching(entry_id));
+		}
+	}
+	else {
+		/* Fallback to older format of the path */
+		return IORegistryEntryFromPath(kIOMasterPortDefault, path);
+	}
+
+	return MACH_PORT_NULL;
+}
+
 hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
 	hid_device *dev = NULL;
@@ -777,7 +816,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	dev = new_hid_device();
 
 	/* Get the IORegistry entry for the given path */
-	entry = IORegistryEntryFromPath(kIOMasterPortDefault, path);
+	entry = hid_open_service_registry_from_path(path);
 	if (entry == MACH_PORT_NULL) {
 		/* Path wasn't valid (maybe device was removed?) */
 		goto return_error;

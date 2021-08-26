@@ -83,15 +83,13 @@ Generic HID sample looks like this (with error checking removed for
 simplicity):
 
 **Warning: Only run the code you understand, and only when it conforms to the
-device spec. Writing data at random to your HID devices can break them.**
+device spec. Writing data (`hid_write`) at random to your HID devices can break them.**
 
 ```c
-#ifdef WIN32
-#include <windows.h>
-#endif
-#include <stdio.h>
-#include <stdlib.h>
-#include "hidapi.h"
+#include <stdio.h> // printf
+#include <wchar.h> // wprintf
+
+#include <hidapi.h>
 
 #define MAX_STR 255
 
