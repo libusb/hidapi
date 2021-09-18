@@ -17,12 +17,14 @@
 For various reasons you may need to build HIDAPI on your own.
 
 It can be done in several different ways:
-- using [Autotools](BUILD.autotools.md);
 - using [CMake](BUILD.cmake.md);
+- using [Autotools](BUILD.autotools.md) (deprecated);
 - using [manual makefiles](#building-the-manual-way-on-unix-platforms).
 
 **Autotools** build system is historically first mature build system for
-HIDAPI. Most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).
+HIDAPI. Most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).<br/>
+NOTE: for all intentions and purposes the Autotools build scripts for HIDAPI are _deprecated_ and going to be obsolete in the future.
+HIDAPI Team recommends using CMake build for HIDAPI.
 
 **CMake** build system is de facto an industry standard for many open-source and proprietary projects and solutions.
 HIDAPI is one of the projects which uses the power of CMake for its advantage.
