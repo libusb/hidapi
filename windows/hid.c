@@ -70,6 +70,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wctype.h>
 
 #include "hidapi.h"
 
@@ -412,7 +413,7 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 
 static void hid_internal_get_info(struct hid_device_info* dev)
 {
-	char *tmp = NULL;
+	const char *tmp = NULL;
 	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL;
 	mbstate_t state;
 	ULONG len;
