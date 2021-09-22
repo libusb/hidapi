@@ -106,19 +106,5 @@ To build HIDAPI using MinGW or Cygwin using Autotools, use a general Autotools
 
 Any windows builds (MSVC or MinGW/Cygwin) are also supported by [CMake](BUILD.cmake.md).
 
-HIDAPI can also be built using the Windows DDK (now also called the Windows
-Driver Kit or WDK). This method was originally required for the HIDAPI build
-but not anymore. However, some users still prefer this method. It is not as
-well supported anymore but should still work. Patches are welcome if it does
-not. To build using the DDK:
-
-   1. Install the Windows Driver Kit (WDK) from Microsoft.
-   2. From the Start menu, in the Windows Driver Kits folder, select Build
-      Environments, then your operating system, then the x86 Free Build
-      Environment (or one that is appropriate for your system).
-   3. From the console, change directory to the `windows/ddk_build/` directory,
-      which is part of the HIDAPI distribution.
-   4. Type build.
-   5. You can find the output files (DLL and LIB) in a subdirectory created
-      by the build system which is appropriate for your environment. On
-      Windows XP, this directory is `objfre_wxp_x86/i386`.
+If you are looking for information regarding DDK build of HIDAPI
+- the build has been broken for a while and now the support files are obsolete.
