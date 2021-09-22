@@ -1039,92 +1039,57 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 	return (int) length;
 }
 
+static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *data, size_t length)
+{
+	BOOL res;
+	DWORD bytes_returned = 0;
+
+	OVERLAPPED ol;
+	memset(&ol, 0, sizeof(ol));
+
+	res = DeviceIoControl(dev->device_handle,
+		report_type,
+		data, (DWORD) length,
+		data, (DWORD) length,
+		&bytes_returned, &ol);
+
+	if (!res) {
+		if (GetLastError() != ERROR_IO_PENDING) {
+			/* DeviceIoControl() failed. Return error. */
+			register_error(dev, "Get Input/Feature Report DeviceIoControl");
+			return -1;
+		}
+	}
+
+	/* Wait here until the write is done. This makes
+	   hid_get_feature_report() synchronous. */
+	res = GetOverlappedResult(dev->device_handle, &ol, &bytes_returned, TRUE/*wait*/);
+	if (!res) {
+		/* The operation failed. */
+		register_error(dev, "Get Input/Feature Report GetOverLappedResult");
+		return -1;
+	}
+
+	/* When numbered reports aren't used,
+	   bytes_returned seem to include only what is actually received from the device
+	   (not including the first byte with 0, as an indication "no numbered reports"). */
+	if (data[0] == 0x0) {
+		bytes_returned++;
+	}
+
+	return bytes_returned;
+}
 
 int HID_API_EXPORT HID_API_CALL hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length)
 {
-	BOOL res;
-#if 0
-	res = HidD_GetFeature(dev->device_handle, data, length);
-	if (!res) {
-		register_error(dev, "HidD_GetFeature");
-		return -1;
-	}
-	return 0; /* HidD_GetFeature() doesn't give us an actual length, unfortunately */
-#else
-	DWORD bytes_returned;
-
-	OVERLAPPED ol;
-	memset(&ol, 0, sizeof(ol));
-
-	res = DeviceIoControl(dev->device_handle,
-		IOCTL_HID_GET_FEATURE,
-		data, (DWORD) length,
-		data, (DWORD) length,
-		&bytes_returned, &ol);
-
-	if (!res) {
-		if (GetLastError() != ERROR_IO_PENDING) {
-			/* DeviceIoControl() failed. Return error. */
-			register_error(dev, "Send Feature Report DeviceIoControl");
-			return -1;
-		}
-	}
-
-	/* Wait here until the write is done. This makes
-	   hid_get_feature_report() synchronous. */
-	res = GetOverlappedResult(dev->device_handle, &ol, &bytes_returned, TRUE/*wait*/);
-	if (!res) {
-		/* The operation failed. */
-		register_error(dev, "Send Feature Report GetOverLappedResult");
-		return -1;
-	}
-
-	return bytes_returned;
-#endif
+	/* We could use HidD_GetFeature() instead, but it doesn't give us an actual length, unfortunately */
+	return hid_get_report(dev, IOCTL_HID_GET_FEATURE, data, length);
 }
-
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
-	BOOL res;
-#if 0
-	res = HidD_GetInputReport(dev->device_handle, data, length);
-	if (!res) {
-		register_error(dev, "HidD_GetInputReport");
-		return -1;
-	}
-	return length;
-#else
-	DWORD bytes_returned;
-
-	OVERLAPPED ol;
-	memset(&ol, 0, sizeof(ol));
-
-	res = DeviceIoControl(dev->device_handle,
-		IOCTL_HID_GET_INPUT_REPORT,
-		data, (DWORD) length,
-		data, (DWORD) length,
-		&bytes_returned, &ol);
-
-	if (!res) {
-		if (GetLastError() != ERROR_IO_PENDING) {
-			/* DeviceIoControl() failed. Return error. */
-			register_error(dev, "Send Input Report DeviceIoControl");
-			return -1;
-		}
-	}
-
-	/* Wait here until the write is done. This makes
-	   hid_get_feature_report() synchronous. */
-	res = GetOverlappedResult(dev->device_handle, &ol, &bytes_returned, TRUE/*wait*/);
-	if (!res) {
-		/* The operation failed. */
-		register_error(dev, "Send Input Report GetOverLappedResult");
-		return -1;
-	}
-
-	return bytes_returned;
-#endif
+	/* We could use HidD_GetInputReport() instead, but it doesn't give us an actual length, unfortunately */
+	return hid_get_report(dev, IOCTL_HID_GET_INPUT_REPORT, data, length);
 }
 
 void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
