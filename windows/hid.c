@@ -135,7 +135,7 @@ static struct hid_api_version api_version = {
 	typedef struct _HIDP_BUTTON_CAPS {
 		USAGE   UsagePage;
 		UCHAR   ReportID;
-		BOOLEAN IsAlias;
+		BOOLEAN IsAlias;  // IsAlias is set to TRUE in the first n-1 capability structures added to the capability array. IsAlias set to FALSE in the nth capability structure.
 		USHORT  BitField;
 		USHORT  LinkCollection;
 		USAGE   LinkUsage;
@@ -171,7 +171,7 @@ static struct hid_api_version api_version = {
 	typedef struct _HIDP_VALUE_CAPS {
 		USAGE   UsagePage;
 		UCHAR   ReportID;
-		BOOLEAN IsAlias;
+		BOOLEAN IsAlias;  // IsAlias is set to TRUE in the first n-1 capability structures added to the capability array. IsAlias set to FALSE in the nth capability structure.
 		USHORT  BitField;
 		USHORT  LinkCollection;
 		USAGE   LinkUsage;
@@ -894,6 +894,11 @@ typedef enum _RD_MAIN_ITEMS {
 	rd_feature = HidP_Feature,
 	rd_collection,
 	rd_collection_end,
+	rd_delimiter_open,
+	rd_delimiter_usage_collection,
+	rd_delimiter_usage_button,
+	rd_delimiter_usage_value,
+	rd_delimiter_close,
 	RD_NUM_OF_MAIN_ITEMS
 } RD_MAIN_ITEMS;
 
@@ -1997,26 +2002,67 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 
 				int actual_coll_level = 0;
 				USHORT collection_node_idx = 0;
+				struct rd_main_item_node* firstDelimiterNode = NULL;
+				struct rd_main_item_node* delimiterCloseNode = NULL;
 				coll_begin_lookup[0] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
 				while (actual_coll_level >= 0) {
 					if ((coll_number_of_direct_childs[collection_node_idx] != 0) &&
 						(coll_last_written_child[collection_node_idx] == -1)) {
+						// Collection has child collections, but none is written to the list yet
+
 						coll_last_written_child[collection_node_idx] = coll_child_order[collection_node_idx][0];
 						collection_node_idx = coll_child_order[collection_node_idx][0];
-						coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+
+						// In a HID Report Descriptor, the first usage declared is the most preferred usage for the control.
+						// While the order in the WIN32 capabiliy strutures is the opposite:
+						// Here the preferred usage is the last aliased usage in the sequence.
+
+						if (link_collection_nodes[collection_node_idx].IsAlias && (firstDelimiterNode == NULL)) {
+							// Alliased Collection (First node in link_collection_nodes -> Last entry in report descriptor output)
+							firstDelimiterNode = main_item_list;
+							coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_usage_collection, 0, &main_item_list);
+							coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_close, 0, &main_item_list);
+							delimiterCloseNode = main_item_list;
+						}
+						else {
+							// Normal not aliased collection
+							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+						}
 						actual_coll_level++;
 
 
 					}
 					else if ((coll_number_of_direct_childs[collection_node_idx] > 1) &&
 						(coll_last_written_child[collection_node_idx] != coll_child_order[collection_node_idx][coll_number_of_direct_childs[collection_node_idx] - 1])) {
+						// Collection has child collections, and this is not the first child
+
 						int nextChild = 1;
 						while (coll_last_written_child[collection_node_idx] != coll_child_order[collection_node_idx][nextChild - 1]) {
 							nextChild++;
 						}
 						coll_last_written_child[collection_node_idx] = coll_child_order[collection_node_idx][nextChild];
 						collection_node_idx = coll_child_order[collection_node_idx][nextChild];
-						coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+
+						if (link_collection_nodes[collection_node_idx].IsAlias && (firstDelimiterNode == NULL)) {
+							// Alliased Collection (First node in link_collection_nodes -> Last entry in report descriptor output)
+							firstDelimiterNode = main_item_list;
+							coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_usage_collection, 0, &main_item_list);
+							coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_close, 0, &main_item_list);
+							delimiterCloseNode = main_item_list;
+						}
+						else if (link_collection_nodes[collection_node_idx].IsAlias && (firstDelimiterNode != NULL)) {
+							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_usage_collection, 0, &firstDelimiterNode);
+						}
+						else if (!link_collection_nodes[collection_node_idx].IsAlias && (firstDelimiterNode != NULL)) {
+							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_usage_collection, 0, &firstDelimiterNode);
+							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_open, 0, &firstDelimiterNode);
+							firstDelimiterNode = NULL;
+							main_item_list = delimiterCloseNode;
+							delimiterCloseNode = NULL; // Last entry of alias has .IsAlias == FALSE
+						}
+						if (!link_collection_nodes[collection_node_idx].IsAlias) {
+							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+						}
 						actual_coll_level++;
 					}
 					else {
@@ -2035,6 +2081,8 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 			// ******************************************************
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 				// Add all button caps to node list
+				struct rd_main_item_node* firstDelimiterNode = NULL;
+				struct rd_main_item_node* delimiterCloseNode = NULL;
 				for (USHORT caps_idx = 0; caps_idx < button_caps_len[rt_idx]; caps_idx++) {
 					struct rd_main_item_node* coll_begin = coll_begin_lookup[button_caps[rt_idx][caps_idx].LinkCollection];
 					int first_bit, last_bit, button_array_count, button_array_size;
@@ -2051,9 +2099,36 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					}
 					struct rd_main_item_node* list_node;
 					list_node = rd_search_main_item_list_for_bit_position(first_bit, rt_idx, button_caps[rt_idx][caps_idx].ReportID, &coll_begin);
-					rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rt_idx, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+
+					// In a HID Report Descriptor, the first usage declared is the most preferred usage for the control.
+					// While the order in the WIN32 capabiliy strutures is the opposite:
+					// Here the preferred usage is the last aliased usage in the sequence.
+
+					if (button_caps[rt_idx][caps_idx].IsAlias && (firstDelimiterNode == NULL)) {
+						// Alliased Usage (First node in pp_data->caps -> Last entry in report descriptor output)
+						firstDelimiterNode = list_node;
+						rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_usage_button, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+						rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_close, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+						delimiterCloseNode = list_node;
+					}
+					else if (button_caps[rt_idx][caps_idx].IsAlias && (firstDelimiterNode != NULL)) {
+						rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_usage_button, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+					}
+					else if (!button_caps[rt_idx][caps_idx].IsAlias && (firstDelimiterNode != NULL)) {
+						// Alliased Collection (Last node in pp_data->caps -> First entry in report descriptor output)
+						rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_usage_button, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+						rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_open, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+						firstDelimiterNode = NULL;
+						list_node = delimiterCloseNode;
+						delimiterCloseNode = NULL; // Last entry of alias has .IsAlias == FALSE
+					}
+					if (!button_caps[rt_idx][caps_idx].IsAlias) {
+						rd_insert_main_item_node(first_bit, last_bit, button_array_count, button_array_size, rd_item_node_button, caps_idx, button_caps[rt_idx][caps_idx].LinkCollection, rt_idx, button_caps[rt_idx][caps_idx].ReportID, &list_node);
+					}
 				}
 				// Add all value caps to node list
+				firstDelimiterNode = NULL;
+				delimiterCloseNode = NULL;
 				for (USHORT caps_idx = 0; caps_idx < value_caps_len[rt_idx]; caps_idx++) {
 					struct rd_main_item_node* coll_begin = coll_begin_lookup[value_caps[rt_idx][caps_idx].LinkCollection];
 					int first_bit, last_bit;
@@ -2070,7 +2145,32 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					}
 					struct rd_main_item_node* list_node;
 					list_node = rd_search_main_item_list_for_bit_position(first_bit, rt_idx, value_caps[rt_idx][caps_idx].ReportID, &coll_begin);
-					rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rt_idx, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+
+					// In a HID Report Descriptor, the first usage declared is the most preferred usage for the control.
+					// While the order in the WIN32 capabiliy strutures is the opposite:
+					// Here the preferred usage is the last aliased usage in the sequence.
+
+					if (value_caps[rt_idx][caps_idx].IsAlias && (firstDelimiterNode == NULL)) {
+						// Alliased Usage (First node in pp_data->caps -> Last entry in report descriptor output)
+						firstDelimiterNode = list_node;
+						rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_usage_value, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+						rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_close, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+						delimiterCloseNode = list_node;
+					}
+					else if (value_caps[rt_idx][caps_idx].IsAlias && (firstDelimiterNode != NULL)) {
+						rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_usage_value, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+					}
+					else if (!value_caps[rt_idx][caps_idx].IsAlias && (firstDelimiterNode != NULL)) {
+						// Alliased Collection (Last node in pp_data->caps -> First entry in report descriptor output)
+						rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_usage_value, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+						rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rd_delimiter_open, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+						firstDelimiterNode = NULL;
+						list_node = delimiterCloseNode;
+						delimiterCloseNode = NULL; // Last entry of alias has .IsAlias == FALSE
+					}
+					if (!value_caps[rt_idx][caps_idx].IsAlias) {
+						rd_insert_main_item_node(first_bit, last_bit, -1, -1, rd_item_node_value, caps_idx, value_caps[rt_idx][caps_idx].LinkCollection, rt_idx, value_caps[rt_idx][caps_idx].ReportID, &list_node);
+					}
 				}
 			}
 
@@ -2137,6 +2237,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 			LONG last_physical_max = 0;
 			ULONG last_unit_exponent = 0; // If Unit Exponent is Undefined it should be considered as 0 according USB HID spec 1.11 chapter 6.2.2.7
 			ULONG last_unit = 0; // If the first nibble is 7, or second nibble of Unit is 0, the unit is None according USB HID spec 1.11 chapter 6.2.2.7
+			BOOLEAN inhibit_write_of_usage = FALSE; // Needed in case of delimited usage print, before the normal collection or cap
 			int report_count = 0;
 			printf("\n");
 			while (main_item_list != NULL)
@@ -2149,9 +2250,15 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &byte_list);
 						printf("Usage Page (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage);
 						last_usage_page = link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage;
+					}				
+					if (inhibit_write_of_usage) {
+						// Inhibit only once after DELIMITER statement
+						inhibit_write_of_usage = FALSE;
 					}
-					rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
-					printf("Usage  (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsage);
+					else {
+						rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
+						printf("Usage  (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsage);
+					}
 					if (link_collection_nodes[main_item_list->CollectionIndex].CollectionType == 0) {
 						rd_write_short_item(rd_main_collection, 0x00, &byte_list);
 						printf("Collection (Physical)\n");
@@ -2171,6 +2278,72 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 				else if (main_item_list->MainItemType == rd_collection_end) {
 					rd_write_short_item(rd_main_collection_end, 0, &byte_list);
 					printf("End Collection\n");
+				}
+				else if (main_item_list->MainItemType == rd_delimiter_open) {
+					if (main_item_list->CollectionIndex != -1) {
+						// Print usage page when changed
+						if (last_usage_page != link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage) {
+							rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &byte_list);
+							printf("Usage Page (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage);
+							last_usage_page = link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage;
+						}
+					}
+					else if (main_item_list->CapsIndex != 0) {
+						// Print usage page when changed
+						int caps_idx = main_item_list->CapsIndex;
+						if (button_caps[rt_idx][caps_idx].UsagePage != last_usage_page) {
+							rd_write_short_item(rd_global_usage_page, button_caps[rt_idx][caps_idx].UsagePage, &byte_list);
+							printf("Usage Page (%d)\n", button_caps[rt_idx][caps_idx].UsagePage);
+							last_usage_page = button_caps[rt_idx][caps_idx].UsagePage;
+						}
+					}
+					rd_write_short_item(rd_local_delimiter, 1, &byte_list); // 1 = open set of aliased usages
+					printf("Delimiter Open (%d)\n", 1);
+				}
+				else if (main_item_list->MainItemType == rd_delimiter_usage_collection) {
+					if (main_item_list->CollectionIndex != -1) {
+						// Print Aliased Collection usage
+						rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
+						printf("Usage  (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsage);
+					}
+				}
+				else if (main_item_list->MainItemType == rd_delimiter_usage_button) {
+					if (main_item_list->CapsIndex != 0) {
+						int caps_idx = main_item_list->CapsIndex;
+						// Print Aliased Usage
+						if (button_caps[rt_idx][caps_idx].IsRange) {
+							rd_write_short_item(rd_local_usage_minimum, button_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
+							printf("Usage Minimum (%d)\n", button_caps[rt_idx][caps_idx].Range.UsageMin);
+							rd_write_short_item(rd_local_usage_maximum, button_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
+							printf("Usage Maximum (%d)\n", button_caps[rt_idx][caps_idx].Range.UsageMax);
+						}
+						else {
+							rd_write_short_item(rd_local_usage, button_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
+							printf("Usage (%d)\n", button_caps[rt_idx][caps_idx].NotRange.Usage);
+						}
+					}
+				}
+				else if (main_item_list->MainItemType == rd_delimiter_usage_value) {
+					if (main_item_list->CapsIndex != 0) {
+						int caps_idx = main_item_list->CapsIndex;
+						// Print Aliased Usage
+						if (value_caps[rt_idx][caps_idx].IsRange) {
+							rd_write_short_item(rd_local_usage_minimum, value_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
+							printf("Usage Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMin);
+							rd_write_short_item(rd_local_usage_maximum, value_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
+							printf("Usage Maximum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMax);
+						}
+						else {
+							rd_write_short_item(rd_local_usage, value_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
+							printf("Usage (%d)\n", value_caps[rt_idx][caps_idx].NotRange.Usage);
+						}
+					}
+				}
+				else if (main_item_list->MainItemType == rd_delimiter_close) {
+					rd_write_short_item(rd_local_delimiter, 0, &byte_list); // 0 = close set of aliased usages
+					printf("Delimiter Close (%d)\n", 0);
+					// Inhibit next usage write
+					inhibit_write_of_usage = TRUE;
 				}
 				else if (main_item_list->TypeOfNode == rd_item_node_padding) {
 					// Padding 
@@ -2214,15 +2387,25 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					// Print only local report items for each cap, if ReportCount > 1
 					if (button_caps[rt_idx][caps_idx].IsRange) {
 						report_count += (button_caps[rt_idx][caps_idx].Range.DataIndexMax - button_caps[rt_idx][caps_idx].Range.DataIndexMin);
-						rd_write_short_item(rd_local_usage_minimum, button_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
-						printf("Usage Minimum (%d)\n", button_caps[rt_idx][caps_idx].Range.UsageMin);
-						rd_write_short_item(rd_local_usage_maximum, button_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
-						printf("Usage Maximum (%d)\n", button_caps[rt_idx][caps_idx].Range.UsageMax);
+					}
+
+					if (inhibit_write_of_usage) {
+						// Inhibit only once after DELIMITER statement
+						inhibit_write_of_usage = FALSE;
 					}
 					else {
-						rd_write_short_item(rd_local_usage, button_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
-						printf("Usage (%d)\n", button_caps[rt_idx][caps_idx].NotRange.Usage);
+						if (button_caps[rt_idx][caps_idx].IsRange) {
+							rd_write_short_item(rd_local_usage_minimum, button_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
+							printf("Usage Minimum (%d)\n", button_caps[rt_idx][caps_idx].Range.UsageMin);
+							rd_write_short_item(rd_local_usage_maximum, button_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
+							printf("Usage Maximum (%d)\n", button_caps[rt_idx][caps_idx].Range.UsageMax);
+						}
+						else {
+							rd_write_short_item(rd_local_usage, button_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
+							printf("Usage (%d)\n", button_caps[rt_idx][caps_idx].NotRange.Usage);
+						}
 					}
+
 
 					if (button_caps[rt_idx][caps_idx].IsDesignatorRange) {
 						rd_write_short_item(rd_local_designator_minimum, button_caps[rt_idx][caps_idx].Range.DesignatorMin, &byte_list);
@@ -2357,18 +2540,21 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						last_usage_page = value_caps[rt_idx][caps_idx].UsagePage;
 					}
 
-
-					if (value_caps[rt_idx][caps_idx].IsRange) {
-						rd_write_short_item(rd_local_usage_minimum, value_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
-						printf("Usage Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMin);
-						rd_write_short_item(rd_local_usage_maximum, value_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
-						printf("Usage Maximum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMax);
-						// In case of an Usage  Range array overwrite Report Count
-						value_caps[rt_idx][caps_idx].ReportCount = value_caps[rt_idx][caps_idx].Range.DataIndexMax - value_caps[rt_idx][caps_idx].Range.DataIndexMin + 1;
+					if (inhibit_write_of_usage) {
+						// Inhibit only once after DELIMITER statement
+						inhibit_write_of_usage = FALSE;
 					}
 					else {
-						rd_write_short_item(rd_local_usage, value_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
-						printf("Usage (%d)\n", value_caps[rt_idx][caps_idx].NotRange.Usage);
+						if (value_caps[rt_idx][caps_idx].IsRange) {
+							rd_write_short_item(rd_local_usage_minimum, value_caps[rt_idx][caps_idx].Range.UsageMin, &byte_list);
+							printf("Usage Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMin);
+							rd_write_short_item(rd_local_usage_maximum, value_caps[rt_idx][caps_idx].Range.UsageMax, &byte_list);
+							printf("Usage Maximum (%d)\n", value_caps[rt_idx][caps_idx].Range.UsageMax);
+						}
+						else {
+							rd_write_short_item(rd_local_usage, value_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
+							printf("Usage (%d)\n", value_caps[rt_idx][caps_idx].NotRange.Usage);
+						}
 					}
 
 					if (value_caps[rt_idx][caps_idx].IsDesignatorRange) {
