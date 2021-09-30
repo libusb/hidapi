@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.6.3 FATAL_ERROR)
 
+list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_libusb.h")
+
 add_library(hidapi_libusb
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
-    hidapi_libusb.h
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
 
@@ -24,7 +25,7 @@ set_target_properties(hidapi_libusb
         OUTPUT_NAME "hidapi-libusb"
         VERSION ${PROJECT_VERSION}
         SOVERSION ${PROJECT_VERSION_MAJOR}
-        PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS};hidapi_libusb.h"
+        PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
 
 # compatibility with find_package()
