@@ -2223,7 +2223,34 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						rd_write_short_item(rd_local_usage, button_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
 						printf("Usage (%d)\n", button_caps[rt_idx][caps_idx].NotRange.Usage);
 					}
-					
+
+					if (button_caps[rt_idx][caps_idx].IsDesignatorRange) {
+						rd_write_short_item(rd_local_designator_minimum, button_caps[rt_idx][caps_idx].Range.DesignatorMin, &byte_list);
+						printf("Designator Minimum (%d)\n", button_caps[rt_idx][caps_idx].Range.DesignatorMin);
+						rd_write_short_item(rd_local_designator_maximum, button_caps[rt_idx][caps_idx].Range.DesignatorMax, &byte_list);
+						printf("Designator Maximum (%d)\n", button_caps[rt_idx][caps_idx].Range.DesignatorMax);
+					}
+					else if (button_caps[rt_idx][caps_idx].NotRange.DesignatorIndex != 0) {
+						// Designator set 0 is a special descriptor set (of the HID Physical Descriptor),
+						// that specifies the number of additional descriptor sets.
+						// Therefore Designator Index 0 can never be a useful reference for a control.
+						rd_write_short_item(rd_local_designator_index, button_caps[rt_idx][caps_idx].NotRange.DesignatorIndex, &byte_list);
+						printf("Designator Index (%d)\n", button_caps[rt_idx][caps_idx].NotRange.DesignatorIndex);
+					}
+
+					if (button_caps[rt_idx][caps_idx].IsStringRange) {
+						rd_write_short_item(rd_local_string_minimum, button_caps[rt_idx][caps_idx].Range.StringMin, &byte_list);
+						printf("String Minimum (%d)\n", button_caps[rt_idx][caps_idx].Range.StringMin);
+						rd_write_short_item(rd_local_string_maximum, button_caps[rt_idx][caps_idx].Range.StringMax, &byte_list);
+						printf("String Maximum (%d)\n", button_caps[rt_idx][caps_idx].Range.StringMax);
+					}
+					else if (button_caps[rt_idx][caps_idx].NotRange.StringIndex != 0) {
+						// String Index 0 is a special entry, that contains a list of supported languages,
+						// therefore Designator Index 0 can never be a useful reference for a control.
+						rd_write_short_item(rd_local_string, button_caps[rt_idx][caps_idx].NotRange.StringIndex, &byte_list);
+						printf("String Index (%d)\n", button_caps[rt_idx][caps_idx].NotRange.StringIndex);
+					}
+
 					if ((main_item_list->next != NULL) &&
 						(main_item_list->next->MainItemType == rt_idx) &&
 						(main_item_list->next->TypeOfNode == rd_item_node_button) &&
@@ -2342,6 +2369,33 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 					else {
 						rd_write_short_item(rd_local_usage, value_caps[rt_idx][caps_idx].NotRange.Usage, &byte_list);
 						printf("Usage (%d)\n", value_caps[rt_idx][caps_idx].NotRange.Usage);
+					}
+
+					if (value_caps[rt_idx][caps_idx].IsDesignatorRange) {
+						rd_write_short_item(rd_local_designator_minimum, value_caps[rt_idx][caps_idx].Range.DesignatorMin, &byte_list);
+						printf("Designator Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.DesignatorMin);
+						rd_write_short_item(rd_local_designator_maximum, value_caps[rt_idx][caps_idx].Range.DesignatorMax, &byte_list);
+						printf("Designator Maximum (%d)\n", value_caps[rt_idx][caps_idx].Range.DesignatorMax);
+					}
+					else if (value_caps[rt_idx][caps_idx].NotRange.DesignatorIndex != 0) {
+						// Designator set 0 is a special descriptor set (of the HID Physical Descriptor),
+						// that specifies the number of additional descriptor sets.
+						// Therefore Designator Index 0 can never be a useful reference for a control.
+						rd_write_short_item(rd_local_designator_index, value_caps[rt_idx][caps_idx].NotRange.DesignatorIndex, &byte_list);
+						printf("Designator Index (%d)\n", value_caps[rt_idx][caps_idx].NotRange.DesignatorIndex);
+					}
+
+					if (value_caps[rt_idx][caps_idx].IsStringRange) {
+						rd_write_short_item(rd_local_string_minimum, value_caps[rt_idx][caps_idx].Range.StringMin, &byte_list);
+						printf("String Minimum (%d)\n", value_caps[rt_idx][caps_idx].Range.StringMin);
+						rd_write_short_item(rd_local_string_maximum, value_caps[rt_idx][caps_idx].Range.StringMax, &byte_list);
+						printf("String Maximum (%d)\n", value_caps[rt_idx][caps_idx].Range.StringMax);
+					}
+					else if (value_caps[rt_idx][caps_idx].NotRange.StringIndex != 0) {
+						// String Index 0 is a special entry, that contains a list of supported languages,
+						// therefore Designator Index 0 can never be a useful reference for a control.
+						rd_write_short_item(rd_local_string, value_caps[rt_idx][caps_idx].NotRange.StringIndex, &byte_list);
+						printf("String Index (%d)\n", value_caps[rt_idx][caps_idx].NotRange.StringIndex);
 					}
 
 					// Print only local report items for each cap, if ReportCount > 1
