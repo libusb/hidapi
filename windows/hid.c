@@ -1877,7 +1877,8 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						printf("Collection (Logical)\n");
 					}
 					else {
-						printf("Collection (nnn)\n");
+						rd_write_short_item(rd_main_collection, link_collection_nodes[main_item_list->CollectionIndex].CollectionType, &byte_list);
+						printf("Collection (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].CollectionType);
 					}
 				}
 				else if (main_item_list->MainItemType == rd_collection_end) {
