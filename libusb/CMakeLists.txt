@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.6.3 FATAL_ERROR)
 
+list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_libusb.h")
+
 add_library(hidapi_libusb
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c

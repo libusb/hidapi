@@ -1,4 +1,12 @@
-# Building HIDAPI using Autotools
+# Building HIDAPI using Autotools (deprecated)
+
+---
+**NOTE**: for all intentions and purposes the Autotools build scripts for HIDAPI are _deprecated_ and going to be obsolete in the future.
+HIDAPI Team recommends using CMake build for HIDAPI.
+If you are already using Autotools build scripts provided by HIDAPI,
+consider switching to CMake build scripts as soon as possible.
+
+---
 
 To be able to use Autotools to build HIDAPI, it has to be [installed](#installing-autotools)/available in the system.
 
