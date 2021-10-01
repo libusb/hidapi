@@ -29,6 +29,6 @@ libhidapi_la_LIBADD = $(LIBS_LIBUSB)
 endif
 
 hdrdir = $(includedir)/hidapi
-hdr_HEADERS = $(top_srcdir)/hidapi/hidapi.h
+hdr_HEADERS = $(top_srcdir)/hidapi/hidapi.h hidapi_libusb.h
 
 EXTRA_DIST = Makefile-manual

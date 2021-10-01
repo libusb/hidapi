@@ -21,4 +21,8 @@ Makefile
 stamp-h1
 libtool
 
+# macOS
 .DS_Store
+
+# Qt Creator
+CMakeLists.txt.user

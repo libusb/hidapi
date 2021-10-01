@@ -2,6 +2,9 @@ AC_PREREQ(2.63)
 
 AC_INIT([hidapi],[m4_normalize(m4_builtin([include], VERSION))],[https://github.com/libusb/hidapi/issues])
 
+echo "This build script for HIDAPI is deprecated."
+echo "Consider using CMake instead."
+
 # Library soname version
 # Follow the following rules (particularly the ones in the second link):
 #  http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
