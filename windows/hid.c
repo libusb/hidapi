@@ -2026,9 +2026,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 						}
 						else {
 							// Normal not aliased collection
-							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+							coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+							actual_coll_level++;
 						}
-						actual_coll_level++;
 
 
 					}
@@ -2061,9 +2061,9 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 							delimiterCloseNode = NULL; // Last entry of alias has .IsAlias == FALSE
 						}
 						if (!link_collection_nodes[collection_node_idx].IsAlias) {
-							coll_begin_lookup[collection_node_idx] = rd_insert_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+							coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, -1, -1, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
+							actual_coll_level++;
 						}
-						actual_coll_level++;
 					}
 					else {
 						actual_coll_level--;
