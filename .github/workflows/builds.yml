@@ -47,7 +47,10 @@ jobs:
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/shared/lib/libhidapi.dylib, install/shared/include/hidapi/hidapi.h, install/framework/lib/hidapi.framework/hidapi, install/framework/lib/hidapi.framework/Headers/hidapi.h"
+        files: "install/shared/lib/libhidapi.dylib, \
+                install/shared/include/hidapi/hidapi.h, \
+                install/framework/lib/hidapi.framework/hidapi, \
+                install/framework/lib/hidapi.framework/Headers/hidapi.h"
         allow_failure: true
 
   ubuntu-cmake:
@@ -76,7 +79,14 @@ jobs:
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/shared/lib/libhidapi-libusb.so, install/shared/lib/libhidapi-hidraw.so, install/shared/include/hidapi/hidapi.h, install/static/lib/libhidapi-libusb.a, install/static/lib/libhidapi-hidraw.a, install/static/include/hidapi/hidapi.h"
+        files: "install/shared/lib/libhidapi-libusb.so, \
+                install/shared/lib/libhidapi-hidraw.so, \
+                install/shared/include/hidapi/hidapi.h, \
+                install/shared/include/hidapi/hidapi_libusb.h, \
+                install/static/lib/libhidapi-libusb.a, \
+                install/static/lib/libhidapi-hidraw.a, \
+                install/static/include/hidapi/hidapi.h, \
+                install/static/include/hidapi/hidapi_libusb.h"
         allow_failure: true
 
   windows-cmake-msvc:
