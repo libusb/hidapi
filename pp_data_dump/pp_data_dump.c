@@ -76,7 +76,7 @@ void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
 	fprintf(file, "pp_data->cap[%d]->UnitsExp                 = %d\n", cap_idx, pp_cap->UnitsExp);
 }
 
-void dump_hidp_link_collection_node(FILE* file, PHIDP_LINK_COLLECTION_NODE pcoll, unsigned int coll_idx) {
+void dump_hidp_link_collection_node(FILE* file, phid_pp_link_collection_node pcoll, unsigned int coll_idx) {
 	fprintf(file, "pp_data->LinkCollectionArray[%d]->LinkUsage          = 0x%04X\n", coll_idx, pcoll->LinkUsage);
 	fprintf(file, "pp_data->LinkCollectionArray[%d]->LinkUsagePage      = 0x%04X\n", coll_idx, pcoll->LinkUsagePage);
 	fprintf(file, "pp_data->LinkCollectionArray[%d]->Parent             = %d\n", coll_idx, pcoll->Parent);
@@ -86,7 +86,6 @@ void dump_hidp_link_collection_node(FILE* file, PHIDP_LINK_COLLECTION_NODE pcoll
 	fprintf(file, "pp_data->LinkCollectionArray[%d]->CollectionType     = %d\n", coll_idx, pcoll->CollectionType);
 	fprintf(file, "pp_data->LinkCollectionArray[%d]->IsAlias            = %d\n", coll_idx, pcoll->IsAlias);
 	fprintf(file, "pp_data->LinkCollectionArray[%d]->Reserved           = 0x%08X\n", coll_idx, pcoll->Reserved);
-	fprintf(file, "pp_data->LinkCollectionArray[%d]->UserContext        = 0x%016llX\n", coll_idx, (ULONGLONG) pcoll->UserContext);
 }
 
 int dump_pp_data(FILE* file, hid_device* dev)
@@ -141,7 +140,7 @@ int dump_pp_data(FILE* file, hid_device* dev)
 			fprintf(file, "\n");
 		}
 
-		PHIDP_LINK_COLLECTION_NODE pcoll = (PHIDP_LINK_COLLECTION_NODE)(((unsigned char*)pcap) + pp_data->FirstByteOfLinkCollectionArray);
+		phid_pp_link_collection_node pcoll = (phid_pp_link_collection_node)(((unsigned char*)pcap) + pp_data->FirstByteOfLinkCollectionArray);
 		fprintf(file, "# Link Collections:\n");
 		for (int coll_idx = 0; coll_idx < pp_data->NumberLinkCollectionNodes; coll_idx++) {
 			dump_hidp_link_collection_node(file, pcoll + coll_idx, coll_idx);
