@@ -182,6 +182,20 @@ static struct hid_api_version api_version = {
 		USHORT ReportByteLength;
 	} hid_pp_caps_info, * phid_pp_caps_info;
 
+
+	typedef struct _hid_pp_link_collection_node {
+		USAGE  LinkUsage;
+		USAGE  LinkUsagePage;
+		USHORT Parent;
+		USHORT NumberOfChildren;
+		USHORT NextSibling;
+		USHORT FirstChild;
+		ULONG  CollectionType : 8;
+		ULONG  IsAlias : 1;
+		ULONG  Reserved : 23;
+		// Same as the public API structure HIDP_LINK_COLLECTION_NODE, but without PVOID UserContext at the end
+	} hid_pp_link_collection_node, * phid_pp_link_collection_node;
+
 	typedef struct _hid_pp_cap {
 		USAGE   UsagePage;
 		UCHAR   ReportID;
@@ -267,7 +281,7 @@ static struct hid_api_version api_version = {
 		// MINGW: flexible array member in union not supported - but works with MSVC
 		//union {
 			hid_pp_cap caps[];
-			//HIDP_LINK_COLLECTION_NODE LinkCollectionArray[];
+			//hid_pp_link_collection_node LinkCollectionArray[];
 		//};
 
 	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
