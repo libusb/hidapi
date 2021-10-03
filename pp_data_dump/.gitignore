@@ -1,0 +1,15 @@
+Debug
+Release
+*.exp
+*.ilk
+*.lib
+*.suo
+*.vcproj.*
+*.ncb
+*.suo
+*.dll
+*.pdb
+*.o
+.deps/
+.libs/
+pp_data_dump
