@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.1.3 FATAL_ERROR)
 
+enable_testing()
+
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(src)
     # compatinility with find_package() vs add_subdirectory

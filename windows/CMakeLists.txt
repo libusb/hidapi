@@ -30,3 +30,10 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+
+add_executable(offline_unit_test ./test/offline_unit_test.c)
+target_link_libraries(offline_unit_test
+        PUBLIC hidapi_include
+        PRIVATE setupapi
+    )
+add_test(test1 offline_unit_test 046D_C52F_0001_000C.pp_data)
