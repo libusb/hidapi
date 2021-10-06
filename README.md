@@ -28,7 +28,7 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 
 ## About
 
-HIDAPI has four back-ends:
+### HIDAPI has four back-ends:
 * Windows (using `hid.dll`)
 * Linux/hidraw (using the Kernel's hidraw driver)
 * libusb (using libusb-1.0 - Linux/BSD/other UNIX-like systems)
@@ -45,7 +45,7 @@ for unprivileged users to be able to access HID devices with hidapi. Refer
 to the [69-hid.rules](udev/69-hid.rules) file in the `udev` directory
 for an example.
 
-__Linux/hidraw__ (`linux/hid.c`):
+#### __Linux/hidraw__ (`linux/hid.c`):
 
 This back-end uses the hidraw interface in the Linux kernel, and supports
 both USB and Bluetooth HID devices. It requires kernel version at least 2.6.39
@@ -55,7 +55,7 @@ Keyboards, mice, and some other devices which are blacklisted from having
 hidraw nodes will not work. Fortunately, for nearly all the uses of hidraw,
 this is not a problem.
 
-__Linux/FreeBSD/libusb__ (`libusb/hid.c`):
+#### __Linux/FreeBSD/libusb__ (`libusb/hid.c`):
 
 This back-end uses libusb-1.0 to communicate directly to a USB device. This
 back-end will of course not work with Bluetooth devices.
