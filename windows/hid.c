@@ -278,11 +278,16 @@ static struct hid_api_version api_version = {
 		USHORT FirstByteOfLinkCollectionArray;
 		USHORT NumberLinkCollectionNodes;
 
-		// MINGW: flexible array member in union not supported - but works with MSVC
-		//union {
-			hid_pp_cap caps[];
-			//hid_pp_link_collection_node LinkCollectionArray[];
-		//};
+
+// MINGW: flexible array member in union not supported - but works with MSVC
+#ifdef __MINGW32__
+		hid_pp_cap caps[];
+#else
+		union {
+		hid_pp_cap caps[];
+			hid_pp_link_collection_node LinkCollectionArray[];
+		};
+#endif
 
 	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
 
