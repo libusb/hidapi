@@ -6,6 +6,7 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 	FILE* file;
 	errno_t err = fopen_s(&file, filename, "r");
 
+
 	if (err != 0) {
 		char currentPath[2048];
 		GetCurrentDirectoryA(sizeof(currentPath), currentPath);
@@ -25,11 +26,11 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 			if (sscanf(line, "dev->product_id          = 0x%04hX\n", &dev->product_id)) continue;
 			if (sscanf(line, "dev->usage               = 0x%04hX\n", &dev->usage)) continue;
 			if (sscanf(line, "dev->usage_page          = 0x%04hX\n", &dev->usage_page)) continue;
-			//if (sscanf(line, "dev->manufacturer_string = \"%ls\"\n", &dev->manufacturer_string)) continue;
-			//if (sscanf(line, "dev->product_string      = \"%ls\"\n", &dev->product_string)) continue;
+			//if (swscanf(line, "dev->manufacturer_string = \"%ls\"\n", dev->manufacturer_string)) continue;
+			//if (swscanf(line, "dev->product_string      = \"%ls\"\n", dev->product_string)) continue;
 			if (sscanf(line, "dev->release_number      = 0x%04hX\n", &dev->release_number)) continue;
 			if (sscanf(line, "dev->interface_number    = %d\n", &dev->interface_number)) continue;
-				//if (sscanf(line, "dev->path                = \"%s\"\n", &dev->path)) continue;
+			if (sscanf(line, "dev->path                = \"%s\"\n", dev->path)) continue;
 			if (sscanf(line, "pp_data->FirstByteOfLinkCollectionArray       = 0x%04hX\n", &FirstByteOfLinkCollectionArray)) continue;
 			if (sscanf(line, "pp_data->NumberLinkCollectionNodes            = %hu\n", &NumberLinkCollectionNodes)) continue;
 		}
@@ -366,12 +367,6 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 
 int main(int argc, char* argv[])
 {
-	unsigned char buf[256];
-#define MAX_STR 255
-	wchar_t wstr[MAX_STR];
-	
-	struct hid_device_info* devs, * cur_dev;
-
 	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
 	if (hid_version()->major == HID_API_VERSION_MAJOR && hid_version()->minor == HID_API_VERSION_MINOR && hid_version()->patch == HID_API_VERSION_PATCH) {
 		printf("Compile-time version matches runtime version of hidapi.\n\n");
@@ -382,28 +377,18 @@ int main(int argc, char* argv[])
 
 	if (hid_init())
 		return -1;
-
-	devs = hid_enumerate(0x0, 0x0);
-	cur_dev = devs;
-	while (cur_dev) {
-		printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number);
-		printf("\n");
-		printf("  Manufacturer: %ls\n", cur_dev->manufacturer_string);
-		printf("  Product:      %ls\n", cur_dev->product_string);
-		printf("  Release:      %hx\n", cur_dev->release_number);
-		printf("  Interface:    %d\n", cur_dev->interface_number);
-		printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
-
-		printf("\n");
-		cur_dev = cur_dev->next;
-	}
+		
 	printf("%s\n", argv[1]);
 
-	wchar_t dummy[256];
+#define MAX_STR 255
+	wchar_t dummy[MAX_STR];
+	char dummy2[MAX_STR];
 	PHIDP_PREPARSED_DATA pp_data = NULL;
-	struct hid_device_info dev_info = { .interface_number = 0,
-	.manufacturer_string = dummy,
-	.path = dummy};
+	struct hid_device_info dev_info = {
+		.interface_number = 0,
+		.manufacturer_string = dummy,
+		.product_string = dummy,
+		.path = dummy2};
 
 	if (!read_preparsed_data_from_file(argv[1], &dev_info, &pp_data))
 	{
@@ -413,8 +398,13 @@ int main(int argc, char* argv[])
 		printf("\n");
 
 		printf("  Manufacturer: %ls\n", dev_info.manufacturer_string);
+		printf("  Product:      %ls\n", dev_info.product_string);
+		printf("  Release:      %hx\n", dev_info.release_number);
+		printf("  Interface:    %d\n", dev_info.interface_number);
+		printf("  Usage (page): 0x%hx (0x%hx)\n", dev_info.usage, dev_info.usage_page);
+		printf("  Report Descriptor: ");
 
-		unsigned char report_descriptor[4096];
+		unsigned char report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
 
 
 		hid_device dev = { .blocking = FALSE,
@@ -433,10 +423,37 @@ int main(int argc, char* argv[])
 			.write_buf=0};
 
 		int res;
-		if (reconstruct_report_descriptor(NULL, pp_data, report_descriptor, 4096) >= 0) res = 0;
+		res = reconstruct_report_descriptor(NULL, pp_data, report_descriptor, HID_API_MAX_REPORT_DESCRIPTOR_SIZE);
+
+		if (res < 0) {
+			return -1;
+		}
 
 		HidD_FreePreparsedData(pp_data);
 
+		char filename[MAX_STR];
+		FILE* file;
+
+		sprintf_s(filename, MAX_STR, "%04X_%04X_%04X_%04X_reconstructed.rpt_desc", dev_info.vendor_id, dev_info.product_id, dev_info.usage, dev_info.usage_page);
+		errno_t err = fopen_s(&file, filename, "w");
+		if (err != 0) {
+			printf("ERROR: Couldn't open file %s for writing\n", filename);
+			return -1;
+		}
+
+		printf("(Reconstructed Report Descriptor has %d bytes)", res);
+		for (int i = 0; i < res; i++) {
+			if (i % 10 == 0) {
+				printf("\n");
+				if (i != 0) fprintf(file, "\n");
+			}
+			printf("0x%02x, ", report_descriptor[i]);
+			fprintf(file, "0x%02x, ", report_descriptor[i]);				
+		}
+
+		fclose(file);
+		printf("\nWrote reconstructed report descriptor to %s\n", filename);
+		
 		return 0;
 	}
 }
