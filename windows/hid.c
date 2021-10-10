@@ -278,13 +278,19 @@ static struct hid_api_version api_version = {
 		USHORT FirstByteOfLinkCollectionArray;
 		USHORT NumberLinkCollectionNodes;
 
-// MINGW warns about flexible array member in union not supported
-#pragma GCC diagnostic ignored "-Wgnu-flexible-array-union-member"
+		// MINGW fails with: Flexible array member in union not supported
+#ifdef __MINGW32__
+		// https://gcc.gnu.org/onlinedocs/gcc/Zero-Length.html
+		union {
+			hid_pp_cap caps[0];
+			hid_pp_link_collection_node LinkCollectionArray[0];
+		};
+#else
 		union {
 			hid_pp_cap caps[];
 			hid_pp_link_collection_node LinkCollectionArray[];
 		};
-#pragma GCC diagnostic pop
+#endif
 
 	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
 
