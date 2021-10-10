@@ -1,4 +1,5 @@
 #include "../windows/hid.c"
+#include <stddef.h>
 #include <hidapi.h>
 
 read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP_PREPARSED_DATA* pp_data2) {
