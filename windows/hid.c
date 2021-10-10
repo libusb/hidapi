@@ -278,11 +278,19 @@ static struct hid_api_version api_version = {
 		USHORT FirstByteOfLinkCollectionArray;
 		USHORT NumberLinkCollectionNodes;
 
-		// MINGW: flexible array member in union not supported - but works with MSVC
-		//union {
+#ifdef __MINGW32__
+		// MINGW fails with: Flexible array member in union not supported
+		// Solution: https://gcc.gnu.org/onlinedocs/gcc/Zero-Length.html
+		union {
+			hid_pp_cap caps[0];
+			hid_pp_link_collection_node LinkCollectionArray[0];
+		};
+#else
+		union {
 			hid_pp_cap caps[];
-			//hid_pp_link_collection_node LinkCollectionArray[];
-		//};
+			hid_pp_link_collection_node LinkCollectionArray[];
+		};
+#endif
 
 	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
 
@@ -2465,20 +2473,19 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char* buf, size_t buf_size)
 {
-	BOOL res;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 
-	res = HidD_GetPreparsedData(dev->device_handle, &pp_data);
-	if (!res) {
+	if (!HidD_GetPreparsedData(dev->device_handle, &pp_data)) {
 		register_error(dev, "HidD_GetPreparsedData");
 		return -1;
 	}
 	else {
-		int return_value = reconstruct_report_descriptor(dev, pp_data, buf, buf_size);
+		int res;
+		res = reconstruct_report_descriptor(dev, pp_data, buf, buf_size);
 
 		HidD_FreePreparsedData(pp_data);
 
-		return return_value;
+		return res;
 	}
 }
 
