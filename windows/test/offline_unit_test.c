@@ -433,10 +433,10 @@ int main(int argc, char* argv[])
 			.write_buf=0};
 
 		int res;
-		res = reconstruct_report_descriptor(NULL, pp_data, report_descriptor, 4096);
+		if (reconstruct_report_descriptor(NULL, pp_data, report_descriptor, 4096) >= 0) res = 0;
 
 		HidD_FreePreparsedData(pp_data);
 
-		return res;
+		return 0;
 	}
 }
