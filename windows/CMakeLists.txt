@@ -37,3 +37,6 @@ target_link_libraries(offline_unit_test
         PRIVATE setupapi
     )
 add_test(ReconstructorTest_046D_C52F_0001_000C offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/046D_C52F_0001_000C.pp_data)
+
+add_test (ReconstructorCompareOutput_046D_C52F_0001_000C ${CMAKE_COMMAND} -E compare_files
+     046D_C52F_0001_000C_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/046D_C52F_0001_000C_expected.rpt_desc)

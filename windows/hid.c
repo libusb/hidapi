@@ -1596,7 +1596,7 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 	ULONG max_datalist_len[NUM_OF_HIDP_REPORT_TYPES];
 
 	if (HidP_GetLinkCollectionNodes(link_collection_nodes, &link_collection_nodes_len, pp_data) != HIDP_STATUS_SUCCESS) {
-		//register_error(dev, "HidP_GetLinkCollectionNodes: Buffer to small");
+		register_error(dev, "HidP_GetLinkCollectionNodes: Buffer to small");
 	}
 	else {
 		// All data read successfull
