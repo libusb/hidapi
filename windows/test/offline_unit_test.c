@@ -314,41 +314,42 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 					continue;
 				};
 
-								
+
+			phid_pp_link_collection_node pcoll = (phid_pp_link_collection_node)(((unsigned char*)&pp_data->caps[0]) + pp_data->FirstByteOfLinkCollectionArray);
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->LinkUsage          = 0x%04hX\n", &coll_idx, &temp_usage) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].LinkUsage = temp_usage;
+				pcoll[coll_idx].LinkUsage = temp_usage;
 				continue;
 			};
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->LinkUsagePage      = 0x%04hX\n", &coll_idx, &temp_usage) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].LinkUsagePage = temp_usage;
+				pcoll[coll_idx].LinkUsagePage = temp_usage;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->Parent             = %hu\n", &coll_idx, &temp_ushort) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].Parent = temp_ushort;
+				pcoll[coll_idx].Parent = temp_ushort;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->NumberOfChildren   = %hu\n", &coll_idx, &temp_ushort) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].NumberOfChildren = temp_ushort;
+				pcoll[coll_idx].NumberOfChildren = temp_ushort;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->NextSibling        = %hu\n", &coll_idx, &temp_ushort) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].NextSibling = temp_ushort;
+				pcoll[coll_idx].NextSibling = temp_ushort;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->FirstChild         = %hu\n", &coll_idx, &temp_ushort) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].FirstChild = temp_ushort;
+				pcoll[coll_idx].FirstChild = temp_ushort;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->CollectionType     = %d\n", &coll_idx, &temp_ulong) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].CollectionType = temp_ulong;
+				pcoll[coll_idx].CollectionType = temp_ulong;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->IsAlias            = %d\n", &coll_idx, &temp_ulong) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].IsAlias = temp_ulong;
+				pcoll[coll_idx].IsAlias = temp_ulong;
 				continue;
 			}
 			if (sscanf(line, "pp_data->LinkCollectionArray[%d]->Reserved           = %d\n", &coll_idx, &temp_ulong) == 2) {
-				pp_data->LinkCollectionArray[coll_idx].Reserved = temp_ulong;
+				pcoll[coll_idx].Reserved = temp_ulong;
 				continue;
 			}
 
@@ -368,8 +369,7 @@ int main(int argc, char* argv[])
 	unsigned char buf[256];
 #define MAX_STR 255
 	wchar_t wstr[MAX_STR];
-	hid_device* handle;
-
+	
 	struct hid_device_info* devs, * cur_dev;
 
 	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
@@ -397,7 +397,6 @@ int main(int argc, char* argv[])
 		printf("\n");
 		cur_dev = cur_dev->next;
 	}
-	//hid_get_report_descriptor(hid_device * dev, unsigned char* buf, size_t buf_size)
 	printf("%s\n", argv[1]);
 
 	wchar_t dummy[256];
@@ -415,11 +414,29 @@ int main(int argc, char* argv[])
 
 		printf("  Manufacturer: %ls\n", dev_info.manufacturer_string);
 
-		//unsigned char report_descriptor[4096];
-		//hid_get_report_descriptor(handle, report_descriptor, 4096);
+		unsigned char report_descriptor[4096];
+
+
+		hid_device dev = { .blocking = FALSE,
+			.device_handle=0,
+			.device_info = &dev_info,
+			.feature_buf=0,
+			.feature_report_length =0,
+			.input_report_length =0,
+			.last_error_num=0,
+			.last_error_num=0,
+			.last_error_str=0,
+			.ol=0,
+			.output_report_length=0,
+			.read_buf=0,
+			.read_pending=0,
+			.write_buf=0};
+
+		int res;
+		res = reconstruct_report_descriptor(NULL, pp_data, report_descriptor, 4096);
 
 		HidD_FreePreparsedData(pp_data);
 
-		return 0;
+		return res;
 	}
 }
