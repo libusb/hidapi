@@ -107,7 +107,7 @@ jobs:
       run: cmake --build . --target install
     - name: Run CTest
       working-directory: build
-      run: ctest
+      run: ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
@@ -158,7 +158,7 @@ jobs:
       run: cmake --build . --target install
     - name: Run CTest
       working-directory: build
-      run: ctest
+      run: ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:

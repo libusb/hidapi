@@ -406,7 +406,7 @@ int main(int argc, char* argv[])
 	.manufacturer_string = dummy,
 	.path = dummy};
 
-	if (read_preparsed_data_from_file(argv[1], &dev_info, &pp_data))
+	if (!read_preparsed_data_from_file(argv[1], &dev_info, &pp_data))
 	{
 		return 1;
 	} else {
