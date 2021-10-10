@@ -156,6 +156,9 @@ jobs:
     - name: Build CMake
       working-directory: build
       run: cmake --build . --target install
+    - name: Run CTest
+      working-directory: build
+      run: ctest
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:

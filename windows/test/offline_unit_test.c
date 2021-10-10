@@ -5,7 +5,11 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 	FILE* file;
 	errno_t err = fopen_s(&file, filename, "r");
 
-	if (err == 0) {
+	if (err != 0) {
+		printf("ERROR: Couldn't open file %s for reading\n", filename);
+		return -1;
+	}
+	else {
 		printf("Opened %s for reading\n", filename);
 		char line[256];
 
@@ -36,7 +40,11 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 		*pp_data2 = pp_data;
 
 		errno_t err = fopen_s(&file, filename, "r");
-		if (err == 0) {
+		if (err != 0) {
+			printf("ERROR: Couldn't open file %s for reading\n", filename);
+			return -1;
+		}
+		else {
 			printf("Opened %s for reading\n", filename);
 			char line[256];
 
@@ -350,16 +358,12 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 }
 
 
-main(int argc, char* argv[])
+int main(int argc, char* argv[])
 {
-
-	int res;
 	unsigned char buf[256];
 #define MAX_STR 255
 	wchar_t wstr[MAX_STR];
 	hid_device* handle;
-	int i;
-
 
 	struct hid_device_info* devs, * cur_dev;
 
@@ -391,24 +395,26 @@ main(int argc, char* argv[])
 	//hid_get_report_descriptor(hid_device * dev, unsigned char* buf, size_t buf_size)
 	printf("%s\n", argv[1]);
 
-	const char dummy[256];
+	wchar_t dummy[256];
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	struct hid_device_info dev_info = { .interface_number = 0,
 	.manufacturer_string = dummy,
 	.path = dummy};
-	read_preparsed_data_from_file(argv[1], &dev_info, &pp_data);
-	printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", dev_info.vendor_id, dev_info.product_id, dev_info.path, dev_info.serial_number);
-	printf("\n");
 
-	printf("  Manufacturer: %ls\n", dev_info.manufacturer_string);
+	if (read_preparsed_data_from_file(argv[1], &dev_info, &pp_data))
+	{
+		return 1;
+	} else {
+		printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", dev_info.vendor_id, dev_info.product_id, dev_info.path, dev_info.serial_number);
+		printf("\n");
 
-	unsigned char report_descriptor[4096];
+		printf("  Manufacturer: %ls\n", dev_info.manufacturer_string);
 
-	//hid_get_report_descriptor(handle, report_descriptor, 4096);
+		//unsigned char report_descriptor[4096];
+		//hid_get_report_descriptor(handle, report_descriptor, 4096);
 
-	HidD_FreePreparsedData(pp_data);
+		HidD_FreePreparsedData(pp_data);
 
-	printf("\n");
-
-	return 1;
+		return 0;
+	}
 }
