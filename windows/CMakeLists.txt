@@ -36,4 +36,4 @@ target_link_libraries(offline_unit_test
         PUBLIC hidapi_include
         PRIVATE setupapi
     )
-add_test(test1 offline_unit_test 046D_C52F_0001_000C.pp_data)
+add_test(ReconstructorTest_046D_C52F_0001_000C offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/046D_C52F_0001_000C.pp_data)

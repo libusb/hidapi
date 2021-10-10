@@ -7,7 +7,9 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 	errno_t err = fopen_s(&file, filename, "r");
 
 	if (err != 0) {
-		printf("ERROR: Couldn't open file %s for reading\n", filename);
+		char currentPath[2048];
+		GetCurrentDirectoryA(sizeof(currentPath), currentPath);
+		printf("ERROR: Couldn't open file %s\\%s for reading\n", currentPath, filename);
 		return -1;
 	}
 	else {
@@ -42,7 +44,9 @@ read_preparsed_data_from_file(char* filename, struct hid_device_info* dev, PHIDP
 
 		errno_t err = fopen_s(&file, filename, "r");
 		if (err != 0) {
-			printf("ERROR: Couldn't open file %s for reading\n", filename);
+			char currentPath[2048];
+			GetCurrentDirectoryA(sizeof(currentPath), currentPath);
+			printf("ERROR: Couldn't open file %s\\%s for reading\n", currentPath, filename);
 			return -1;
 		}
 		else {
