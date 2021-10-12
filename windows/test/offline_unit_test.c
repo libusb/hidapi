@@ -447,8 +447,8 @@ int main(int argc, char* argv[])
 				printf("\n");
 				if (i != 0) fprintf(file, "\n");
 			}
-			printf("0x%02x, ", report_descriptor[i]);
-			fprintf(file, "0x%02x, ", report_descriptor[i]);				
+			printf("0x%02X, ", report_descriptor[i]);
+			fprintf(file, "0x%02X, ", report_descriptor[i]);				
 		}
 
 		fclose(file);
