@@ -55,4 +55,8 @@ add_test (ReconstructorCompareOutput_046D_C52F_0002_FF00 ${CMAKE_COMMAND} -E com
 add_test(ReconstructorTest_17CC_1130_0000_FF01 offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/17CC_1130_0000_FF01.pp_data)
 add_test (ReconstructorCompareOutput_17CC_1130_0000_FF01 ${CMAKE_COMMAND} -E compare_files
      17CC_1130_0000_FF01_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/17CC_1130_0000_FF01_expected.rpt_desc)
+     
+add_test(ReconstructorTest_046D_0A37_0001_000C offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/046D_0A37_0001_000C.pp_data)
+add_test (ReconstructorCompareOutput_046D_0A37_0001_000C ${CMAKE_COMMAND} -E compare_files
+     046D_0A37_0001_000C_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/046D_0A37_0001_000C_expected.rpt_desc)
 
