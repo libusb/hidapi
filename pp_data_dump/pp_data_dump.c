@@ -125,18 +125,18 @@ int dump_pp_data(FILE* file, hid_device* dev)
 
 		phid_pp_cap pcap = (phid_pp_cap)(((unsigned char*)pp_data) + offsetof(HIDP_PREPARSED_DATA, caps));
 		fprintf(file, "# Input hid_pp_cap struct:\n");
-		for (int caps_idx = 0; caps_idx < pp_data->caps_info[0].NumberOfCaps; caps_idx++) {
-			dump_hid_pp_cap(file, pcap + pp_data->caps_info[0].FirstCap + caps_idx, caps_idx);
+		for (int caps_idx = pp_data->caps_info[0].FirstCap; caps_idx < pp_data->caps_info[0].LastCap; caps_idx++) {
+			dump_hid_pp_cap(file, pcap + caps_idx, caps_idx);
 			fprintf(file, "\n");
 		}
 		fprintf(file, "# Output hid_pp_cap struct:\n");
-		for (int caps_idx = 0; caps_idx < pp_data->caps_info[1].NumberOfCaps; caps_idx++) {
-			dump_hid_pp_cap(file, pcap + pp_data->caps_info[1].FirstCap + caps_idx, caps_idx);
+		for (int caps_idx = pp_data->caps_info[1].FirstCap; caps_idx < pp_data->caps_info[1].LastCap; caps_idx++) {
+			dump_hid_pp_cap(file, pcap + caps_idx, caps_idx);
 			fprintf(file, "\n");
 		}
 		fprintf(file, "# Feature hid_pp_cap struct:\n");
-		for (int caps_idx = 0; caps_idx < pp_data->caps_info[2].NumberOfCaps; caps_idx++) {
-			dump_hid_pp_cap(file, pcap + pp_data->caps_info[2].FirstCap + caps_idx, caps_idx);
+		for (int caps_idx = pp_data->caps_info[2].FirstCap; caps_idx < pp_data->caps_info[2].LastCap; caps_idx++) {
+			dump_hid_pp_cap(file, pcap + caps_idx, caps_idx);
 			fprintf(file, "\n");
 		}
 
