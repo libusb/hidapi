@@ -1,4 +1,4 @@
-#include "../windows/hid.c"
+#include "../hid.c"
 #include <stddef.h>
 #include <hidapi.h>
 
