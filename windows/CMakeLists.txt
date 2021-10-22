@@ -118,3 +118,16 @@ add_test(ReconstructorTest_046D_C534_0080_0001 offline_unit_test ${CMAKE_SOURCE_
 add_test (ReconstructorCompareOutput_046D_C534_0080_0001 ${CMAKE_COMMAND} -E compare_files
      046D_C534_0080_0001_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/046D_C534_0080_0001_expected.rpt_desc)
 
+
+add_test(ReconstructorTest_047F_C056_0001_000C offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/047F_C056_0001_000C.pp_data)
+add_test (ReconstructorCompareOutput_047F_C056_0001_000C ${CMAKE_COMMAND} -E compare_files
+     047F_C056_0001_000C_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/047F_C056_0001_000C_expected.rpt_desc)
+
+add_test(ReconstructorTest_047F_C056_0003_FFA0 offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/047F_C056_0003_FFA0.pp_data)
+add_test (ReconstructorCompareOutput_047F_C056_0003_FFA0 ${CMAKE_COMMAND} -E compare_files
+     047F_C056_0003_FFA0_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/047F_C056_0003_FFA0_expected.rpt_desc)
+
+add_test(ReconstructorTest_047F_C056_0005_000B offline_unit_test ${CMAKE_SOURCE_DIR}/windows/test/047F_C056_0005_000B.pp_data)
+add_test (ReconstructorCompareOutput_047F_C056_0005_000B ${CMAKE_COMMAND} -E compare_files
+     047F_C056_0005_000B_reconstructed.rpt_desc ${CMAKE_SOURCE_DIR}/windows/test/047F_C056_0005_000B_expected.rpt_desc)
+
