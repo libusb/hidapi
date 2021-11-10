@@ -33,6 +33,7 @@ typedef LONG NTSTATUS;
 #endif
 
 #ifdef __MINGW32__
+#include <devpropdef.h>
 #include <ntdef.h>
 #include <winbase.h>
 #endif
