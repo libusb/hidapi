@@ -66,7 +66,7 @@ back-end will of course not work with Bluetooth devices.
 HIDAPI also comes with a Test GUI. The Test GUI is cross-platform and uses
 Fox Toolkit <http://www.fox-toolkit.org>.  It will build on every platform
 which HIDAPI supports.  Since it relies on a 3rd party library, building it
-is optional but sometime it is useful when debugging hardware.
+is optional but it is useful when debugging hardware.
 
 NOTE: Test GUI based on Fox Toolkit is not actively developed nor supported
 by HIDAPI team. It is kept as a historical artifact. It may even work sometime
