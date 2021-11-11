@@ -77,9 +77,8 @@ Make sure to use Fox-Toolkit v1.6 if you choose to use it.
 
 ### Console Test App
 
-If you want to play around with your HID device/devices before starting
-any development with HIDAPI and using a GUI app is not an option for you -
-you may try a [`hidapitester`](https://github.com/todbot/hidapitester).
+If you want to play around with your HID device before starting
+any development with HIDAPI and using a GUI app is not an option for you, you may try [`hidapitester`](https://github.com/todbot/hidapitester).
 
 This app has a console interface for most of the features supported
 by HIDAPI library.
