@@ -20,6 +20,7 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 
 * [About](#about)
     * [Test GUI](#test-gui)
+    * [Console Test App](#console-test-app)
 * [What Does the API Look Like?](#what-does-the-api-look-like)
 * [License](#license)
 * [Installing HIDAPI](#installing-hidapi)
@@ -65,7 +66,7 @@ back-end will of course not work with Bluetooth devices.
 HIDAPI also comes with a Test GUI. The Test GUI is cross-platform and uses
 Fox Toolkit <http://www.fox-toolkit.org>.  It will build on every platform
 which HIDAPI supports.  Since it relies on a 3rd party library, building it
-is optional but recommended because it is so useful when debugging hardware.
+is optional but sometime it is useful when debugging hardware.
 
 NOTE: Test GUI based on Fox Toolkit is not actively developed nor supported
 by HIDAPI team. It is kept as a historical artifact. It may even work sometime
@@ -73,6 +74,15 @@ or on some platforms, but it is not going to get any new features or bugfixes.
 
 Instructions for installing Fox-Toolkit on each platform is not provided.
 Make sure to use Fox-Toolkit v1.6 if you choose to use it.
+
+### Console Test App
+
+If you want to play around with your HID device/devices before starting
+any development with HIDAPI and using a GUI app is not an option for you -
+you may try a [`hidapitester`](https://github.com/todbot/hidapitester).
+
+This app has a console interface for most of the features supported
+by HIDAPI library.
 
 ## What Does the API Look Like?
 
