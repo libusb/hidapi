@@ -182,7 +182,7 @@ add_subdirectory(hidapi)
 <details>
   <summary>NOTE</summary>
 
-  If you project happen to use `BUILD_SHARED_LIBS` as a `CACHE` variable globally for you project, setting it as simple variable, as showed above _will have not affect_ up until to _CMake 3.13_. See [CMP0077](https://cmake.org/cmake/help/latest/policy/CMP0077.html) for details.
+  If you project happen to use `BUILD_SHARED_LIBS` as a `CACHE` variable globally for you project, setting it as simple variable, as showed above _will have not affect_ up until _CMake 3.13_. See [CMP0077](https://cmake.org/cmake/help/latest/policy/CMP0077.html) for details.
 </details><br>
 
 There are several important differences in the behavior of HIDAPI CMake build system when CMake is built as standalone package vs subdirectory build:
