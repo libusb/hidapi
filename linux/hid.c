@@ -62,6 +62,13 @@
 #endif
 
 
+// HIDIOCGINPUT is not defined in Linux kernel headers < 5.11.
+// This definition is from hidraw.h in Linux >= 5.11.
+// https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f43d3870cafa2a0f3854c1819c8385733db8f9ae
+#ifndef HIDIOCGINPUT
+#define HIDIOCGINPUT(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x0A, len)
+#endif
+
 /* USB HID device property names */
 const char *device_string_names[] = {
 	"manufacturer",
@@ -1065,13 +1072,15 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return res;
 }
 
-// Not supported by Linux HidRaw yet
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
-	(void)dev;
-	(void)data;
-	(void)length;
-	return -1;
+	int res;
+
+	res = ioctl(dev->device_handle, HIDIOCGINPUT(length), data);
+	if (res < 0)
+		register_device_error_format(dev, "ioctl (GINPUT): %s", strerror(errno));
+
+	return res;
 }
 
 void HID_API_EXPORT hid_close(hid_device *dev)
