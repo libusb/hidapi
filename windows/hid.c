@@ -126,7 +126,6 @@ static struct hid_api_version api_version = {
 			BOOLEAN On;
 		};
 	} HIDP_DATA, * PHIDP_DATA;
-	//typedef void* PHIDP_PREPARSED_DATA;
 	typedef struct _HIDP_LINK_COLLECTION_NODE {
 		USAGE  LinkUsage;
 		USAGE  LinkUsagePage;
@@ -647,17 +646,6 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 		}
 	}
 	return 0;
-}
-
-/// <summary>
-/// Writes a long report descriptor item according USB HID spec 1.11 chapter 6.2.2.3
-/// </summary>
-/// <param name="data">Optional data items (NULL if bDataSize is 0)</param>
-/// <param name="bLongItemTag">Long item tag (8 bits)</param>
-/// <param name="bDataSize">Size of long item data (range 0-255 in Bytes)</param>
-/// <returns></returns>
-static int rd_write_long_item(unsigned char* data, unsigned char bLongItemTag, unsigned char bDataSize) {
-	// Not implemented
 }
 
 typedef enum _RD_MAIN_ITEMS {
@@ -1628,19 +1616,6 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 		for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 			for (USHORT caps_idx = pp_data->caps_info[rt_idx].FirstCap; caps_idx < pp_data->caps_info[rt_idx].LastCap; caps_idx++) {
 				int first_bit, last_bit;
-				//printf("DEBUG:ReportType %d\n", rt_idx);
-				//printf("DEBUG:BytePosition %d\n", pp_data->caps[caps_idx].BytePosition);
-				//printf("DEBUG:BitPosition %d\n", pp_data->caps[caps_idx].BitPosition);
-				//printf("DEBUG:BitSize %d\n", pp_data->caps[caps_idx].BitSize);
-				//printf("DEBUG:ReportCount %d\n", pp_data->caps[caps_idx].ReportCount);
-				//printf("DEBUG:ReportID %d\n", pp_data->caps[caps_idx].ReportID);
-				//printf("DEBUG:NotRange.Usage %d\n", pp_data->caps[caps_idx].NotRange.Usage);
-				//printf("DEBUG:IsMultipleItemsForArray %d\n", pp_data->caps[caps_idx].IsMultipleItemsForArray);
-				//printf("DEBUG:NextBytePosition %d\n", pp_data->caps[caps_idx].NextBytePosition);
-				//printf("DEBUG:IsAlias %d\n", pp_data->caps[caps_idx].IsAlias);
-				//printf("DEBUG:IsRange %d\n", pp_data->caps[caps_idx].IsRange);
-				//printf("DEBUG:IsPadding %d\n", pp_data->caps[caps_idx].IsPadding);
-				//printf("DEBUG:BitField %x\n", pp_data->caps[caps_idx].BitField);
 				first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8 +
 						        pp_data->caps[caps_idx].BitPosition;
 				last_bit = first_bit + pp_data->caps[caps_idx].BitSize *
@@ -1940,7 +1915,6 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 		}
 
 
-
 		// ***********************************************************************
 		// Add const items for all bit gaps and at the report end for 8bit padding
 		// ***********************************************************************
@@ -1988,9 +1962,6 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				}
 			}
 		}
-
-
-
 
 
 		// ***********************************
