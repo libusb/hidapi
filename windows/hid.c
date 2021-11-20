@@ -1397,10 +1397,9 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 	}
 
 	if (rd_item == rd_main_collection_end) {
-		// Item without data
+		// Item without data (1Byte prefix only)
 		unsigned char oneBytePrefix = rd_item + 0x00;
 		rd_append_byte(oneBytePrefix, list);
-		//printf("%02X               ", oneBytePrefix);
 	}
 	else if ((rd_item == rd_global_logical_minimum) ||
 		(rd_item == rd_global_logical_maximum) ||
@@ -1408,21 +1407,22 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 		(rd_item == rd_global_physical_maximum)) {
 		// Item with signed integer data
 		if ((data >= -128) && (data <= 127)) {
+			// 1Byte prefix + 1Byte data
 			unsigned char oneBytePrefix = rd_item + 0x01;
 			char localData = (char)data;
 			rd_append_byte(oneBytePrefix, list);
 			rd_append_byte(localData & 0xFF, list);
-			//printf("%02X %02X            ", oneBytePrefix, localData & 0xFF);
 		}
 		else if ((data >= -32768) && (data <= 32767)) {
+			// 1Byte prefix + 2Byte data
 			unsigned char oneBytePrefix = rd_item + 0x02;
 			INT16 localData = (INT16)data;
 			rd_append_byte(oneBytePrefix, list);
 			rd_append_byte(localData & 0xFF, list);
 			rd_append_byte(localData >> 8 & 0xFF, list);
-			//printf("%02X %02X %02X         ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF);
 		}
 		else if ((data >= -2147483648LL) && (data <= 2147483647)) {
+			// 1Byte prefix + 4Byte data
 			unsigned char oneBytePrefix = rd_item + 0x03;
 			INT32 localData = (INT32)data;
 			rd_append_byte(oneBytePrefix, list);
@@ -1430,7 +1430,6 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 			rd_append_byte(localData >> 8 & 0xFF, list);
 			rd_append_byte(localData >> 16 & 0xFF, list);
 			rd_append_byte(localData >> 24 & 0xFF, list);
-			//printf("%02X %02X %02X %02X %02X   ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF, localData >> 16 & 0xFF, localData >> 24 & 0xFF);
 		}
 		else {
 			// Error data out of range
@@ -1440,21 +1439,22 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 	else {
 		// Item with unsigned integer data
 		if ((data >= 0) && (data <= 0xFF)) {
+			// 1Byte prefix + 1Byte data
 			unsigned char oneBytePrefix = rd_item + 0x01;
 			unsigned char localData = (unsigned char)data;
 			rd_append_byte(oneBytePrefix, list);
 			rd_append_byte(localData & 0xFF, list);
-			//printf("%02X %02X            ", oneBytePrefix, localData & 0xFF);
 		}
 		else if ((data >= 0) && (data <= 0xFFFF)) {
+			// 1Byte prefix + 2Byte data
 			unsigned char oneBytePrefix = rd_item + 0x02;
 			UINT16 localData = (UINT16)data;
 			rd_append_byte(oneBytePrefix, list);
 			rd_append_byte(localData & 0xFF, list);
 			rd_append_byte(localData >> 8 & 0xFF, list);
-			//printf("%02X %02X %02X         ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF);
 		}
 		else if ((data >= 0) && (data <= 0xFFFFFFFF)) {
+			// 1Byte prefix + 4Byte data
 			unsigned char oneBytePrefix = rd_item + 0x03;
 			UINT32 localData = (UINT32)data;
 			rd_append_byte(oneBytePrefix, list);
@@ -1462,7 +1462,6 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 			rd_append_byte(localData >> 8 & 0xFF, list);
 			rd_append_byte(localData >> 16 & 0xFF, list);
 			rd_append_byte(localData >> 24 & 0xFF, list);
-			//printf("%02X %02X %02X %02X %02X   ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF, localData >> 16 & 0xFF, localData >> 24 & 0xFF);
 		}
 		else {
 			// Error data out of range
@@ -1932,8 +1931,8 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 		UCHAR report_id = main_item_list->ReportID;
 		if (main_item_list->MainItemType == rd_collection) {
 			if (last_usage_page != link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage) {
+				// Write "Usage Page" at the begin of a collection - except it refers the same table as wrote last 
 				rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &byte_list);
-				//printf("Usage Page (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage);
 				last_usage_page = link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage;
 			}
 			if (inhibit_write_of_usage) {
@@ -1941,60 +1940,55 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				inhibit_write_of_usage = FALSE;
 			}
 			else {
+				// Write "Usage" of collection
 				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
-				//printf("Usage  (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsage);
 			}
+			// Write begin of "Collection" 
 		    rd_write_short_item(rd_main_collection, link_collection_nodes[main_item_list->CollectionIndex].CollectionType, &byte_list);
-			//printf("Collection (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].CollectionType);
 		}
 		else if (main_item_list->MainItemType == rd_collection_end) {
+			// Write "End Collection"
 			rd_write_short_item(rd_main_collection_end, 0, &byte_list);
-			//printf("End Collection\n");
 		}
 		else if (main_item_list->MainItemType == rd_delimiter_open) {
 			if (main_item_list->CollectionIndex != -1) {
-				// Print usage page when changed
+				// Write "Usage Page" inside of a collection delmiter section
 				if (last_usage_page != link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage) {
 					rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &byte_list);
-					//printf("Usage Page (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage);
 					last_usage_page = link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage;
 				}
 			}
 			else if (main_item_list->CapsIndex != 0) {
-				// Print usage page when changed
+				// Write "Usage Page" inside of a main item delmiter section
 				int caps_idx = main_item_list->CapsIndex;
 				if (pp_data->caps[caps_idx].UsagePage != last_usage_page) {
 					rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &byte_list);
-					//printf("Usage Page (%d)\n", pp_data->caps[caps_idx].UsagePage);
 					last_usage_page = pp_data->caps[caps_idx].UsagePage;
 				}
 			}
+			// Write "Delimiter Open"
 			rd_write_short_item(rd_local_delimiter, 1, &byte_list); // 1 = open set of aliased usages
-			//printf("Delimiter Open (%d)\n", 1);
 		}
 		else if (main_item_list->MainItemType == rd_delimiter_usage) {
 			if (main_item_list->CollectionIndex != -1) {
-				// Print Aliased Collection usage
+				// Write aliased collection "Usage"
 				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
-				//printf("Usage  (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsage);
 			}  if (main_item_list->CapsIndex != 0) {
 				int caps_idx = main_item_list->CapsIndex;
-				// Print Aliased Usage
+				// Write aliased main item range from "Usage Minimum" to "Usage Maximum"
 				if (pp_data->caps[caps_idx].IsRange) {
 					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &byte_list);
-					//printf("Usage Minimum (%d)\n", pp_data->caps[caps_idx].Range.UsageMin);
 					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &byte_list);
-					//printf("Usage Maximum (%d)\n", pp_data->caps[caps_idx].Range.UsageMax);
 				}
 				else {
+					// Write single aliased main item "Usage"
 					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &byte_list);
-					//printf("Usage (%d)\n", pp_data->caps[caps_idx].NotRange.Usage);
 				}
 			}
 		}
 		else if (main_item_list->MainItemType == rd_delimiter_close) {
+			// Write "Delimiter Close"
 			rd_write_short_item(rd_local_delimiter, 0, &byte_list); // 0 = close set of aliased usages
-			//printf("Delimiter Close (%d)\n", 0);
 			// Inhibit next usage write
 			inhibit_write_of_usage = TRUE;
 		}
@@ -2003,89 +1997,86 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 			// The preparsed data doesn't contain any information about padding. Therefore all undefined gaps
 			// in the reports are filled with the same style of constant padding. 
 
+			// Write "Report Size" with number of padding bits
 			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit), &byte_list);
-			//printf("Report Size (%d)  Padding\n", (main_item_list->LastBit - main_item_list->FirstBit));
 
+			// Write "Report Count" for padding always as 1
 			rd_write_short_item(rd_global_report_count, 1, &byte_list);
-			//printf("Report Count (%d) Padding\n", 1);
 
 			if (rt_idx == HidP_Input) {
+				// Write "Input" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
 				rd_write_short_item(rd_main_input, 0x03, &byte_list); // Const / Abs
-				//printf("Input (0x%02X)     Padding\n", 0x03);
 			}
 			else if (rt_idx == HidP_Output) {
+				// Write "Output" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
 				rd_write_short_item(rd_main_output, 0x03, &byte_list); // Const / Abs
-				//printf("Output (0x%02X)    Padding\n", 0x03);
 			}
 			else if (rt_idx == HidP_Feature) {
+				// Write "Feature" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
 				rd_write_short_item(rd_main_feature, 0x03, &byte_list); // Const / Abs
-				//printf("Feature (0x%02X)   Padding\n", 0x03);
 			}
 			report_count = 0;
 		}
 		else if (pp_data->caps[caps_idx].IsButtonCap) {
 			// Button
+			// (The preparsed data contain different data for 1 bit Button caps, than for parametric Value caps)
+
 			if (last_report_id != pp_data->caps[caps_idx].ReportID) {
-				// Write Report ID if changed
+				// Write "Report ID" if changed
 				rd_write_short_item(rd_global_report_id, pp_data->caps[caps_idx].ReportID, &byte_list);
-				//printf("Report ID (%d)\n", pp_data->caps[caps_idx].ReportID);
 				last_report_id = pp_data->caps[caps_idx].ReportID;
 			}
 
-			// Print usage page when changed
+			// Write "Usage Page" when changed
 			if (pp_data->caps[caps_idx].UsagePage != last_usage_page) {
 				rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &byte_list);
-				//printf("Usage Page (%d)\n", pp_data->caps[caps_idx].UsagePage);
 				last_usage_page = pp_data->caps[caps_idx].UsagePage;
 			}
 
-			// Print only local report items for each cap, if ReportCount > 1
+			// Write only local report items for each cap, if ReportCount > 1
 			if (pp_data->caps[caps_idx].IsRange) {
 				report_count += (pp_data->caps[caps_idx].Range.DataIndexMax - pp_data->caps[caps_idx].Range.DataIndexMin);
 			}
 
 			if (inhibit_write_of_usage) {
-				// Inhibit only once after DELIMITER statement
+				// Inhibit only once after Delimiter - Reset flag
 				inhibit_write_of_usage = FALSE;
 			}
 			else {
 				if (pp_data->caps[caps_idx].IsRange) {
+					// Write range from "Usage Minimum" to "Usage Maximum"
 					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &byte_list);
-					//printf("Usage Minimum (%d)\n", pp_data->caps[caps_idx].Range.UsageMin);
 					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &byte_list);
-					//printf("Usage Maximum (%d)\n", pp_data->caps[caps_idx].Range.UsageMax);
 				}
 				else {
+					// Write single "Usage"
 					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &byte_list);
-					//printf("Usage (%d)\n", pp_data->caps[caps_idx].NotRange.Usage);
 				}
 			}
 
 			if (pp_data->caps[caps_idx].IsDesignatorRange) {
+				// Write physical descriptor indices range from "Designator Minimum" to "Designator Maximum"
 				rd_write_short_item(rd_local_designator_minimum, pp_data->caps[caps_idx].Range.DesignatorMin, &byte_list);
-				//printf("Designator Minimum (%d)\n", pp_data->caps[caps_idx].Range.DesignatorMin);
 				rd_write_short_item(rd_local_designator_maximum, pp_data->caps[caps_idx].Range.DesignatorMax, &byte_list);
-				//printf("Designator Maximum (%d)\n", pp_data->caps[caps_idx].Range.DesignatorMax);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.DesignatorIndex != 0) {
 				// Designator set 0 is a special descriptor set (of the HID Physical Descriptor),
 				// that specifies the number of additional descriptor sets.
-				// Therefore Designator Index 0 can never be a useful reference for a control.
+				// Therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
+				// Write single "Designator Index"
 				rd_write_short_item(rd_local_designator_index, pp_data->caps[caps_idx].NotRange.DesignatorIndex, &byte_list);
-				//printf("Designator Index (%d)\n", pp_data->caps[caps_idx].NotRange.DesignatorIndex);
 			}
 
 			if (pp_data->caps[caps_idx].IsStringRange) {
+				// Write range of indices of the USB string descriptor, from "String Minimum" to "String Maximum"
 				rd_write_short_item(rd_local_string_minimum, pp_data->caps[caps_idx].Range.StringMin, &byte_list);
-				//printf("String Minimum (%d)\n", pp_data->caps[caps_idx].Range.StringMin);
 				rd_write_short_item(rd_local_string_maximum, pp_data->caps[caps_idx].Range.StringMax, &byte_list);
-				//printf("String Maximum (%d)\n", pp_data->caps[caps_idx].Range.StringMax);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.StringIndex != 0) {
-				// String Index 0 is a special entry, that contains a list of supported languages,
-				// therefore Designator Index 0 can never be a useful reference for a control.
+				// String Index 0 is a special entry of the USB string descriptor, that contains a list of supported languages,
+				// therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
+				// Write single "String Index"
 				rd_write_short_item(rd_local_string, pp_data->caps[caps_idx].NotRange.StringIndex, &byte_list);
-				//printf("String Index (%d)\n", pp_data->caps[caps_idx].NotRange.StringIndex);
 			}
 
 			if ((main_item_list->next != NULL) &&
@@ -2109,77 +2100,66 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 
 				if ((pp_data->caps[caps_idx].Button.LogicalMin == 0) &&
 					(pp_data->caps[caps_idx].Button.LogicalMax == 0)) {
+					// While a HID report descriptor must always contain LogicalMinimum and LogicalMaximum,
+					// the preparsed data contain both fields set to zero, for the case of simple buttons
+					// Write "Logical Minimum" set to 0 and "Logical Maximum" set to 1
 					rd_write_short_item(rd_global_logical_minimum, 0, &byte_list);
-					//printf("Logical Minimum (%d)\n", 0);
-
 					rd_write_short_item(rd_global_logical_maximum, 1, &byte_list);
-					//printf("Logical Maximum (%d)\n", 1);
 				}
 				else {
+					// Write logical range from "Logical Minimum" to "Logical Maximum"
 					rd_write_short_item(rd_global_logical_minimum, pp_data->caps[caps_idx].Button.LogicalMin, &byte_list);
-					//printf("Logical Minimum (%d)\n", pp_data->caps[caps_idx].Button.LogicalMin);
-
 					rd_write_short_item(rd_global_logical_maximum, pp_data->caps[caps_idx].Button.LogicalMax, &byte_list);
-					//printf("Logical Maximum (%d)\n", pp_data->caps[caps_idx].Button.LogicalMax);
 				}
 
+				// Write "Report Size"
 				rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &byte_list);
-				//printf("Report Size (%d)\n", pp_data->caps[caps_idx].ReportSize);
 
+				// Write "Report Count"
 				if (!pp_data->caps[caps_idx].IsRange) {
 					// Variable bit field with one bit per button
+					// In case of multiple usages with the same items, only "Usage" is written per cap, and "Report Count" is incremented
 					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &byte_list);
-					//printf("Report Count (%d)\n", pp_data->caps[caps_idx].ReportCount + report_count);
 				}
 				else {
-					// Button array of Report Size x Report Count
+					// Button array of "Report Size" x "Report Count
 					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount, &byte_list);
-					//printf("Report Count (%d)\n", pp_data->caps[caps_idx].ReportCount);
 				}
 
 
 				// Buttons have only 1 bit and therefore no physical limits/units -> Set to undefined state
-
 				if (last_physical_min != 0) {
-					// Write Physical Min only if changed
+					// Write "Physical Minimum", but only if changed
 					last_physical_min = 0;
 					rd_write_short_item(rd_global_physical_minimum, last_physical_min, &byte_list);
-					//printf("Physical Minimum (%d)\n", last_physical_min);
 				}
-
 				if (last_physical_max != 0) {
-					// Write Physical Max only if changed
+					// Write "Physical Maximum", but only if changed
 					last_physical_max = 0;
 					rd_write_short_item(rd_global_physical_maximum, last_physical_max, &byte_list);
-					//printf("Physical Maximum (%d)\n", last_physical_max);
 				}
-
 				if (last_unit_exponent != 0) {
-					// Write Unit Exponent only if changed
+					// Write "Unit Exponent", but only if changed
 					last_unit_exponent = 0;
 					rd_write_short_item(rd_global_unit_exponent, last_unit_exponent, &byte_list);
-					//printf("Unit Exponent (%d)\n", last_unit_exponent);
 				}
-
 				if (last_unit != 0) {
-					// Write Unit only if changed
+					// Write "Unit",but only if changed
 					last_unit = 0;
 					rd_write_short_item(rd_global_unit, last_unit, &byte_list);
-					//printf("Unit (%d)\n", last_unit);
 				}
 
-
+				// Write "Input" main item
 				if (rt_idx == HidP_Input) {
 					rd_write_short_item(rd_main_input, pp_data->caps[caps_idx].BitField, &byte_list);
-					//printf("Input (0x%02X)\n", pp_data->caps[caps_idx].BitField);
 				}
+				// Write "Output" main item
 				else if (rt_idx == HidP_Output) {
 					rd_write_short_item(rd_main_output, pp_data->caps[caps_idx].BitField, &byte_list);
-					//printf("Output (0x%02X)\n", pp_data->caps[caps_idx].BitField);
 				}
+				// Write "Feature" main item
 				else if (rt_idx == HidP_Feature) {
 					rd_write_short_item(rd_main_feature, pp_data->caps[caps_idx].BitField, &byte_list);
-					//printf("Feature (0x%02X)\n", pp_data->caps[caps_idx].BitField);
 				}
 				report_count = 0;
 			}
@@ -2187,69 +2167,64 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 		else {
 
 			if (last_report_id != pp_data->caps[caps_idx].ReportID) {
-				// Write Report ID if changed
+				// Write "Report ID" if changed
 				rd_write_short_item(rd_global_report_id, pp_data->caps[caps_idx].ReportID, &byte_list);
-				//printf("Report ID (%d)\n", pp_data->caps[caps_idx].ReportID);
 				last_report_id = pp_data->caps[caps_idx].ReportID;
 			}
 
-			// Print usage page when changed
+			// Write "Usage Page" if changed
 			if (pp_data->caps[caps_idx].UsagePage != last_usage_page) {
 				rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &byte_list);
-				//printf("Usage Page (%d)\n", pp_data->caps[caps_idx].UsagePage);
 				last_usage_page = pp_data->caps[caps_idx].UsagePage;
 			}
 
 			if (inhibit_write_of_usage) {
-				// Inhibit only once after DELIMITER statement
+				// Inhibit only once after Delimiter - Reset flag
 				inhibit_write_of_usage = FALSE;
 			}
 			else {
 				if (pp_data->caps[caps_idx].IsRange) {
+					// Write usage range from "Usage Minimum" to "Usage Maximum"
 					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &byte_list);
-					//printf("Usage Minimum (%d)\n", pp_data->caps[caps_idx].Range.UsageMin);
 					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &byte_list);
-					//printf("Usage Maximum (%d)\n", pp_data->caps[caps_idx].Range.UsageMax);
 				}
 				else {
+					// Write single "Usage"
 					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &byte_list);
-					//printf("Usage (%d)\n", pp_data->caps[caps_idx].NotRange.Usage);
 				}
 			}
 
 			if (pp_data->caps[caps_idx].IsDesignatorRange) {
+				// Write physical descriptor indices range from "Designator Minimum" to "Designator Maximum"
 				rd_write_short_item(rd_local_designator_minimum, pp_data->caps[caps_idx].Range.DesignatorMin, &byte_list);
-				//printf("Designator Minimum (%d)\n", pp_data->caps[caps_idx].Range.DesignatorMin);
 				rd_write_short_item(rd_local_designator_maximum, pp_data->caps[caps_idx].Range.DesignatorMax, &byte_list);
-				//printf("Designator Maximum (%d)\n", pp_data->caps[caps_idx].Range.DesignatorMax);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.DesignatorIndex != 0) {
 				// Designator set 0 is a special descriptor set (of the HID Physical Descriptor),
 				// that specifies the number of additional descriptor sets.
-				// Therefore Designator Index 0 can never be a useful reference for a control.
+				// Therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
+				// Write single "Designator Index"
 				rd_write_short_item(rd_local_designator_index, pp_data->caps[caps_idx].NotRange.DesignatorIndex, &byte_list);
-				//printf("Designator Index (%d)\n", pp_data->caps[caps_idx].NotRange.DesignatorIndex);
 			}
 
 			if (pp_data->caps[caps_idx].IsStringRange) {
+				// Write range of indices of the USB string descriptor, from "String Minimum" to "String Maximum"
 				rd_write_short_item(rd_local_string_minimum, pp_data->caps[caps_idx].Range.StringMin, &byte_list);
-				//printf("String Minimum (%d)\n", pp_data->caps[caps_idx].Range.StringMin);
 				rd_write_short_item(rd_local_string_maximum, pp_data->caps[caps_idx].Range.StringMax, &byte_list);
-				//printf("String Maximum (%d)\n", pp_data->caps[caps_idx].Range.StringMax);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.StringIndex != 0) {
-				// String Index 0 is a special entry, that contains a list of supported languages,
-				// therefore Designator Index 0 can never be a useful reference for a control.
+				// String Index 0 is a special entry of the USB string descriptor, that contains a list of supported languages,
+				// therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
+				// Write single "String Index"
 				rd_write_short_item(rd_local_string, pp_data->caps[caps_idx].NotRange.StringIndex, &byte_list);
-				//printf("String Index (%d)\n", pp_data->caps[caps_idx].NotRange.StringIndex);
 			}
 
 			if ((pp_data->caps[caps_idx].BitField & 0x02) != 0x02) {
-				// In case of an value array overwrite Report Count
+				// In case of an value array overwrite "Report Count"
 				pp_data->caps[caps_idx].ReportCount = pp_data->caps[caps_idx].Range.DataIndexMax - pp_data->caps[caps_idx].Range.DataIndexMin + 1;
 			}
 
-					
+
 			// Print only local report items for each cap, if ReportCount > 1
 			if ((main_item_list->next != NULL) &&
 				(main_item_list->next->MainItemType == rt_idx) &&
@@ -2274,57 +2249,51 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				report_count++;
 			}
 			else {
+				// Value
 
+				// Write logical range from "Logical Minimum" to "Logical Maximum"
 				rd_write_short_item(rd_global_logical_minimum, pp_data->caps[caps_idx].NotButton.LogicalMin, &byte_list);
-				//printf("Logical Minimum (%d)\n", pp_data->caps[caps_idx].NotButton.LogicalMin);
-
 				rd_write_short_item(rd_global_logical_maximum, pp_data->caps[caps_idx].NotButton.LogicalMax, &byte_list);
-				//printf("Logical Maximum (%d)\n", pp_data->caps[caps_idx].NotButton.LogicalMax);
 
 				if ((last_physical_min != pp_data->caps[caps_idx].NotButton.PhysicalMin) ||
 					(last_physical_max != pp_data->caps[caps_idx].NotButton.PhysicalMax)) {
-					// Write Physical Min and Max only if one of them changed
+					// Write range from "Physical Minimum" to " Physical Maximum", but only if one of them changed
 					rd_write_short_item(rd_global_physical_minimum, pp_data->caps[caps_idx].NotButton.PhysicalMin, &byte_list);
-					//printf("Physical Minimum (%d)\n", pp_data->caps[caps_idx].NotButton.PhysicalMin);
 					last_physical_min = pp_data->caps[caps_idx].NotButton.PhysicalMin;
-
 					rd_write_short_item(rd_global_physical_maximum, pp_data->caps[caps_idx].NotButton.PhysicalMax, &byte_list);
-					//printf("Physical Maximum (%d)\n", pp_data->caps[caps_idx].NotButton.PhysicalMax);
 					last_physical_max = pp_data->caps[caps_idx].NotButton.PhysicalMax;
 				}
 
 
 				if (last_unit_exponent != pp_data->caps[caps_idx].UnitsExp) {
-					// Write Unit Exponent only if changed
+					// Write "Unit Exponent", but only if changed
 					rd_write_short_item(rd_global_unit_exponent, pp_data->caps[caps_idx].UnitsExp, &byte_list);
-					//printf("Unit Exponent (%d)\n", pp_data->caps[caps_idx].UnitsExp);
 					last_unit_exponent = pp_data->caps[caps_idx].UnitsExp;
 				}
 
 				if (last_unit != pp_data->caps[caps_idx].Units) {
-					// Write Unit only if changed
+					// Write physical "Unit", but only if changed
 					rd_write_short_item(rd_global_unit, pp_data->caps[caps_idx].Units, &byte_list);
-					//printf("Unit (%d)\n", pp_data->caps[caps_idx].Units);
 					last_unit = pp_data->caps[caps_idx].Units;
 				}
 
+				// Write "Report Size"
 				rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &byte_list);
-				//printf("Report Size (%d)\n", pp_data->caps[caps_idx].ReportSize);
 
+				// Write "Report Count"
 				rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &byte_list);
-				//printf("Report Count (%d)\n", pp_data->caps[caps_idx].ReportCount + report_count);
 
 				if (rt_idx == HidP_Input) {
+					// Write "Input" main item
 					rd_write_short_item(rd_main_input, pp_data->caps[caps_idx].BitField, &byte_list);
-					//printf("Input (0x%02X)\n", pp_data->caps[caps_idx].BitField);
 				}
 				else if (rt_idx == HidP_Output) {
+					// Write "Output" main item
 					rd_write_short_item(rd_main_output, pp_data->caps[caps_idx].BitField, &byte_list);
-					//printf("Output (0x%02X)\n", pp_data->caps[caps_idx].BitField);
 				}
 				else if (rt_idx == HidP_Feature) {
+					// Write "Feature" main item
 					rd_write_short_item(rd_main_feature, pp_data->caps[caps_idx].BitField, &byte_list);
-					//printf("Feature (0x%02X)\n", pp_data->caps[caps_idx].BitField);
 				}
 				report_count = 0;
 			}
