@@ -266,7 +266,7 @@ static struct hid_api_version api_version = {
 
 	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
 
-	typedef void(__stdcall* HidD_GetHidGuid_)(LPGUID hid_guid);
+	typedef void(__stdcall *HidD_GetHidGuid_)(LPGUID hid_guid);
 	typedef BOOLEAN (__stdcall *HidD_GetAttributes_)(HANDLE device, PHIDD_ATTRIBUTES attrib);
 	typedef BOOLEAN (__stdcall *HidD_GetSerialNumberString_)(HANDLE device, PVOID buffer, ULONG buffer_len);
 	typedef BOOLEAN (__stdcall *HidD_GetManufacturerString_)(HANDLE handle, PVOID buffer, ULONG buffer_len);
@@ -327,8 +327,6 @@ static struct hid_api_version api_version = {
 
 	static HMODULE cfgmgr32_lib_handle = NULL;
 #endif /* HIDAPI_USE_DDK */
-
-
 
 struct hid_device_ {
 		HANDLE device_handle;
@@ -2413,7 +2411,6 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 		return byte_list_len;
 	}
 }
-
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char* buf, size_t buf_size)
 {
