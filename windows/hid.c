@@ -118,14 +118,6 @@ static struct hid_api_version api_version = {
 		USHORT NumberFeatureValueCaps;
 		USHORT NumberFeatureDataIndices;
 	} HIDP_CAPS, *PHIDP_CAPS;
-	typedef struct _HIDP_DATA {
-		USHORT DataIndex;
-		USHORT Reserved;
-		union {
-			ULONG   RawValue;
-			BOOLEAN On;
-		};
-	} HIDP_DATA, * PHIDP_DATA;
 	typedef struct _HIDP_LINK_COLLECTION_NODE {
 		USAGE  LinkUsage;
 		USAGE  LinkUsagePage;
@@ -153,26 +145,7 @@ static struct hid_api_version api_version = {
 		ULONG BitField; ///< Specifies the data part of the global item.
 	} HIDP_UNKNOWN_TOKEN, * PHIDP_UNKNOWN_TOKEN;
 	
-#define HIDP_STATUS_SUCCESS 0x110000
-#define	HIDP_STATUS_NULL 0x80110001
-#define HIDP_STATUS_INVALID_PREPARSED_DATA 0xc0110001
-#define HIDP_STATUS_INVALID_REPORT_TYPE 0xc0110002
-#define HIDP_STATUS_INVALID_REPORT_LENGTH 0xc0110003
-#define HIDP_STATUS_USAGE_NOT_FOUND 0xc0110004
-#define HIDP_STATUS_VALUE_OUT_OF_RANGE 0xc0110005
-#define HIDP_STATUS_BAD_LOG_PHY_VALUES 0xc0110006
-#define HIDP_STATUS_BUFFER_TOO_SMALL 0xc0110007
-#define	HIDP_STATUS_INTERNAL_ERROR 0xc0110008
-#define	HIDP_STATUS_I8042_TRANS_UNKNOWN 0xc0110009
-#define	HIDP_STATUS_INCOMPATIBLE_REPORT_ID 0xc011000a
-#define	HIDP_STATUS_NOT_VALUE_ARRAY 0xc011000b
-#define	HIDP_STATUS_IS_VALUE_ARRAY 0xc011000c
-#define	HIDP_STATUS_DATA_INDEX_NOT_FOUND 0xc011000d
-#define	HIDP_STATUS_DATA_INDEX_OUT_OF_RANGE 0xc011000e
-#define	HIDP_STATUS_BUTTON_NOT_PRESSED 0xc011000f
-#define	HIDP_STATUS_REPORT_DOES_NOT_EXIST 0xc0110010
-#define	HIDP_STATUS_NOT_IMPLEMENTED 0xc0110020
-#define	HIDP_STATUS_I8242_TRANS_UNKNOWN 0xc0110009
+	#define HIDP_STATUS_SUCCESS 0x110000
 
 	typedef struct _hid_pp_caps_info {
 		USHORT FirstCap;
@@ -504,12 +477,12 @@ static int lookup_functions()
 /// The two least significiant bits nn represent the size of the item and must be added to this values
 /// </summary>
 typedef enum rd_items_ {
-	rd_main_input = 0x80, ///< 1000 00 nn
-	rd_main_output =			  0x90, ///< 1001 00 nn
-	rd_main_feature =			  0xB0, ///< 1011 00 nn
-	rd_main_collection =		  0xA0, ///< 1010 00 nn
-	rd_main_collection_end =	  0xC0, ///< 1100 00 nn
-	rd_global_usage_page =		  0x04, ///< 0000 01 nn
+	rd_main_input =               0x80, ///< 1000 00 nn
+	rd_main_output =              0x90, ///< 1001 00 nn
+	rd_main_feature =             0xB0, ///< 1011 00 nn
+	rd_main_collection =          0xA0, ///< 1010 00 nn
+	rd_main_collection_end =      0xC0, ///< 1100 00 nn
+	rd_global_usage_page =        0x04, ///< 0000 01 nn
 	rd_global_logical_minimum =   0x14, ///< 0001 01 nn
 	rd_global_logical_maximum =   0x24, ///< 0010 01 nn
 	rd_global_physical_minimum =  0x34, ///< 0011 01 nn
@@ -548,20 +521,20 @@ struct rd_item_byte
 /// <param name="byte">Single byte to append</param>
 /// <param name="list">Pointer to the list</param>
 static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
-		struct rd_item_byte* new_list_element;
+	struct rd_item_byte* new_list_element;
 
-		/* Determine last list position */
-		while (*list != NULL)
-		{
-			list = &(*list)->next;
-		}
-
-		new_list_element = malloc(sizeof(*new_list_element)); // Create new list entry
-		new_list_element->byte = byte;
-		new_list_element->next = NULL; // Marks last element of list
-
-		*list = new_list_element;
+	/* Determine last list position */
+	while (*list != NULL)
+	{
+		list = &(*list)->next;
 	}
+
+	new_list_element = malloc(sizeof(*new_list_element)); // Create new list entry
+	new_list_element->byte = byte;
+	new_list_element->next = NULL; // Marks last element of list
+
+	*list = new_list_element;
+}
 
 
 /// <summary>
@@ -677,8 +650,8 @@ struct rd_main_item_node
 	int FirstBit; ///< Position of first bit in report (counting from 0)
 	int LastBit; ///< Position of last bit in report (counting from 0)
 	RD_NODE_TYPE TypeOfNode; ///< Information if caps index refers to the array of button caps, value caps,
-							 ///< or if the node is just a padding element to fill unused bit positions.
-	                         ///< The node can also be a collection node without any bits in the report.
+                             ///< or if the node is just a padding element to fill unused bit positions.
+                             ///< The node can also be a collection node without any bits in the report.
 	int CapsIndex; ///< Index in the array of caps
 	int CollectionIndex; ///< Index in the array of link collections
 	RD_MAIN_ITEMS MainItemType; ///< Input, Output, Feature, Collection or Collection End
