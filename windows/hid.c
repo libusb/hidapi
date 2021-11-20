@@ -146,125 +146,128 @@ static struct hid_api_version api_version = {
 	} HIDP_UNKNOWN_TOKEN, * PHIDP_UNKNOWN_TOKEN;
 	
 	#define HIDP_STATUS_SUCCESS 0x110000
+#endif /* HIDAPI_USE_DDK */
 
-	typedef struct _hid_pp_caps_info {
-		USHORT FirstCap;
-		USHORT NumberOfCaps; // Includes empty caps after LastCap 
-		USHORT LastCap;
-		USHORT ReportByteLength;
-	} hid_pp_caps_info, * phid_pp_caps_info;
+typedef struct _hid_pp_caps_info {
+	USHORT FirstCap;
+	USHORT NumberOfCaps; // Includes empty caps after LastCap 
+	USHORT LastCap;
+	USHORT ReportByteLength;
+} hid_pp_caps_info, * phid_pp_caps_info;
 
+typedef struct _hid_pp_link_collection_node {
+	USAGE  LinkUsage;
+	USAGE  LinkUsagePage;
+	USHORT Parent;
+	USHORT NumberOfChildren;
+	USHORT NextSibling;
+	USHORT FirstChild;
+	ULONG  CollectionType : 8;
+	ULONG  IsAlias : 1;
+	ULONG  Reserved : 23;
+	// Same as the public API structure HIDP_LINK_COLLECTION_NODE, but without PVOID UserContext at the end
+} hid_pp_link_collection_node, * phid_pp_link_collection_node;
 
-	typedef struct _hid_pp_link_collection_node {
-		USAGE  LinkUsage;
-		USAGE  LinkUsagePage;
-		USHORT Parent;
-		USHORT NumberOfChildren;
-		USHORT NextSibling;
-		USHORT FirstChild;
-		ULONG  CollectionType : 8;
-		ULONG  IsAlias : 1;
-		ULONG  Reserved : 23;
-		// Same as the public API structure HIDP_LINK_COLLECTION_NODE, but without PVOID UserContext at the end
-	} hid_pp_link_collection_node, * phid_pp_link_collection_node;
+typedef struct _hid_pp_cap {
+	USAGE   UsagePage;
+	UCHAR   ReportID;
+	UCHAR   BitPosition;
+	USHORT  ReportSize; // WIN32 term for this is BitSize
+	USHORT  ReportCount;
+	USHORT  BytePosition;
+	USHORT  BitCount;
+	ULONG   BitField;
+	USHORT  NextBytePosition;
+	USHORT  LinkCollection;
+	USAGE   LinkUsagePage;
+	USAGE   LinkUsage;
 
-	typedef struct _hid_pp_cap {
-		USAGE   UsagePage;
-		UCHAR   ReportID;
-		UCHAR   BitPosition;
-		USHORT  BitSize; // WIN32 term for Report Size
-		USHORT  ReportCount;
-		USHORT  BytePosition;
-		USHORT  BitCount;
-		ULONG   BitField;
-		USHORT  NextBytePosition;
-	    USHORT  LinkCollection;
-		USAGE   LinkUsagePage;
-		USAGE   LinkUsage;
+	// Start of 8 Flags in one byte
+	BOOLEAN IsMultipleItemsForArray:1;
 
-		// 8 Flags in one byte
-		BOOLEAN IsMultipleItemsForArray:1;
+	BOOLEAN IsPadding:1;
+	BOOLEAN IsButtonCap:1;
+	BOOLEAN IsAbsolute:1;
+	BOOLEAN IsRange:1;
+	BOOLEAN IsAlias:1; // IsAlias is set to TRUE in the first n-1 capability structures added to the capability array. IsAlias set to FALSE in the nth capability structure.
+	BOOLEAN IsStringRange:1;
+	BOOLEAN IsDesignatorRange:1;
+	// End of 8 Flags in one byte
+	BOOLEAN Reserved1[3];
 
-		BOOLEAN IsPadding:1;
-		BOOLEAN IsButtonCap:1;
-		BOOLEAN IsAbsolute:1;
-		BOOLEAN IsRange:1;
-		BOOLEAN IsAlias:1; // IsAlias is set to TRUE in the first n-1 capability structures added to the capability array. IsAlias set to FALSE in the nth capability structure.
-		BOOLEAN IsStringRange:1;
-		BOOLEAN IsDesignatorRange:1;
-		// 8 Flags in one byte
-		BOOLEAN Reserved1[3];
+	struct _HIDP_UNKNOWN_TOKEN UnknownTokens[4]; // 4 x 8 Byte
 
-		struct _HIDP_UNKNOWN_TOKEN UnknownTokens[4]; // 4 x 8 Byte
+	union {
+		struct {
+			USAGE  UsageMin;
+			USAGE  UsageMax;
+			USHORT StringMin;
+			USHORT StringMax;
+			USHORT DesignatorMin;
+			USHORT DesignatorMax;
+			USHORT DataIndexMin;
+			USHORT DataIndexMax;
+		} Range;
+		struct {
+			USAGE  Usage;
+			USAGE  Reserved1;
+			USHORT StringIndex;
+			USHORT Reserved2;
+			USHORT DesignatorIndex;
+			USHORT Reserved3;
+			USHORT DataIndex;
+			USHORT Reserved4;
+		} NotRange;
+	};
+	union {
+		struct {
+			LONG    LogicalMin;
+			LONG    LogicalMax;
+		} Button;
+		struct {
+			BOOLEAN HasNull;
+			UCHAR   Reserved4[3];
+			LONG    LogicalMin;
+			LONG    LogicalMax;
+			LONG    PhysicalMin;
+			LONG    PhysicalMax;
+		} NotButton;
+	};
+	ULONG   Units;
+	ULONG   UnitsExp;
 
-		union {
-			struct {
-				USAGE  UsageMin;
-				USAGE  UsageMax;
-				USHORT StringMin;
-				USHORT StringMax;
-				USHORT DesignatorMin;
-				USHORT DesignatorMax;
-				USHORT DataIndexMin;
-				USHORT DataIndexMax;
-			} Range;
-			struct {
-				USAGE  Usage;
-				USAGE  Reserved1;
-				USHORT StringIndex;
-				USHORT Reserved2;
-				USHORT DesignatorIndex;
-				USHORT Reserved3;
-				USHORT DataIndex;
-				USHORT Reserved4;
-			} NotRange;
-		};
-		union {
-			struct {
-				LONG    LogicalMin;
-				LONG    LogicalMax;
-			} Button;
-			struct {
-				BOOLEAN HasNull;
-				UCHAR   Reserved4[3];
-				LONG    LogicalMin;
-				LONG    LogicalMax;
-				LONG    PhysicalMin;
-				LONG    PhysicalMax;
-			} NotButton;
-		};
-		ULONG   Units;
-		ULONG   UnitsExp;
-
-	} hid_pp_cap, * phid_pp_cap;
+} hid_pp_cap, * phid_pp_cap;
 	
-	typedef struct _hid_preparsed_data {
-		UCHAR MagicKey[8];
-		USAGE Usage;
-		USAGE UsagePage;
-		USHORT Reserved[2];
+typedef struct _hid_preparsed_data {
+	UCHAR MagicKey[8];
+	USAGE Usage;
+	USAGE UsagePage;
+	USHORT Reserved[2];
 
-		// CAPS structure for Input, Output and Feature
-		hid_pp_caps_info caps_info[3];
+	// CAPS structure for Input, Output and Feature
+	hid_pp_caps_info caps_info[3];
 
-		USHORT FirstByteOfLinkCollectionArray;
-		USHORT NumberLinkCollectionNodes;
+	USHORT FirstByteOfLinkCollectionArray;
+	USHORT NumberLinkCollectionNodes;
 
 #if defined(__MINGW32__) || defined(__CYGWIN__)
-		// MINGW fails with: Flexible array member in union not supported
-		// Solution: https://gcc.gnu.org/onlinedocs/gcc/Zero-Length.html
-		union {
-			hid_pp_cap caps[0];
-			hid_pp_link_collection_node LinkCollectionArray[0];
-		};
+	// MINGW fails with: Flexible array member in union not supported
+	// Solution: https://gcc.gnu.org/onlinedocs/gcc/Zero-Length.html
+	union {
+		hid_pp_cap caps[0];
+		hid_pp_link_collection_node LinkCollectionArray[0];
+	};
 #else
-		union {
-			hid_pp_cap caps[];
-			hid_pp_link_collection_node LinkCollectionArray[];
-		};
+	union {
+		hid_pp_cap caps[];
+		hid_pp_link_collection_node LinkCollectionArray[];
+	};
 #endif
 
-	} HIDP_PREPARSED_DATA, * PHIDP_PREPARSED_DATA;
+} HIDP_PREPARSED_DATA;
+
+#ifndef HIDAPI_USE_DDK
+	typedef HIDP_PREPARSED_DATA* PHIDP_PREPARSED_DATA;
 
 	typedef void(__stdcall *HidD_GetHidGuid_)(LPGUID hid_guid);
 	typedef BOOLEAN (__stdcall *HidD_GetAttributes_)(HANDLE device, PHIDD_ATTRIBUTES attrib);
@@ -327,6 +330,87 @@ static struct hid_api_version api_version = {
 
 	static HMODULE cfgmgr32_lib_handle = NULL;
 #endif /* HIDAPI_USE_DDK */
+
+/// <summary>
+/// Enumeration of all report descriptor item One-Byte prefixes from the USB HID spec 1.11
+/// The two least significiant bits nn represent the size of the item and must be added to this values
+/// </summary>
+typedef enum rd_items_ {
+	rd_main_input               = 0x80, ///< 1000 00 nn
+	rd_main_output              = 0x90, ///< 1001 00 nn
+	rd_main_feature             = 0xB0, ///< 1011 00 nn
+	rd_main_collection          = 0xA0, ///< 1010 00 nn
+	rd_main_collection_end      = 0xC0, ///< 1100 00 nn
+	rd_global_usage_page        = 0x04, ///< 0000 01 nn
+	rd_global_logical_minimum   = 0x14, ///< 0001 01 nn
+	rd_global_logical_maximum   = 0x24, ///< 0010 01 nn
+	rd_global_physical_minimum  = 0x34, ///< 0011 01 nn
+	rd_global_physical_maximum  = 0x44, ///< 0100 01 nn
+	rd_global_unit_exponent     = 0x54, ///< 0101 01 nn
+	rd_global_unit              = 0x64, ///< 0110 01 nn
+	rd_global_report_size       = 0x74, ///< 0111 01 nn
+	rd_global_report_id         = 0x84, ///< 1000 01 nn
+	rd_global_report_count      = 0x94, ///< 1001 01 nn
+	rd_global_push              = 0xA4, ///< 1010 01 nn
+	rd_global_pop               = 0xB4, ///< 1011 01 nn
+	rd_local_usage              = 0x08, ///< 0000 10 nn
+	rd_local_usage_minimum      = 0x18, ///< 0001 10 nn
+	rd_local_usage_maximum      = 0x28, ///< 0010 10 nn
+	rd_local_designator_index   = 0x38, ///< 0011 10 nn
+	rd_local_designator_minimum = 0x48, ///< 0100 10 nn
+	rd_local_designator_maximum = 0x58, ///< 0101 10 nn
+	rd_local_string             = 0x78, ///< 0111 10 nn
+	rd_local_string_minimum     = 0x88, ///< 1000 10 nn
+	rd_local_string_maximum     = 0x98, ///< 1001 10 nn
+	rd_local_delimiter          = 0xA8  ///< 1010 10 nn
+} RD_ITEMS;
+
+/// <summary>
+/// List element of the encoded report descriptor
+/// </summary>
+struct rd_item_byte
+{
+	unsigned char byte;
+	struct rd_item_byte* next;
+};
+
+typedef enum _RD_MAIN_ITEMS {
+	rd_input = HidP_Input,
+	rd_output = HidP_Output,
+	rd_feature = HidP_Feature,
+	rd_collection,
+	rd_collection_end,
+	rd_delimiter_open,
+	rd_delimiter_usage,
+	rd_delimiter_close,
+	RD_NUM_OF_MAIN_ITEMS
+} RD_MAIN_ITEMS;
+
+typedef struct _RD_BIT_RANGE {
+	int FirstBit;
+	int LastBit;
+} RD_BIT_RANGE;
+
+typedef enum _RD_ITEM_NODE_TYPE {
+	rd_item_node_cap,
+	rd_item_node_padding,
+	rd_item_node_collection,
+	RD_NUM_OF_ITEM_NODE_TYPES
+} RD_NODE_TYPE;
+
+struct rd_main_item_node
+{
+	int FirstBit; ///< Position of first bit in report (counting from 0)
+	int LastBit; ///< Position of last bit in report (counting from 0)
+	RD_NODE_TYPE TypeOfNode; ///< Information if caps index refers to the array of button caps, value caps,
+								///< or if the node is just a padding element to fill unused bit positions.
+								///< The node can also be a collection node without any bits in the report.
+	int CapsIndex; ///< Index in the array of caps
+	int CollectionIndex; ///< Index in the array of link collections
+	RD_MAIN_ITEMS MainItemType; ///< Input, Output, Feature, Collection or Collection End
+	unsigned char ReportID;
+	struct rd_main_item_node* next;
+};
 
 struct hid_device_ {
 		HANDLE device_handle;
@@ -469,242 +553,7 @@ static int lookup_functions()
 	return 0;
 }
 #endif
-
-/// <summary>
-/// Enumeration of all report descriptor item One-Byte prefixes from the USB HID spec 1.11
-/// The two least significiant bits nn represent the size of the item and must be added to this values
-/// </summary>
-typedef enum rd_items_ {
-	rd_main_input =               0x80, ///< 1000 00 nn
-	rd_main_output =              0x90, ///< 1001 00 nn
-	rd_main_feature =             0xB0, ///< 1011 00 nn
-	rd_main_collection =          0xA0, ///< 1010 00 nn
-	rd_main_collection_end =      0xC0, ///< 1100 00 nn
-	rd_global_usage_page =        0x04, ///< 0000 01 nn
-	rd_global_logical_minimum =   0x14, ///< 0001 01 nn
-	rd_global_logical_maximum =   0x24, ///< 0010 01 nn
-	rd_global_physical_minimum =  0x34, ///< 0011 01 nn
-	rd_global_physical_maximum =  0x44, ///< 0100 01 nn
-	rd_global_unit_exponent =     0x54, ///< 0101 01 nn
-	rd_global_unit =              0x64, ///< 0110 01 nn
-	rd_global_report_size =       0x74, ///< 0111 01 nn
-	rd_global_report_id =         0x84, ///< 1000 01 nn
-	rd_global_report_count =      0x94, ///< 1001 01 nn
-	rd_global_push =              0xA4, ///< 1010 01 nn
-	rd_global_pop =               0xB4, ///< 1011 01 nn
-	rd_local_usage =              0x08, ///< 0000 10 nn
-	rd_local_usage_minimum =      0x18, ///< 0001 10 nn
-	rd_local_usage_maximum =      0x28, ///< 0010 10 nn
-	rd_local_designator_index =   0x38, ///< 0011 10 nn
-	rd_local_designator_minimum = 0x48, ///< 0100 10 nn
-	rd_local_designator_maximum = 0x58, ///< 0101 10 nn
-	rd_local_string =             0x78, ///< 0111 10 nn
-	rd_local_string_minimum =     0x88, ///< 1000 10 nn
-	rd_local_string_maximum =     0x98, ///< 1001 10 nn
-	rd_local_delimiter =          0xA8  ///< 1010 10 nn
-} RD_ITEMS;
-
-/// <summary>
-/// List element of the encoded report descriptor
-/// </summary>
-struct rd_item_byte
-{
-	unsigned char byte;
-	struct rd_item_byte* next;
-};
-
-/// <summary>
-/// Function that appends a byte to encoded report descriptor list
-/// </summary>
-/// <param name="byte">Single byte to append</param>
-/// <param name="list">Pointer to the list</param>
-static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
-	struct rd_item_byte* new_list_element;
-
-	/* Determine last list position */
-	while (*list != NULL)
-	{
-		list = &(*list)->next;
-	}
-
-	new_list_element = malloc(sizeof(*new_list_element)); // Create new list entry
-	new_list_element->byte = byte;
-	new_list_element->next = NULL; // Marks last element of list
-
-	*list = new_list_element;
-}
-
-
-/// <summary>
-///  Writes a short report descriptor item according USB HID spec 1.11 chapter 6.2.2.2
-/// </summary>
-/// <param name="rd_item">Enumeration identifying type (Main, Global, Local) and function (e.g Usage or Report Count) of the item.</param>
-/// <param name="data">Data (Size depends on rd_item 0,1,2 or 4bytes)</param>
-/// <param name="list">Chained list of report descriptor bytes</param>
-/// <returns>Returns 0 if successful, -1 for error</returns>
-static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byte** list) {
-	if (rd_item & 0x03) {
-		return -1; // Invaid input data
-	}
-
-	if (rd_item == rd_main_collection_end) {
-		// Item without data
-		unsigned char oneBytePrefix = rd_item + 0x00;
-		rd_append_byte(oneBytePrefix, list);
-		printf("%02X               ", oneBytePrefix);
-	} else if ((rd_item == rd_global_logical_minimum) ||
-			   (rd_item == rd_global_logical_maximum) ||
-	      	   (rd_item == rd_global_physical_minimum) ||
-		       (rd_item == rd_global_physical_maximum)) {
-		// Item with signed integer data
-		if ((data >= -128) && (data <= 127)) {
-			unsigned char oneBytePrefix = rd_item + 0x01;
-			char localData = (char)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			printf("%02X %02X            ", oneBytePrefix, localData & 0xFF);
-		}
-		else if ((data >= -32768) && (data <= 32767)) {
-			unsigned char oneBytePrefix = rd_item + 0x02;
-			INT16 localData = (INT16)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
-			printf("%02X %02X %02X         ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF);
-		}
-		else if ((data >= -2147483648LL) && (data <= 2147483647)) {
-			unsigned char oneBytePrefix = rd_item + 0x03;
-			INT32 localData = (INT32)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
-			rd_append_byte(localData >> 16 & 0xFF, list);
-			rd_append_byte(localData >> 24 & 0xFF, list);
-			printf("%02X %02X %02X %02X %02X   ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF, localData >> 16 & 0xFF, localData >> 24 & 0xFF);
-		} else {
-			// Error data out of range
-			return -1;
-		}
-	} else {
-		// Item with unsigned integer data
-		if ((data >= 0) && (data <= 0xFF)) {
-			unsigned char oneBytePrefix = rd_item + 0x01;
-			unsigned char localData = (unsigned char)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			printf("%02X %02X            ", oneBytePrefix, localData & 0xFF);
-		}
-		else if ((data >= 0) && (data <= 0xFFFF)) {
-			unsigned char oneBytePrefix = rd_item + 0x02;
-			UINT16 localData = (UINT16)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
-			printf("%02X %02X %02X         ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF);
-		}
-		else if ((data >= 0) && (data <= 0xFFFFFFFF)) {
-			unsigned char oneBytePrefix = rd_item + 0x03;
-			UINT32 localData = (UINT32)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
-			rd_append_byte(localData >> 16 & 0xFF, list);
-			rd_append_byte(localData >> 24 & 0xFF, list);
-			printf("%02X %02X %02X %02X %02X   ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF, localData >> 16 & 0xFF, localData >> 24 & 0xFF);
-		} else {
-			// Error data out of range
-			return -1;
-		}
-	}
-	return 0;
-}
-
-typedef enum _RD_MAIN_ITEMS {
-	rd_input = HidP_Input,
-	rd_output = HidP_Output,
-	rd_feature = HidP_Feature,
-	rd_collection,
-	rd_collection_end,
-	rd_delimiter_open,
-	rd_delimiter_usage,
-	rd_delimiter_close,
-	RD_NUM_OF_MAIN_ITEMS
-} RD_MAIN_ITEMS;
-
-typedef struct _RD_BIT_RANGE {
-	int FirstBit;
-	int LastBit;
-} RD_BIT_RANGE;
-
-typedef enum _RD_ITEM_NODE_TYPE {
-	rd_item_node_cap,
-	rd_item_node_padding,
-	rd_item_node_collection,
-	RD_NUM_OF_ITEM_NODE_TYPES
-} RD_NODE_TYPE;
-
-struct rd_main_item_node
-{
-	int FirstBit; ///< Position of first bit in report (counting from 0)
-	int LastBit; ///< Position of last bit in report (counting from 0)
-	RD_NODE_TYPE TypeOfNode; ///< Information if caps index refers to the array of button caps, value caps,
-                             ///< or if the node is just a padding element to fill unused bit positions.
-                             ///< The node can also be a collection node without any bits in the report.
-	int CapsIndex; ///< Index in the array of caps
-	int CollectionIndex; ///< Index in the array of link collections
-	RD_MAIN_ITEMS MainItemType; ///< Input, Output, Feature, Collection or Collection End
-	unsigned char ReportID;
-	struct rd_main_item_node* next; 
-};
-
 	
-static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
-	struct rd_main_item_node* new_list_node;
-
-	// Determine last node in the list
-	while (*list != NULL)
-	{
-		list = &(*list)->next;
-	}
-
-	new_list_node = malloc(sizeof(*new_list_node)); // Create new list entry
-	new_list_node->FirstBit = first_bit;
-	new_list_node->LastBit = last_bit;
-	new_list_node->TypeOfNode = type_of_node;
-	new_list_node->CapsIndex = caps_index;
-	new_list_node->CollectionIndex = collection_index;
-	new_list_node->MainItemType = main_item_type;
-	new_list_node->ReportID = report_id;
-	new_list_node->next = NULL; // NULL marks last node in the list
-
-	*list = new_list_node;
-	return new_list_node;
-}
-
-static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
-	// Insert item after the main item node referenced by list
-	struct rd_main_item_node* next_item = (*list)->next;
-	(*list)->next = NULL;
-	rd_append_main_item_node(first_bit, last_bit, type_of_node, caps_index, collection_index, main_item_type, report_id, list);
-	(*list)->next->next = next_item;
-	return (*list)->next;
-}
-
-static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
-	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
-	
-	while (((*list)->next->MainItemType != rd_collection) &&
-		   ((*list)->next->MainItemType != rd_collection_end) &&
-		   !(((*list)->next->LastBit >= search_bit) &&
-		   ((*list)->next->ReportID == report_id) &&
-		   ((*list)->next->MainItemType == main_item_type))
-		)
-	{
-		list = &(*list)->next;
-	}
-	return *list;
-}
-
 static HANDLE open_device(const char *path, BOOL open_rw)
 {
 	HANDLE handle;
@@ -1538,6 +1387,162 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 	return 0;
 }
 
+/// <summary>
+/// Function that appends a byte to encoded report descriptor list
+/// </summary>
+/// <param name="byte">Single byte to append</param>
+/// <param name="list">Pointer to the list</param>
+static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
+	struct rd_item_byte* new_list_element;
+
+	/* Determine last list position */
+	while (*list != NULL)
+	{
+		list = &(*list)->next;
+	}
+
+	new_list_element = malloc(sizeof(*new_list_element)); // Create new list entry
+	new_list_element->byte = byte;
+	new_list_element->next = NULL; // Marks last element of list
+
+	*list = new_list_element;
+}
+
+/// <summary>
+///  Writes a short report descriptor item according USB HID spec 1.11 chapter 6.2.2.2
+/// </summary>
+/// <param name="rd_item">Enumeration identifying type (Main, Global, Local) and function (e.g Usage or Report Count) of the item.</param>
+/// <param name="data">Data (Size depends on rd_item 0,1,2 or 4bytes)</param>
+/// <param name="list">Chained list of report descriptor bytes</param>
+/// <returns>Returns 0 if successful, -1 for error</returns>
+static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byte** list) {
+	if (rd_item & 0x03) {
+		return -1; // Invaid input data
+	}
+
+	if (rd_item == rd_main_collection_end) {
+		// Item without data
+		unsigned char oneBytePrefix = rd_item + 0x00;
+		rd_append_byte(oneBytePrefix, list);
+		printf("%02X               ", oneBytePrefix);
+	}
+	else if ((rd_item == rd_global_logical_minimum) ||
+		(rd_item == rd_global_logical_maximum) ||
+		(rd_item == rd_global_physical_minimum) ||
+		(rd_item == rd_global_physical_maximum)) {
+		// Item with signed integer data
+		if ((data >= -128) && (data <= 127)) {
+			unsigned char oneBytePrefix = rd_item + 0x01;
+			char localData = (char)data;
+			rd_append_byte(oneBytePrefix, list);
+			rd_append_byte(localData & 0xFF, list);
+			printf("%02X %02X            ", oneBytePrefix, localData & 0xFF);
+		}
+		else if ((data >= -32768) && (data <= 32767)) {
+			unsigned char oneBytePrefix = rd_item + 0x02;
+			INT16 localData = (INT16)data;
+			rd_append_byte(oneBytePrefix, list);
+			rd_append_byte(localData & 0xFF, list);
+			rd_append_byte(localData >> 8 & 0xFF, list);
+			printf("%02X %02X %02X         ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF);
+		}
+		else if ((data >= -2147483648LL) && (data <= 2147483647)) {
+			unsigned char oneBytePrefix = rd_item + 0x03;
+			INT32 localData = (INT32)data;
+			rd_append_byte(oneBytePrefix, list);
+			rd_append_byte(localData & 0xFF, list);
+			rd_append_byte(localData >> 8 & 0xFF, list);
+			rd_append_byte(localData >> 16 & 0xFF, list);
+			rd_append_byte(localData >> 24 & 0xFF, list);
+			printf("%02X %02X %02X %02X %02X   ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF, localData >> 16 & 0xFF, localData >> 24 & 0xFF);
+		}
+		else {
+			// Error data out of range
+			return -1;
+		}
+	}
+	else {
+		// Item with unsigned integer data
+		if ((data >= 0) && (data <= 0xFF)) {
+			unsigned char oneBytePrefix = rd_item + 0x01;
+			unsigned char localData = (unsigned char)data;
+			rd_append_byte(oneBytePrefix, list);
+			rd_append_byte(localData & 0xFF, list);
+			printf("%02X %02X            ", oneBytePrefix, localData & 0xFF);
+		}
+		else if ((data >= 0) && (data <= 0xFFFF)) {
+			unsigned char oneBytePrefix = rd_item + 0x02;
+			UINT16 localData = (UINT16)data;
+			rd_append_byte(oneBytePrefix, list);
+			rd_append_byte(localData & 0xFF, list);
+			rd_append_byte(localData >> 8 & 0xFF, list);
+			printf("%02X %02X %02X         ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF);
+		}
+		else if ((data >= 0) && (data <= 0xFFFFFFFF)) {
+			unsigned char oneBytePrefix = rd_item + 0x03;
+			UINT32 localData = (UINT32)data;
+			rd_append_byte(oneBytePrefix, list);
+			rd_append_byte(localData & 0xFF, list);
+			rd_append_byte(localData >> 8 & 0xFF, list);
+			rd_append_byte(localData >> 16 & 0xFF, list);
+			rd_append_byte(localData >> 24 & 0xFF, list);
+			printf("%02X %02X %02X %02X %02X   ", oneBytePrefix, localData & 0xFF, localData >> 8 & 0xFF, localData >> 16 & 0xFF, localData >> 24 & 0xFF);
+		}
+		else {
+			// Error data out of range
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+	struct rd_main_item_node* new_list_node;
+
+	// Determine last node in the list
+	while (*list != NULL)
+	{
+		list = &(*list)->next;
+	}
+
+	new_list_node = malloc(sizeof(*new_list_node)); // Create new list entry
+	new_list_node->FirstBit = first_bit;
+	new_list_node->LastBit = last_bit;
+	new_list_node->TypeOfNode = type_of_node;
+	new_list_node->CapsIndex = caps_index;
+	new_list_node->CollectionIndex = collection_index;
+	new_list_node->MainItemType = main_item_type;
+	new_list_node->ReportID = report_id;
+	new_list_node->next = NULL; // NULL marks last node in the list
+
+	*list = new_list_node;
+	return new_list_node;
+}
+
+static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+	// Insert item after the main item node referenced by list
+	struct rd_main_item_node* next_item = (*list)->next;
+	(*list)->next = NULL;
+	rd_append_main_item_node(first_bit, last_bit, type_of_node, caps_index, collection_index, main_item_type, report_id, list);
+	(*list)->next->next = next_item;
+	return (*list)->next;
+}
+
+static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
+
+	while (((*list)->next->MainItemType != rd_collection) &&
+		((*list)->next->MainItemType != rd_collection_end) &&
+		!(((*list)->next->LastBit >= search_bit) &&
+			((*list)->next->ReportID == report_id) &&
+			((*list)->next->MainItemType == main_item_type))
+		)
+	{
+		list = &(*list)->next;
+	}
+	return *list;
+}
+
 int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned char* buf, size_t buf_size) {
 	struct rd_item_byte* byte_list = NULL;
 	HIDP_CAPS caps;
@@ -1589,7 +1594,7 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				int first_bit, last_bit;
 				first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8 +
 						        pp_data->caps[caps_idx].BitPosition;
-				last_bit = first_bit + pp_data->caps[caps_idx].BitSize *
+				last_bit = first_bit + pp_data->caps[caps_idx].ReportSize *
 						                pp_data->caps[caps_idx].ReportCount - 1;
 				if (coll_bit_range[pp_data->caps[caps_idx].LinkCollection][pp_data->caps[caps_idx].ReportID][rt_idx]->FirstBit == -1 ||
 					coll_bit_range[pp_data->caps[caps_idx].LinkCollection][pp_data->caps[caps_idx].ReportID][rt_idx]->FirstBit > first_bit) {
@@ -1843,7 +1848,7 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				int first_bit, last_bit;
 				first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8 +
 					pp_data->caps[caps_idx].BitPosition;
-				last_bit = first_bit + pp_data->caps[caps_idx].BitSize *
+				last_bit = first_bit + pp_data->caps[caps_idx].ReportSize *
 					pp_data->caps[caps_idx].ReportCount - 1;
 
 				for (int child_idx = 0; child_idx < coll_number_of_direct_childs[pp_data->caps[caps_idx].LinkCollection]; child_idx++) {
@@ -2157,8 +2162,8 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 						printf("Logical Maximum (%d)\n", pp_data->caps[caps_idx].Button.LogicalMax);
 					}
 
-					rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].BitSize, &byte_list);
-					printf("Report Size (%d)\n", pp_data->caps[caps_idx].BitSize);
+					rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &byte_list);
+					printf("Report Size (%d)\n", pp_data->caps[caps_idx].ReportSize);
 
 					if (!pp_data->caps[caps_idx].IsRange) {
 						// Variable bit field with one bit per button
@@ -2298,7 +2303,7 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 					(pp_data->caps[main_item_list->next->CapsIndex].NotButton.PhysicalMax == pp_data->caps[caps_idx].NotButton.PhysicalMax) &&
 					(pp_data->caps[main_item_list->next->CapsIndex].UnitsExp == pp_data->caps[caps_idx].UnitsExp) &&
 					(pp_data->caps[main_item_list->next->CapsIndex].Units == pp_data->caps[caps_idx].Units) &&
-					(pp_data->caps[main_item_list->next->CapsIndex].BitSize == pp_data->caps[caps_idx].BitSize) &&
+					(pp_data->caps[main_item_list->next->CapsIndex].ReportSize == pp_data->caps[caps_idx].ReportSize) &&
 					(pp_data->caps[main_item_list->next->CapsIndex].ReportID == pp_data->caps[caps_idx].ReportID) &&
 					(pp_data->caps[main_item_list->next->CapsIndex].BitField == pp_data->caps[caps_idx].BitField) &&
 					(pp_data->caps[main_item_list->next->CapsIndex].ReportCount == 1) &&
@@ -2342,8 +2347,8 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 						last_unit = pp_data->caps[caps_idx].Units;
 					}
 
-					rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].BitSize, &byte_list);
-					printf("Report Size (%d)\n", pp_data->caps[caps_idx].BitSize);
+					rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &byte_list);
+					printf("Report Size (%d)\n", pp_data->caps[caps_idx].ReportSize);
 
 					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &byte_list);
 					printf("Report Count (%d)\n", pp_data->caps[caps_idx].ReportCount + report_count);
