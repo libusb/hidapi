@@ -99,7 +99,7 @@ static struct hid_api_version api_version = {
 		USHORT VersionNumber;
 	} HIDD_ATTRIBUTES, *PHIDD_ATTRIBUTES;
 
-	typedef USHORT USAGE, *PUSAGE;
+	typedef USHORT USAGE;
 	typedef struct _HIDP_CAPS {
 		USAGE Usage;
 		USAGE UsagePage;
