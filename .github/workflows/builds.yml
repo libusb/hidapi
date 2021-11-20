@@ -134,6 +134,9 @@ jobs:
       run: |
         call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
+    - name: Run CTest
+      working-directory: build
+      run: ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
