@@ -1519,10 +1519,21 @@ static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int s
 	return *list;
 }
 
+/// <summary>
+/// This function reconstructs a HID Report Descriptor from a Win32 PreparsedData structure.
+/// This reconstructed report descriptor is logical identical to the real report descriptor,
+/// but not byte wise identical.
+/// </summary>
+/// <param name="dev">Device structure needed - only used for error reporting</param>
+/// <param name="pp_data">Pointer to the preparsed data structure to read</param>
+/// <param name="buf">Pointer to the buffer where the report descriptor should be stored</param>
+/// <param name="buf_size">Size of the buffer</param>
+/// <returns>Returns 0 if successful, -1 for error</returns>
 int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned char* buf, size_t buf_size) {
 
 	// Check if MagicKey is correct, to ensure that pp_data points to an valid preparse data structure
 	if (strncmp(pp_data->MagicKey, "HidP KDR", 8)) {
+		register_error(dev, "pp_data did not point to valid HIDP_PREPARSED_DATA struct");
 		return -1;
 	}
 
@@ -1531,10 +1542,12 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 	// Set pointer to the first node of link_collection_nodes
 	phid_pp_link_collection_node link_collection_nodes = (phid_pp_link_collection_node)(((unsigned char*)&pp_data->caps[0]) + pp_data->FirstByteOfLinkCollectionArray);
 
-	// *************************************************************************************************************************
-	// Create lookup tables for the bit range each report per collection (position of first bit and last bit in each collection)
+	// ****************************************************************************************************************************
+	// Create lookup tables for the bit range of each report per collection (position of first bit and last bit in each collection)
 	// [COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
-	// *************************************************************************************************************************
+	// ****************************************************************************************************************************
+	
+	// Allocate memory and initialize lookup table
 	RD_BIT_RANGE**** coll_bit_range;
 	coll_bit_range = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
@@ -1545,7 +1558,6 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = malloc(sizeof(RD_BIT_RANGE));
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit = -1;
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->LastBit = -1;
-				// IsButton and CapIndex are not used in this lookup table
 			}
 		}
 	}
@@ -1817,7 +1829,7 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				// Determine in which section before/between/after child collection the item should be inserted
 				if (first_bit < coll_bit_range[coll_child_order[pp_data->caps[caps_idx].LinkCollection][child_idx]][pp_data->caps[caps_idx].ReportID][rt_idx]->FirstBit)
 				{
-					// Note, that the default value for undefined coll_bit_range is -1, which cant be greater than the bit position
+					// Note, that the default value for undefined coll_bit_range is -1, which can't be greater than the bit position
 					break;
 				}
 				coll_begin = coll_end_lookup[coll_child_order[pp_data->caps[caps_idx].LinkCollection][child_idx]];
@@ -1933,22 +1945,8 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
 				printf("Usage  (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].LinkUsage);
 			}
-			if (link_collection_nodes[main_item_list->CollectionIndex].CollectionType == 0) {
-				rd_write_short_item(rd_main_collection, 0x00, &byte_list);
-				printf("Collection (Physical)\n");
-			}
-			else if (link_collection_nodes[main_item_list->CollectionIndex].CollectionType == 1) {
-				rd_write_short_item(rd_main_collection, 0x01, &byte_list);
-				printf("Collection (Application)\n");
-			}
-			else if (link_collection_nodes[main_item_list->CollectionIndex].CollectionType == 2) {
-				rd_write_short_item(rd_main_collection, 0x02, &byte_list);
-				printf("Collection (Logical)\n");
-			}
-			else {
-				rd_write_short_item(rd_main_collection, link_collection_nodes[main_item_list->CollectionIndex].CollectionType, &byte_list);
-				printf("Collection (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].CollectionType);
-			}
+		    rd_write_short_item(rd_main_collection, link_collection_nodes[main_item_list->CollectionIndex].CollectionType, &byte_list);
+			printf("Collection (%d)\n", link_collection_nodes[main_item_list->CollectionIndex].CollectionType);
 		}
 		else if (main_item_list->MainItemType == rd_collection_end) {
 			rd_write_short_item(rd_main_collection_end, 0, &byte_list);
