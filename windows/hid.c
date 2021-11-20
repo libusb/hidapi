@@ -275,7 +275,7 @@ typedef struct _hid_preparsed_data {
 	static HidD_FreePreparsedData_ HidD_FreePreparsedData;
 	static HidP_GetCaps_ HidP_GetCaps;
 	static HidD_SetNumInputBuffers_ HidD_SetNumInputBuffers;
-	
+
 	static HMODULE lib_handle = NULL;
 	static BOOLEAN initialized = FALSE;
 
@@ -380,8 +380,8 @@ struct rd_main_item_node
 	int FirstBit; ///< Position of first bit in report (counting from 0)
 	int LastBit; ///< Position of last bit in report (counting from 0)
 	RD_NODE_TYPE TypeOfNode; ///< Information if caps index refers to the array of button caps, value caps,
-								///< or if the node is just a padding element to fill unused bit positions.
-								///< The node can also be a collection node without any bits in the report.
+                             ///< or if the node is just a padding element to fill unused bit positions.
+                             ///< The node can also be a collection node without any bits in the report.
 	int CapsIndex; ///< Index in the array of caps
 	int CollectionIndex; ///< Index in the array of link collections
 	RD_MAIN_ITEMS MainItemType; ///< Input, Output, Feature, Collection or Collection End
