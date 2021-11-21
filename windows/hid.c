@@ -1370,7 +1370,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 /// <param name="list">Pointer to the list</param>
 static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
 	struct rd_item_byte* new_list_element;
-
+	
 	/* Determine last list position */
 	while (*list != NULL)
 	{
@@ -1393,7 +1393,8 @@ static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
 /// <returns>Returns 0 if successful, -1 for error</returns>
 static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byte** list) {
 	if (rd_item & 0x03) {
-		return -1; // Invaid input data
+		// Invalid input data, last to bits are reserved for data size
+		return -1;
 	}
 
 	if (rd_item == rd_main_collection_end) {
@@ -1432,7 +1433,7 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 			rd_append_byte(localData >> 24 & 0xFF, list);
 		}
 		else {
-			// Error data out of range
+			// Data out of 32 bit signed integer range
 			return -1;
 		}
 	}
@@ -1464,7 +1465,7 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 			rd_append_byte(localData >> 24 & 0xFF, list);
 		}
 		else {
-			// Error data out of range
+			// Data out of 32 bit unsigned integer range"
 			return -1;
 		}
 	}
@@ -1527,7 +1528,7 @@ static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int s
 /// <param name="pp_data">Pointer to the preparsed data structure to read</param>
 /// <param name="buf">Pointer to the buffer where the report descriptor should be stored</param>
 /// <param name="buf_size">Size of the buffer</param>
-/// <returns>Returns 0 if successful, -1 for error</returns>
+/// <returns>Returns size of reconstructed report descriptor if successful, -1 for error</returns>
 int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned char* buf, size_t buf_size) {
 
 	// Check if MagicKey is correct, to ensure that pp_data points to an valid preparse data structure
@@ -1543,7 +1544,7 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 
 	// ****************************************************************************************************************************
 	// Create lookup tables for the bit range of each report per collection (position of first bit and last bit in each collection)
-	// [COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
+	// coll_bit_range[COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
 	// ****************************************************************************************************************************
 	
 	// Allocate memory and initialize lookup table
@@ -1579,10 +1580,12 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 		}
 	}
 
-	// *****************************************************
-	// Determine hierachy levels of collections
-	// Determine number of direct childs of each collections
-	// *****************************************************
+	// *************************************************************************
+	// -Determine hierachy levels of each collections and store it in:
+	//  coll_levels[COLLECTION_INDEX]
+	// -Determine number of direct childs of each collections and store it in:
+	//  coll_number_of_direct_childs[COLLECTION_INDEX]
+	// *************************************************************************
 	int max_coll_level = 0;
 	int* coll_levels;
 	coll_levels = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
@@ -1648,9 +1651,10 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 		}
 	}
 
-	// ************************************************************************************************
-	// Determine child collection order of the whole hierachy based on previously determined bit ranges
-	// ************************************************************************************************
+	// *************************************************************************************************
+	// Determine child collection order of the whole hierachy, based on previously determined bit ranges
+	// and store it this index coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
+	// *************************************************************************************************
 	int** coll_child_order;
 	coll_child_order = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
 	{
@@ -1715,9 +1719,9 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 	}
 
 
-	// *****************************************************************************
-	// Create sorted list containing all the Collection and CollectionEnd main items
-	// *****************************************************************************
+	// ***************************************************************************************
+	// Create sorted main_item_list containing all the Collection and CollectionEnd main items
+	// ***************************************************************************************
 	struct rd_main_item_node* main_item_list;
 	main_item_list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
 	main_item_list = NULL; // List root
@@ -1808,10 +1812,10 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 	}
 
 
-	// ******************************************************
-	// Inserted Input/Output/Feature main items into the list
+	// ****************************************************************
+	// Inserted Input/Output/Feature main items into the main_item_list
 	// in order of reconstructed bit positions
-	// ******************************************************
+	// ****************************************************************
 	for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 		// Add all value caps to node list
 		struct rd_main_item_node* firstDelimiterNode = NULL;
@@ -1864,9 +1868,14 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 	}
 
 
-	// ***********************************************************************
-	// Add const items for all bit gaps and at the report end for 8bit padding
-	// ***********************************************************************
+	// ***********************************************************
+	// Add const main items for padding to main_item_list
+	// -To fill all bit gaps
+	// -At each report end for 8bit padding
+	//  Note that information about the padding at the report end,
+	//  is not stored in the preparsed data, but in practice all
+	//  report descriptors seem to have it, as assumed here.
+	// ***********************************************************
 	{
 		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
 		struct rd_main_item_node* last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
@@ -2305,6 +2314,7 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 	}
 
 	// Free multidimensionable array: coll_bit_range[COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
+	// Free multidimensionable array: coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
@@ -2313,13 +2323,14 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 			free(coll_bit_range[collection_node_idx][reportid_idx]);
 		}
 		free(coll_bit_range[collection_node_idx]);
+		if (coll_number_of_direct_childs[collection_node_idx] != 0) free(coll_child_order[collection_node_idx]);
 	}
 	free(coll_bit_range);
+	free(coll_child_order);
 
 	// Free one dimensional arrays
 	free(coll_begin_lookup);
 	free(coll_end_lookup);
-	free(coll_child_order);
     free(coll_levels);
     free(coll_number_of_direct_childs);
 	    
@@ -2339,6 +2350,7 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 	}
 
 	if (byte_list_len > buf_size) {
+		register_error(dev, "No descriptor bytes generated");
 		return -1;
 	}
 	else {
