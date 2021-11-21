@@ -472,6 +472,12 @@ static void register_error(hid_device *dev, const char *op)
 	dev->last_error_str = msg;
 }
 
+static void register_error_msg(hid_device* dev, const WCHAR err_msg[]) {
+	LocalFree(dev->last_error_str);
+	dev->last_error_str = LocalAlloc(LPTR, wcslen(err_msg)*sizeof(WCHAR));
+	wcscpy(dev->last_error_str, err_msg);
+}
+
 #ifndef HIDAPI_USE_DDK
 static int lookup_functions()
 {
@@ -1465,7 +1471,7 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 			rd_append_byte(localData >> 24 & 0xFF, list);
 		}
 		else {
-			// Data out of 32 bit unsigned integer range"
+			// Data out of 32 bit unsigned integer range
 			return -1;
 		}
 	}
@@ -1533,7 +1539,7 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 
 	// Check if MagicKey is correct, to ensure that pp_data points to an valid preparse data structure
 	if (strncmp(pp_data->MagicKey, "HidP KDR", 8)) {
-		register_error(dev, "pp_data did not point to valid HIDP_PREPARSED_DATA struct");
+		register_error_msg(dev, L"pp_data did not point to valid HIDP_PREPARSED_DATA struct");
 		return -1;
 	}
 
@@ -2350,7 +2356,7 @@ int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned ch
 	}
 
 	if (byte_list_len > buf_size) {
-		register_error(dev, "No descriptor bytes generated");
+		register_error_msg(dev, L"Buffer to small for the generated report descriptor");
 		return -1;
 	}
 	else {

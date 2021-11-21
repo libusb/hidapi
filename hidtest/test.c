@@ -72,6 +72,7 @@ int main(int argc, char* argv[])
 			res = hid_get_report_descriptor(device, buf, sizeof(buf));
 			if (res < 0) {
 				printf("error getting.");
+				printf("%ls", hid_error(device));
 			}
 			else {
 				printf("(%d bytes)", res);
