@@ -2298,11 +2298,13 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 				report_count = 0;
 			}
 		}
+        // Go to next item in main_item_list and free the memory of the actual item 
+        struct rd_main_item_node* main_item_list_prev = main_item_list;
 		main_item_list = main_item_list->next;
+        free(main_item_list_prev);        
 	}
 
-
-
+	// Free multidimensionable array: coll_bit_range[COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
@@ -2311,17 +2313,18 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 			free(coll_bit_range[collection_node_idx][reportid_idx]);
 		}
 		free(coll_bit_range[collection_node_idx]);
-		free(coll_begin_lookup[collection_node_idx]);
-		free(coll_end_lookup[collection_node_idx]);
 	}
 	free(coll_bit_range);
+
+	// Free one dimensional arrays
 	free(coll_begin_lookup);
 	free(coll_end_lookup);
-
-
-	// Copy report temporary descriptor list into buf array
+	free(coll_child_order);
+    free(coll_levels);
+    free(coll_number_of_direct_childs);
+	    
+	// Copy report temporary descriptor list into buf array and free list
 	unsigned int byte_list_len = 0;
-
 	while ((byte_list != NULL))
 	{
 		if (byte_list_len < buf_size) {
@@ -2334,7 +2337,7 @@ int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data
 		byte_list = byte_list->next;
 		free(byte_list_prev);
 	}
-	
+
 	if (byte_list_len > buf_size) {
 		return -1;
 	}
