@@ -2366,14 +2366,16 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 		register_error(dev, "HidD_GetPreparsedData");
 		return -1;
 	}
-	else {
-		int res;
-		res = rd_reconstructor(dev, pp_data, buf, buf_size);
+	
+	int res;
+	res = rd_reconstructor(dev, pp_data, buf, buf_size);
 
-		HidD_FreePreparsedData(pp_data);
-
-		return res;
+	if (!HidD_FreePreparsedData(pp_data)) {
+		register_error(dev, "HidD_FreePreparsedData");
+		return -1;
 	}
+	
+	return res;
 }
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
