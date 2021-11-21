@@ -1528,7 +1528,7 @@ static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int s
 /// <param name="buf">Pointer to the buffer where the report descriptor should be stored</param>
 /// <param name="buf_size">Size of the buffer</param>
 /// <returns>Returns 0 if successful, -1 for error</returns>
-int reconstruct_report_descriptor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned char* buf, size_t buf_size) {
+int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned char* buf, size_t buf_size) {
 
 	// Check if MagicKey is correct, to ensure that pp_data points to an valid preparse data structure
 	if (strncmp(pp_data->MagicKey, "HidP KDR", 8)) {
@@ -2356,7 +2356,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 	}
 	else {
 		int res;
-		res = reconstruct_report_descriptor(dev, pp_data, buf, buf_size);
+		res = rd_reconstructor(dev, pp_data, buf, buf_size);
 
 		HidD_FreePreparsedData(pp_data);
 
