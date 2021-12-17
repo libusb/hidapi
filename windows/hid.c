@@ -21,7 +21,7 @@
 ********************************************************/
 
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-// Do not warn about mbsrtowcs, wcsrtombs and wcsncpy usage.
+// Do not warn about wcsncpy usage.
 // https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt
 #define _CRT_SECURE_NO_WARNINGS
 #endif
@@ -35,6 +35,7 @@ typedef LONG NTSTATUS;
 #ifdef __MINGW32__
 #include <ntdef.h>
 #include <winbase.h>
+#define WC_ERR_INVALID_CHARS 0x00000080
 #endif
 
 #ifdef __CYGWIN__
@@ -324,13 +325,13 @@ static int lookup_functions()
 }
 #endif
 
-static HANDLE open_device(const char *path, BOOL open_rw)
+static HANDLE open_device(const wchar_t *path, BOOL open_rw)
 {
 	HANDLE handle;
 	DWORD desired_access = (open_rw)? (GENERIC_WRITE | GENERIC_READ): 0;
 	DWORD share_mode = FILE_SHARE_READ|FILE_SHARE_WRITE;
 
-	handle = CreateFileA(path,
+	handle = CreateFileW(path,
 		desired_access,
 		share_mode,
 		NULL,
@@ -447,11 +448,9 @@ static int hid_internal_get_interface_number(const wchar_t* hardware_id)
 	return interface_number;
 }
 
-static void hid_internal_get_info(struct hid_device_info* dev)
+static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
-	const char *tmp = NULL;
-	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
-	mbstate_t state;
+	wchar_t *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
 	ULONG len;
 	CONFIGRET cr;
 	DEVPROPTYPE property_type;
@@ -468,15 +467,6 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 		!CM_Get_DevNode_PropertyW)
 		goto end;
 #endif
-
-	tmp = dev->path;
-
-	len = (ULONG)strlen(tmp);
-	interface_path = (wchar_t*)calloc(len + 1, sizeof(wchar_t));
-	memset(&state, 0, sizeof(state));
-
-	if (mbsrtowcs(interface_path, &tmp, len, &state) == (size_t)-1)
-		goto end;
 
 	/* Get the device id from interface path */
 	len = 0;
@@ -544,16 +534,38 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 		}
 	}
 end:
-	free(interface_path);
 	free(device_id);
 	free(hardware_ids);
 	free(compatible_ids);
 }
 
-static struct hid_device_info *hid_get_device_info(const char *path, HANDLE handle)
+static char *hid_internal_UTF16toUTF8(const wchar_t *src)
+{
+	char *dst = NULL;
+	int len = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, NULL, 0, NULL, NULL);
+	if (len) {
+		dst = (char*)calloc(len, sizeof(char));
+		WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, dst, len, NULL, NULL);
+	}
+
+	return dst;
+}
+
+static wchar_t *hid_internal_UTF8toUTF16(const char *src)
+{
+	wchar_t *dst = NULL;
+	int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, NULL, 0);
+	if (len) {
+		dst = (wchar_t*)calloc(len, sizeof(wchar_t));
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, dst, len);
+	}
+
+	return dst;
+}
+
+static struct hid_device_info *hid_get_device_info(const wchar_t *path, HANDLE handle)
 {
 	struct hid_device_info *dev = NULL; /* return object */
-
 	BOOL res;
 	HIDD_ATTRIBUTES attrib;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
@@ -567,14 +579,7 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 
 	/* Fill out the record */
 	dev->next = NULL;
-
-	if (path) {
-		size_t len = strlen(path);
-		dev->path = (char*)calloc(len + 1, sizeof(char));
-		memcpy(dev->path, path, len + 1);
-	}
-	else
-		dev->path = NULL;
+	dev->path = hid_internal_UTF16toUTF8(path);
 
 	attrib.Size = sizeof(HIDD_ATTRIBUTES);
 	res = HidD_GetAttributes(handle, &attrib);
@@ -617,7 +622,7 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 	wstr[WSTR_LEN - 1] = L'\0';
 	dev->product_string = _wcsdup(wstr);
 
-	hid_internal_get_info(dev);
+	hid_internal_get_info(path, dev);
 
 	return dev;
 }
@@ -667,31 +672,19 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 	/* Iterate over each device interface in the HID class, looking for the right one. */
 	for (wchar_t* device_interface = device_interface_list; *device_interface; device_interface += wcslen(device_interface) + 1) {
-		wchar_t *tmp_str = NULL;
-		char* path = NULL;
-		mbstate_t state;
 		HANDLE read_handle = INVALID_HANDLE_VALUE;
 		HIDD_ATTRIBUTES attrib;
 
 		//wprintf(L"Device Path: %s\n", device_interface);
 
-		tmp_str = device_interface;
-		len = (ULONG)wcslen(tmp_str);
-		path = (char*)calloc(len + 1, sizeof(char));
-		memset(&state, 0, sizeof(state));
-
-		/* Convert device interface path to narrow encoding */
-		if (wcsrtombs(path, &tmp_str, len, &state) == (size_t)-1)
-			goto cont;
-
 		/* Open read-only handle to the device */
-		read_handle = open_device(path, FALSE);
+		read_handle = open_device(device_interface, FALSE);
 
 		/* Check validity of read_handle. */
 		if (read_handle == INVALID_HANDLE_VALUE) {
 			/* Unable to open the device. */
 			//register_error(dev, "CreateFile");
-			goto cont;
+			continue;
 		}
 
 		/* Get the Vendor ID and Product ID for this device. */
@@ -705,7 +698,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		    (product_id == 0x0 || attrib.ProductID == product_id)) {
 
 			/* VID/PID match. Create the record. */
-			struct hid_device_info *tmp = hid_get_device_info(path, read_handle);
+			struct hid_device_info *tmp = hid_get_device_info(device_interface, read_handle);
 
 			if (tmp == NULL) {
 				goto cont_close;
@@ -722,8 +715,6 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 cont_close:
 		CloseHandle(read_handle);
-cont:
-		free(path);
 	}
 
 	free(device_interface_list);
@@ -786,6 +777,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 {
 	hid_device *dev = NULL;
+	wchar_t* interface_path = NULL;
 	HANDLE device_handle = INVALID_HANDLE_VALUE;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	HIDP_CAPS caps;
@@ -793,8 +785,12 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	if (hid_init() < 0)
 		goto end_of_function;
 
+	interface_path = hid_internal_UTF8toUTF16(path);
+	if (!interface_path)
+		goto end_of_function;
+
 	/* Open a handle to the device */
-	device_handle = open_device(path, TRUE);
+	device_handle = open_device(interface_path, TRUE);
 
 	/* Check validity of write_handle. */
 	if (device_handle == INVALID_HANDLE_VALUE) {
@@ -803,7 +799,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 		   them.  This is to prevent keyloggers.  However, feature reports
 		   can still be sent and received.  Retry opening the device, but
 		   without read/write access. */
-		device_handle = open_device(path, FALSE);
+		device_handle = open_device(interface_path, FALSE);
 
 		/* Check the validity of the limited device_handle. */
 		if (device_handle == INVALID_HANDLE_VALUE)
@@ -830,9 +826,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	dev->input_report_length = caps.InputReportByteLength;
 	dev->feature_report_length = caps.FeatureReportByteLength;
 	dev->read_buf = (char*) malloc(dev->input_report_length);
-	dev->device_info = hid_get_device_info(path, dev->device_handle);
+	dev->device_info = hid_get_device_info(interface_path, dev->device_handle);
 
 end_of_function:
+	free(interface_path);
 	CloseHandle(device_handle);
 	HidD_FreePreparsedData(pp_data);
 
