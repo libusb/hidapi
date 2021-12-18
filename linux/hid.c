@@ -39,6 +39,7 @@
 
 /* Linux */
 #include <linux/hidraw.h>
+#include <linux/hiddev.h>
 #include <linux/version.h>
 #include <linux/input.h>
 #include <libudev.h>
