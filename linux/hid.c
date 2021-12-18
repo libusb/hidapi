@@ -1114,13 +1114,21 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 	return get_device_string(dev, DEVICE_STRING_SERIAL, string, maxlen);
 }
 
-int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
+int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device * dev, int string_index, wchar_t * string, size_t maxlen)
 {
-	(void)dev;
-	(void)string_index;
-	(void)string;
-	(void)maxlen;
-	return -1;
+
+	int res;
+	struct hiddev_string_descriptor str_desc;
+
+	str_desc.index = string_index;
+	res = ioctl(dev->device_handle, HIDIOCGSTRING, str_desc);
+	if (res < 0)
+		register_device_error_format(dev, "ioctl (GSTRING): %s", strerror(errno));
+	else {
+		mbstowcs(&string[0], str_desc.value, maxlen);
+	}
+
+	return res;
 }
 
 
