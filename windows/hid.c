@@ -412,10 +412,35 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 }
 
+/* USB Device Interface Number.
+   It can be parsed out of the Hardware ID if a USB device is has multiple interfaces (composite device).
+   See https://docs.microsoft.com/windows-hardware/drivers/hid/hidclass-hardware-ids-for-top-level-collections
+   and https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
+
+   hardware_id is always expected to be uppercase.
+*/
+static int hid_internal_get_interface_number(const wchar_t* hardware_id)
+{
+	int interface_number;
+	wchar_t *startptr, *endptr;
+	const wchar_t *interface_token = L"&MI_";
+
+	startptr = wcsstr(hardware_id, interface_token);
+	if (!startptr)
+		return -1;
+
+	startptr += wcslen(interface_token);
+	interface_number = wcstol(startptr, &endptr, 16);
+	if (endptr == startptr)
+		return -1;
+
+	return interface_number;
+}
+
 static void hid_internal_get_info(struct hid_device_info* dev)
 {
 	const char *tmp = NULL;
-	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL;
+	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
 	mbstate_t state;
 	ULONG len;
 	CONFIGRET cr;
@@ -423,6 +448,7 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 	DEVINST dev_node;
 
 	static DEVPROPKEY DEVPKEY_Device_InstanceId = { { 0x78c34fc8, 0x104a, 0x4aca, 0x9e, 0xa4, 0x52, 0x4d, 0x52, 0x99, 0x6e, 0x57 }, 256 }; // DEVPROP_TYPE_STRING
+	static DEVPROPKEY DEVPKEY_Device_HardwareIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 3 }; // DEVPROP_TYPE_STRING_LIST
 	static DEVPROPKEY DEVPKEY_Device_CompatibleIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 4 }; // DEVPROP_TYPE_STRING_LIST
 
 	if (!CM_Get_Device_Interface_PropertyW ||
@@ -454,6 +480,27 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
 	if (cr != CR_SUCCESS)
 		goto end;
+
+	/* Get the hardware ids from devnode */
+	len = 0;
+	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_HardwareIds, &property_type, NULL, &len, 0);
+	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING_LIST) {
+		hardware_ids = (wchar_t*)calloc(len, sizeof(BYTE));
+		cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_HardwareIds, &property_type, (PBYTE)hardware_ids, &len, 0);
+	}
+	if (cr != CR_SUCCESS)
+		goto end;
+
+	// Search for interface number in hardware ids
+	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
+		/* Normalize to upper case */
+		for (wchar_t* p = hardware_id; *p; ++p) *p = towupper(*p);
+
+		dev->interface_number = hid_internal_get_interface_number(hardware_id);
+
+		if (dev->interface_number != -1)
+			break;
+	}
 
 	/* Get devnode parent */
 	cr = CM_Get_Parent(&dev_node, dev_node, 0);
@@ -487,6 +534,7 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 end:
 	free(interface_path);
 	free(device_id);
+	free(hardware_ids);
 	free(compatible_ids);
 }
 
@@ -556,25 +604,6 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 	res = HidD_GetProductString(handle, wstr, sizeof(wstr));
 	wstr[WSTR_LEN - 1] = L'\0';
 	dev->product_string = _wcsdup(wstr);
-
-	/* Interface Number. It can sometimes be parsed out of the path
-	   on Windows if a device has multiple interfaces. See
-	   https://docs.microsoft.com/windows-hardware/drivers/hid/hidclass-hardware-ids-for-top-level-collections
-	   or search for "HIDClass Hardware IDs for Top-Level Collections" at Microsoft Docs. If it's not
-	   in the path, it's set to -1. */
-	dev->interface_number = -1;
-	if (dev->path) {
-		char* interface_component = strstr(dev->path, "&mi_");
-		if (interface_component) {
-			char* hex_str = interface_component + 4;
-			char* endptr = NULL;
-			dev->interface_number = strtol(hex_str, &endptr, 16);
-			if (endptr == hex_str) {
-				/* The parsing failed. Set interface_number to -1. */
-				dev->interface_number = -1;
-			}
-		}
-	}
 
 	hid_internal_get_info(dev);
 
