@@ -222,7 +222,7 @@ static void free_hid_device(hid_device *dev)
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
-	free(dev->device_info);
+	hid_free_enumeration(dev->device_info);
 	free(dev);
 }
 
@@ -781,72 +781,58 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 
 HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 {
-	hid_device *dev;
-	HIDP_CAPS caps;
+	hid_device *dev = NULL;
+	HANDLE device_handle = INVALID_HANDLE_VALUE;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
-	BOOLEAN res;
-	NTSTATUS nt_res;
+	HIDP_CAPS caps;
 
-	if (hid_init() < 0) {
-		return NULL;
-	}
-
-	dev = new_hid_device();
+	if (hid_init() < 0)
+		goto end_of_function;
 
 	/* Open a handle to the device */
-	dev->device_handle = open_device(path, TRUE);
+	device_handle = open_device(path, TRUE);
 
 	/* Check validity of write_handle. */
-	if (dev->device_handle == INVALID_HANDLE_VALUE) {
+	if (device_handle == INVALID_HANDLE_VALUE) {
 		/* System devices, such as keyboards and mice, cannot be opened in
 		   read-write mode, because the system takes exclusive control over
 		   them.  This is to prevent keyloggers.  However, feature reports
 		   can still be sent and received.  Retry opening the device, but
 		   without read/write access. */
-		dev->device_handle = open_device(path, FALSE);
+		device_handle = open_device(path, FALSE);
 
 		/* Check the validity of the limited device_handle. */
-		if (dev->device_handle == INVALID_HANDLE_VALUE) {
-			/* Unable to open the device, even without read-write mode. */
-			register_error(dev, "CreateFile");
-			goto err;
-		}
+		if (device_handle == INVALID_HANDLE_VALUE)
+			goto end_of_function;
 	}
 
 	/* Set the Input Report buffer size to 64 reports. */
-	res = HidD_SetNumInputBuffers(dev->device_handle, 64);
-	if (!res) {
-		register_error(dev, "HidD_SetNumInputBuffers");
-		goto err;
-	}
+	if (!HidD_SetNumInputBuffers(device_handle, 64))
+		goto end_of_function;
 
 	/* Get the Input Report length for the device. */
-	res = HidD_GetPreparsedData(dev->device_handle, &pp_data);
-	if (!res) {
-		register_error(dev, "HidD_GetPreparsedData");
-		goto err;
-	}
-	nt_res = HidP_GetCaps(pp_data, &caps);
-	if (nt_res != HIDP_STATUS_SUCCESS) {
-		register_error(dev, "HidP_GetCaps");
-		goto err_pp_data;
-	}
+	if (!HidD_GetPreparsedData(device_handle, &pp_data))
+		goto end_of_function;
+
+	if (HidP_GetCaps(pp_data, &caps) != HIDP_STATUS_SUCCESS)
+		goto end_of_function;
+
+	dev = new_hid_device();
+
+	dev->device_handle = device_handle;
+	device_handle = INVALID_HANDLE_VALUE;
+
 	dev->output_report_length = caps.OutputReportByteLength;
 	dev->input_report_length = caps.InputReportByteLength;
 	dev->feature_report_length = caps.FeatureReportByteLength;
-	HidD_FreePreparsedData(pp_data);
-
 	dev->read_buf = (char*) malloc(dev->input_report_length);
-
 	dev->device_info = hid_get_device_info(path, dev->device_handle);
 
-	return dev;
+end_of_function:
+	CloseHandle(device_handle);
+	HidD_FreePreparsedData(pp_data);
 
-err_pp_data:
-		HidD_FreePreparsedData(pp_data);
-err:
-		free_hid_device(dev);
-		return NULL;
+	return dev;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
