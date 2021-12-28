@@ -4,7 +4,6 @@ add_library(hidapi_winapi
 )
 target_link_libraries(hidapi_winapi
     PUBLIC hidapi_include
-    PRIVATE setupapi
 )
 
 set_target_properties(hidapi_winapi

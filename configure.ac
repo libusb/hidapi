@@ -153,7 +153,7 @@ if test "x$os" = xwindows; then
 	AC_DEFINE(OS_WINDOWS, 1, [Windows implementations])
 	AC_SUBST(OS_WINDOWS)
 	LDFLAGS="${LDFLAGS} -no-undefined"
-	LIBS="${LIBS} -lsetupapi"
+	LIBS="${LIBS}"
 fi
 
 if test "x$threads" = xpthreads; then
