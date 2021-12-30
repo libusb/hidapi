@@ -105,6 +105,10 @@ __thread wchar_t *last_global_error_str = NULL;
 static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
+	if (dev == NULL) {
+		return NULL;
+	}
+
 	dev->device_handle = -1;
 	dev->blocking = 1;
 	dev->uses_numbered_reports = 0;
@@ -426,6 +430,28 @@ static int get_hid_report_descriptor_from_sysfs(const char *sysfs_path, struct h
 
 	res = get_hid_report_descriptor(rpt_path, rpt_desc);
 	free(rpt_path);
+
+	return res;
+}
+
+static int get_hid_report_descriptor_from_hidraw(hid_device *dev, struct hidraw_report_descriptor *rpt_desc)
+{
+	int desc_size = 0;
+
+	/* Get Report Descriptor Size */
+	int res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
+	if (res < 0) {
+		register_device_error_format(dev, "ioctl (GRDESCSIZE): %s", strerror(errno));
+		return res;
+	}
+
+	/* Get Report Descriptor */
+	memset(rpt_desc, 0x0, sizeof(*rpt_desc));
+	rpt_desc->size = desc_size;
+	res = ioctl(dev->device_handle, HIDIOCGRDESC, rpt_desc);
+	if (res < 0) {
+		register_device_error_format(dev, "ioctl (GRDESC): %s", strerror(errno));
+	}
 
 	return res;
 }
@@ -915,40 +941,26 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 
 hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
-	/* Set global error to none */
-	register_global_error(NULL);
-
 	hid_device *dev = NULL;
 
 	hid_init();
 
 	dev = new_hid_device();
+	if (dev == NULL) {
+		register_global_error("Device allocation error");
+		return NULL;
+	}
 
-	/* OPEN HERE */
 	dev->device_handle = open(path, O_RDWR);
 
-	/* If we have a good handle, return it. */
 	if (dev->device_handle >= 0) {
-		/* Set device error to none */
-		register_device_error(dev, NULL);
+		register_global_error(NULL);
 
 		/* Get the report descriptor */
-		int res, desc_size = 0;
 		struct hidraw_report_descriptor rpt_desc;
+		int res = get_hid_report_descriptor_from_hidraw(dev, &rpt_desc);
 
-		memset(&rpt_desc, 0x0, sizeof(rpt_desc));
-
-		/* Get Report Descriptor Size */
-		res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
-		if (res < 0)
-			register_device_error_format(dev, "ioctl (GRDESCSIZE): %s", strerror(errno));
-
-		/* Get Report Descriptor */
-		rpt_desc.size = desc_size;
-		res = ioctl(dev->device_handle, HIDIOCGRDESC, &rpt_desc);
-		if (res < 0) {
-			register_device_error_format(dev, "ioctl (GRDESC): %s", strerror(errno));
-		} else {
+		if (res >= 0) {
 			/* Determine if this device uses numbered reports. */
 			dev->uses_numbered_reports =
 				uses_numbered_reports(rpt_desc.value,
@@ -1125,11 +1137,20 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
 {
-	(void)dev;
-	(void)buf;
-	(void)buf_size;
-	/* TODO  */
-	return -1;
+	struct hidraw_report_descriptor rpt_desc;
+	int res = get_hid_report_descriptor_from_hidraw(dev, &rpt_desc);
+	if (res < 0) {
+		/* error already registered */
+		return res;
+	}
+
+	if (rpt_desc.size < buf_size) {
+		buf_size = (size_t) rpt_desc.size;
+	}
+
+	memcpy(buf, rpt_desc.value, buf_size);
+
+	return (int) buf_size;
 }
 
 /* Passing in NULL means asking for the last global error message. */
