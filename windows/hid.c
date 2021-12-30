@@ -33,6 +33,7 @@ typedef LONG NTSTATUS;
 #endif
 
 #ifdef __MINGW32__
+#include <devpropdef.h>
 #include <ntdef.h>
 #include <winbase.h>
 #endif
@@ -221,7 +222,7 @@ static void free_hid_device(hid_device *dev)
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
-	free(dev->device_info);
+	hid_free_enumeration(dev->device_info);
 	free(dev);
 }
 
@@ -411,10 +412,35 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 }
 
+/* USB Device Interface Number.
+   It can be parsed out of the Hardware ID if a USB device is has multiple interfaces (composite device).
+   See https://docs.microsoft.com/windows-hardware/drivers/hid/hidclass-hardware-ids-for-top-level-collections
+   and https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
+
+   hardware_id is always expected to be uppercase.
+*/
+static int hid_internal_get_interface_number(const wchar_t* hardware_id)
+{
+	int interface_number;
+	wchar_t *startptr, *endptr;
+	const wchar_t *interface_token = L"&MI_";
+
+	startptr = wcsstr(hardware_id, interface_token);
+	if (!startptr)
+		return -1;
+
+	startptr += wcslen(interface_token);
+	interface_number = wcstol(startptr, &endptr, 16);
+	if (endptr == startptr)
+		return -1;
+
+	return interface_number;
+}
+
 static void hid_internal_get_info(struct hid_device_info* dev)
 {
 	const char *tmp = NULL;
-	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL;
+	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
 	mbstate_t state;
 	ULONG len;
 	CONFIGRET cr;
@@ -422,6 +448,7 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 	DEVINST dev_node;
 
 	static DEVPROPKEY DEVPKEY_Device_InstanceId = { { 0x78c34fc8, 0x104a, 0x4aca, 0x9e, 0xa4, 0x52, 0x4d, 0x52, 0x99, 0x6e, 0x57 }, 256 }; // DEVPROP_TYPE_STRING
+	static DEVPROPKEY DEVPKEY_Device_HardwareIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 3 }; // DEVPROP_TYPE_STRING_LIST
 	static DEVPROPKEY DEVPKEY_Device_CompatibleIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 4 }; // DEVPROP_TYPE_STRING_LIST
 
 	if (!CM_Get_Device_Interface_PropertyW ||
@@ -453,6 +480,27 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
 	if (cr != CR_SUCCESS)
 		goto end;
+
+	/* Get the hardware ids from devnode */
+	len = 0;
+	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_HardwareIds, &property_type, NULL, &len, 0);
+	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING_LIST) {
+		hardware_ids = (wchar_t*)calloc(len, sizeof(BYTE));
+		cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_HardwareIds, &property_type, (PBYTE)hardware_ids, &len, 0);
+	}
+	if (cr != CR_SUCCESS)
+		goto end;
+
+	// Search for interface number in hardware ids
+	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
+		/* Normalize to upper case */
+		for (wchar_t* p = hardware_id; *p; ++p) *p = towupper(*p);
+
+		dev->interface_number = hid_internal_get_interface_number(hardware_id);
+
+		if (dev->interface_number != -1)
+			break;
+	}
 
 	/* Get devnode parent */
 	cr = CM_Get_Parent(&dev_node, dev_node, 0);
@@ -486,6 +534,7 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 end:
 	free(interface_path);
 	free(device_id);
+	free(hardware_ids);
 	free(compatible_ids);
 }
 
@@ -555,25 +604,6 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 	res = HidD_GetProductString(handle, wstr, sizeof(wstr));
 	wstr[WSTR_LEN - 1] = L'\0';
 	dev->product_string = _wcsdup(wstr);
-
-	/* Interface Number. It can sometimes be parsed out of the path
-	   on Windows if a device has multiple interfaces. See
-	   https://docs.microsoft.com/windows-hardware/drivers/hid/hidclass-hardware-ids-for-top-level-collections
-	   or search for "HIDClass Hardware IDs for Top-Level Collections" at Microsoft Docs. If it's not
-	   in the path, it's set to -1. */
-	dev->interface_number = -1;
-	if (dev->path) {
-		char* interface_component = strstr(dev->path, "&mi_");
-		if (interface_component) {
-			char* hex_str = interface_component + 4;
-			char* endptr = NULL;
-			dev->interface_number = strtol(hex_str, &endptr, 16);
-			if (endptr == hex_str) {
-				/* The parsing failed. Set interface_number to -1. */
-				dev->interface_number = -1;
-			}
-		}
-	}
 
 	hid_internal_get_info(dev);
 
@@ -780,72 +810,58 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 
 HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 {
-	hid_device *dev;
-	HIDP_CAPS caps;
+	hid_device *dev = NULL;
+	HANDLE device_handle = INVALID_HANDLE_VALUE;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
-	BOOLEAN res;
-	NTSTATUS nt_res;
+	HIDP_CAPS caps;
 
-	if (hid_init() < 0) {
-		return NULL;
-	}
-
-	dev = new_hid_device();
+	if (hid_init() < 0)
+		goto end_of_function;
 
 	/* Open a handle to the device */
-	dev->device_handle = open_device(path, TRUE);
+	device_handle = open_device(path, TRUE);
 
 	/* Check validity of write_handle. */
-	if (dev->device_handle == INVALID_HANDLE_VALUE) {
+	if (device_handle == INVALID_HANDLE_VALUE) {
 		/* System devices, such as keyboards and mice, cannot be opened in
 		   read-write mode, because the system takes exclusive control over
 		   them.  This is to prevent keyloggers.  However, feature reports
 		   can still be sent and received.  Retry opening the device, but
 		   without read/write access. */
-		dev->device_handle = open_device(path, FALSE);
+		device_handle = open_device(path, FALSE);
 
 		/* Check the validity of the limited device_handle. */
-		if (dev->device_handle == INVALID_HANDLE_VALUE) {
-			/* Unable to open the device, even without read-write mode. */
-			register_error(dev, "CreateFile");
-			goto err;
-		}
+		if (device_handle == INVALID_HANDLE_VALUE)
+			goto end_of_function;
 	}
 
 	/* Set the Input Report buffer size to 64 reports. */
-	res = HidD_SetNumInputBuffers(dev->device_handle, 64);
-	if (!res) {
-		register_error(dev, "HidD_SetNumInputBuffers");
-		goto err;
-	}
+	if (!HidD_SetNumInputBuffers(device_handle, 64))
+		goto end_of_function;
 
 	/* Get the Input Report length for the device. */
-	res = HidD_GetPreparsedData(dev->device_handle, &pp_data);
-	if (!res) {
-		register_error(dev, "HidD_GetPreparsedData");
-		goto err;
-	}
-	nt_res = HidP_GetCaps(pp_data, &caps);
-	if (nt_res != HIDP_STATUS_SUCCESS) {
-		register_error(dev, "HidP_GetCaps");
-		goto err_pp_data;
-	}
+	if (!HidD_GetPreparsedData(device_handle, &pp_data))
+		goto end_of_function;
+
+	if (HidP_GetCaps(pp_data, &caps) != HIDP_STATUS_SUCCESS)
+		goto end_of_function;
+
+	dev = new_hid_device();
+
+	dev->device_handle = device_handle;
+	device_handle = INVALID_HANDLE_VALUE;
+
 	dev->output_report_length = caps.OutputReportByteLength;
 	dev->input_report_length = caps.InputReportByteLength;
 	dev->feature_report_length = caps.FeatureReportByteLength;
-	HidD_FreePreparsedData(pp_data);
-
 	dev->read_buf = (char*) malloc(dev->input_report_length);
-
 	dev->device_info = hid_get_device_info(path, dev->device_handle);
 
-	return dev;
+end_of_function:
+	CloseHandle(device_handle);
+	HidD_FreePreparsedData(pp_data);
 
-err_pp_data:
-		HidD_FreePreparsedData(pp_data);
-err:
-		free_hid_device(dev);
-		return NULL;
+	return dev;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
