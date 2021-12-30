@@ -324,6 +324,16 @@ static int get_usage(uint8_t *report_descriptor, size_t size,
 }
 #endif /* INVASIVE_GET_USAGE */
 
+static int hid_get_report_descriptor_libusb(libusb_device_handle *dev, int interface_num, unsigned char *buf, size_t buf_size)
+{
+	int res = libusb_control_transfer(dev, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, buf, buf_size, 5000);
+	if (res < 0) {
+		LOG("libusb_control_transfer() for getting the HID report failed with: (%d) %s\n", res, libusb_error_name(res));
+		return -1;
+	}
+	return res;
+}
+
 #if defined(__FreeBSD__) && __FreeBSD__ < 10
 /* The libusb version included in FreeBSD < 10 doesn't have this function. In
    mainline libusb, it's inlined in libusb.h. This function will bear a striking
@@ -650,7 +660,6 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 						#if 0. For composite devices, use the interface
 						field in the hid_device_info struct to distinguish
 						between interfaces. */
-							unsigned char data[256];
 #ifdef DETACH_KERNEL_DRIVER
 							int detached = 0;
 							/* Usage Page and Usage */
@@ -665,18 +674,16 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 #endif
 							res = libusb_claim_interface(handle, interface_num);
 							if (res >= 0) {
-								/* Get the HID Report Descriptor. */
-								res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
+								unsigned char rpt_desc[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+								res = hid_get_report_descriptor_libusb(handle, interface_num, rpt_desc, sizeof(rpt_desc));
 								if (res >= 0) {
 									unsigned short page=0, usage=0;
 									/* Parse the usage and usage page
 									   out of the report descriptor. */
-									get_usage(data, res,  &page, &usage);
+									get_usage(rpt_desc, (size_t) res,  &page, &usage);
 									cur_dev->usage_page = page;
 									cur_dev->usage = usage;
 								}
-								else
-									LOG("libusb_control_transfer() for getting the HID report failed with %d\n", res);
 
 								/* Release the interface */
 								res = libusb_release_interface(handle, interface_num);
@@ -684,7 +691,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 									LOG("Can't release the interface.\n");
 							}
 							else
-								LOG("Can't claim interface %d\n", res);
+								LOG("Can't claim interface: (%d) %s\n", res, libusb_error_name(res));
 #ifdef DETACH_KERNEL_DRIVER
 							/* Re-attach kernel driver if necessary. */
 							if (detached) {
@@ -830,7 +837,7 @@ static void read_callback(struct libusb_transfer *transfer)
 	/* Re-submit the transfer object. */
 	res = libusb_submit_transfer(transfer);
 	if (res != 0) {
-		LOG("Unable to submit URB. libusb error code: %d\n", res);
+		LOG("Unable to submit URB: (%d) %s\n", res, libusb_error_name(res));
 		dev->shutdown_thread = 1;
 		dev->transfer_loop_finished = 1;
 	}
@@ -868,7 +875,7 @@ static void *read_thread(void *param)
 		res = libusb_handle_events(usb_context);
 		if (res < 0) {
 			/* There was an error. */
-			LOG("read_thread(): libusb reports error # %d\n", res);
+			LOG("read_thread(): (%d) %s\n", res, libusb_error_name(res));
 
 			/* Break out of this loop only on fatal error.*/
 			if (res != LIBUSB_ERROR_BUSY &&
@@ -935,7 +942,7 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 #endif
 	res = libusb_claim_interface(dev->device_handle, intf_desc->bInterfaceNumber);
 	if (res < 0) {
-		LOG("can't claim interface %d: %d\n", intf_desc->bInterfaceNumber, res);
+		LOG("can't claim interface %d: (%d) %s\n", intf_desc->bInterfaceNumber, res, libusb_error_name(res));
 		return 0;
 	}
 
@@ -1472,11 +1479,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
 {
-	(void)dev;
-	(void)buf;
-	(void)buf_size;
-	/* TODO  */
-	return -1;
+	return hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, buf, buf_size);
 }
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
