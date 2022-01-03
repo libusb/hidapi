@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
 				if (i % 10 == 0) {
 					printf("\n");
 				}
-				printf("0x%02X, ", buf[i]);
+				printf("0x%02x, ", buf[i]);
 			}
 			printf("\n");
 
