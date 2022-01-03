@@ -348,7 +348,7 @@ typedef enum rd_items_ {
  */
 struct rd_item_byte {
 	unsigned char byte;
-	struct rd_item_byte* next;
+	struct rd_item_byte *next;
 };
 
 typedef enum rd_main_items_ {
@@ -1397,7 +1397,7 @@ static void rd_append_byte(unsigned char byte, struct rd_item_byte **list) {
  *
  * @return Returns 0 if successful, -1 for error.
  */
-static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byte** list) {
+static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byte **list) {
 	if (rd_item & 0x03) {
 		// Invalid input data, last to bits are reserved for data size
 		return -1;
@@ -1478,8 +1478,8 @@ static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byt
 	return 0;
 }
 
-static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int last_bit, rd_node_type type_of_node, int caps_index, int collection_index, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
-	struct rd_main_item_node* new_list_node;
+static struct rd_main_item_node * rd_append_main_item_node(int first_bit, int last_bit, rd_node_type type_of_node, int caps_index, int collection_index, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node **list) {
+	struct rd_main_item_node *new_list_node;
 
 	// Determine last node in the list
 	while (*list != NULL)
@@ -1501,16 +1501,16 @@ static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int las
 	return new_list_node;
 }
 
-static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, rd_node_type type_of_node, int caps_index, int collection_index, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+static struct  rd_main_item_node * rd_insert_main_item_node(int first_bit, int last_bit, rd_node_type type_of_node, int caps_index, int collection_index, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node **list) {
 	// Insert item after the main item node referenced by list
-	struct rd_main_item_node* next_item = (*list)->next;
+	struct rd_main_item_node *next_item = (*list)->next;
 	(*list)->next = NULL;
 	rd_append_main_item_node(first_bit, last_bit, type_of_node, caps_index, collection_index, main_item_type, report_id, list);
 	(*list)->next->next = next_item;
 	return (*list)->next;
 }
 
-static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+static struct rd_main_item_node * rd_search_main_item_list_for_bit_position(int search_bit, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node **list) {
 	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
 
 	while (((*list)->next->MainItemType != rd_collection) &&
@@ -1545,7 +1545,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 		return -1;
 	}
 
-	struct rd_item_byte* byte_list = NULL;
+	struct rd_item_byte *byte_list = NULL;
 
 	// Set pointer to the first node of link_collection_nodes
 	phid_pp_link_collection_node link_collection_nodes = (phid_pp_link_collection_node)(((unsigned char*)&pp_data->caps[0]) + pp_data->FirstByteOfLinkCollectionArray);
@@ -1556,7 +1556,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	// ****************************************************************************************************************************
 	
 	// Allocate memory and initialize lookup table
-	rd_bit_range**** coll_bit_range;
+	rd_bit_range ****coll_bit_range;
 	coll_bit_range = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
@@ -1595,10 +1595,8 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	//  coll_number_of_direct_childs[COLLECTION_INDEX]
 	// *************************************************************************
 	int max_coll_level = 0;
-	int* coll_levels;
-	coll_levels = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
-	int* coll_number_of_direct_childs;
-	coll_number_of_direct_childs = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
+	int *coll_levels = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
+	int *coll_number_of_direct_childs = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		coll_levels[collection_node_idx] = -1;
 		coll_number_of_direct_childs[collection_node_idx] = 0;
@@ -1663,10 +1661,10 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	// Determine child collection order of the whole hierachy, based on previously determined bit ranges
 	// and store it this index coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
 	// *************************************************************************************************
-	int** coll_child_order;
+	int **coll_child_order;
 	coll_child_order = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
 	{
-		BOOLEAN* coll_parsed_flag;
+		BOOLEAN *coll_parsed_flag;
 		coll_parsed_flag = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_parsed_flag[0]));
 		for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 			coll_parsed_flag[collection_node_idx] = FALSE;
@@ -1730,25 +1728,21 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	// ***************************************************************************************
 	// Create sorted main_item_list containing all the Collection and CollectionEnd main items
 	// ***************************************************************************************
-	struct rd_main_item_node* main_item_list;
-	main_item_list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
+	struct rd_main_item_node *main_item_list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
 	main_item_list = NULL; // List root
 	// Lookup table to find the Collection items in the list by index
-	struct rd_main_item_node** coll_begin_lookup;
-	struct rd_main_item_node** coll_end_lookup;
-	coll_begin_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
-	coll_end_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
+	struct rd_main_item_node **coll_begin_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
+	struct rd_main_item_node **coll_end_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
 	{
-		int* coll_last_written_child;
-		coll_last_written_child = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
+		int *coll_last_written_child = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
 		for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 			coll_last_written_child[collection_node_idx] = -1;
 		}
 
 		int actual_coll_level = 0;
 		USHORT collection_node_idx = 0;
-		struct rd_main_item_node* firstDelimiterNode = NULL;
-		struct rd_main_item_node* delimiterCloseNode = NULL;
+		struct rd_main_item_node *firstDelimiterNode = NULL;
+		struct rd_main_item_node *delimiterCloseNode = NULL;
 		coll_begin_lookup[0] = rd_append_main_item_node(0, 0, rd_item_node_collection, 0, collection_node_idx, rd_collection, 0, &main_item_list);
 		while (actual_coll_level >= 0) {
 			if ((coll_number_of_direct_childs[collection_node_idx] != 0) &&
@@ -1826,10 +1820,10 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	// ****************************************************************
 	for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 		// Add all value caps to node list
-		struct rd_main_item_node* firstDelimiterNode = NULL;
-		struct rd_main_item_node* delimiterCloseNode = NULL;
+		struct rd_main_item_node *firstDelimiterNode = NULL;
+		struct rd_main_item_node *delimiterCloseNode = NULL;
 		for (USHORT caps_idx = pp_data->caps_info[rt_idx].FirstCap; caps_idx < pp_data->caps_info[rt_idx].LastCap; caps_idx++) {
-			struct rd_main_item_node* coll_begin = coll_begin_lookup[pp_data->caps[caps_idx].LinkCollection];
+			struct rd_main_item_node *coll_begin = coll_begin_lookup[pp_data->caps[caps_idx].LinkCollection];
 			int first_bit, last_bit;
 			first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8 +
 				pp_data->caps[caps_idx].BitPosition;
@@ -1845,7 +1839,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 				}
 				coll_begin = coll_end_lookup[coll_child_order[pp_data->caps[caps_idx].LinkCollection][child_idx]];
 			}
-			struct rd_main_item_node* list_node;
+			struct rd_main_item_node *list_node;
 			list_node = rd_search_main_item_list_for_bit_position(first_bit, rt_idx, pp_data->caps[caps_idx].ReportID, &coll_begin);
 
 			// In a HID Report Descriptor, the first usage declared is the most preferred usage for the control.
@@ -1886,7 +1880,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	// ***********************************************************
 	{
 		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
-		struct rd_main_item_node* last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
+		struct rd_main_item_node *last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
 		for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 			for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 				last_bit_position[rt_idx][reportid_idx] = -1;
@@ -1894,8 +1888,8 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 			}
 		}
 
-		struct rd_main_item_node* list = main_item_list; // List root;
-				
+		struct rd_main_item_node *list = main_item_list; // List root;
+
 		while (list->next != NULL)
 		{
 			if ((list->MainItemType >= rd_input) &&
@@ -1905,8 +1899,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 					if ((last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) &&
 						(last_report_item_lookup[list->MainItemType][list->ReportID]->FirstBit != list->FirstBit) // Happens in case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array
 						) {
-						struct rd_main_item_node* list_node;
-						list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
+						struct rd_main_item_node *list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
 						rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
 					}
 					last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
@@ -2315,10 +2308,11 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 				report_count = 0;
 			}
 		}
-        // Go to next item in main_item_list and free the memory of the actual item 
-        struct rd_main_item_node* main_item_list_prev = main_item_list;
+
+		// Go to next item in main_item_list and free the memory of the actual item
+		struct rd_main_item_node *main_item_list_prev = main_item_list;
 		main_item_list = main_item_list->next;
-        free(main_item_list_prev);        
+		free(main_item_list_prev);
 	}
 
 	// Free multidimensionable array: coll_bit_range[COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
@@ -2352,7 +2346,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 			*(buf + byte_list_len) = (unsigned char)byte_list->byte;
 		}
 		byte_list_len++;
-		struct rd_item_byte* byte_list_prev = byte_list;
+		struct rd_item_byte *byte_list_prev = byte_list;
 		byte_list = byte_list->next;
 		free(byte_list_prev);
 	}
@@ -2366,7 +2360,7 @@ static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsig
 	}
 }
 
-int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char* buf, size_t buf_size)
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
 {
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 
