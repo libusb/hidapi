@@ -92,7 +92,7 @@ static struct hid_api_version api_version = {
 	   files aren't part of the SDK, we have to define all this
 	   stuff here. In lookup_functions(), the function pointers
 	   defined below are set. */
-	typedef struct _HIDD_ATTRIBUTES{
+	typedef struct _HIDD_ATTRIBUTES {
 		ULONG Size;
 		USHORT VendorID;
 		USHORT ProductID;
@@ -115,26 +115,27 @@ static struct hid_api_version api_version = {
 		HidP_Feature,
 		NUM_OF_HIDP_REPORT_TYPES
 	} HIDP_REPORT_TYPE;
-	/// <summary>
-	/// Contains information about one global item that the HID parser did not recognize.
-	/// </summary>
+
+	/**
+	 * @brief Contains information about one global item that the HID parser did not recognize.
+	 */
 	typedef struct _HIDP_UNKNOWN_TOKEN {
-		UCHAR Token; ///< Specifies the one-byte prefix of a global item.
+		UCHAR Token; /* Specifies the one-byte prefix of a global item. */
 		UCHAR Reserved[3];
-		ULONG BitField; ///< Specifies the data part of the global item.
+		ULONG BitField; /* Specifies the data part of the global item. */
 	} HIDP_UNKNOWN_TOKEN, * PHIDP_UNKNOWN_TOKEN;
 	
 	#define HIDP_STATUS_SUCCESS 0x110000
 #endif /* HIDAPI_USE_DDK */
 
-typedef struct _hid_pp_caps_info {
+typedef struct hid_pp_caps_info_ {
 	USHORT FirstCap;
 	USHORT NumberOfCaps; // Includes empty caps after LastCap 
 	USHORT LastCap;
 	USHORT ReportByteLength;
-} hid_pp_caps_info, * phid_pp_caps_info;
+} hid_pp_caps_info, *phid_pp_caps_info;
 
-typedef struct _hid_pp_link_collection_node {
+typedef struct hid_pp_link_collection_node_ {
 	USAGE  LinkUsage;
 	USAGE  LinkUsagePage;
 	USHORT Parent;
@@ -145,9 +146,9 @@ typedef struct _hid_pp_link_collection_node {
 	ULONG  IsAlias : 1;
 	ULONG  Reserved : 23;
 	// Same as the public API structure HIDP_LINK_COLLECTION_NODE, but without PVOID UserContext at the end
-} hid_pp_link_collection_node, * phid_pp_link_collection_node;
+} hid_pp_link_collection_node, *phid_pp_link_collection_node;
 
-typedef struct _hid_pp_cap {
+typedef struct hid_pp_cap_ {
 	USAGE   UsagePage;
 	UCHAR   ReportID;
 	UCHAR   BitPosition;
@@ -215,9 +216,9 @@ typedef struct _hid_pp_cap {
 	ULONG   Units;
 	ULONG   UnitsExp;
 
-} hid_pp_cap, * phid_pp_cap;
-	
-typedef struct _hid_preparsed_data {
+} hid_pp_cap, *phid_pp_cap;
+
+typedef struct hid_preparsed_data_ {
 	UCHAR MagicKey[8];
 	USAGE Usage;
 	USAGE UsagePage;
@@ -308,50 +309,49 @@ typedef struct _hid_preparsed_data {
 	static HMODULE cfgmgr32_lib_handle = NULL;
 #endif /* HIDAPI_USE_DDK */
 
-/// <summary>
-/// Enumeration of all report descriptor item One-Byte prefixes from the USB HID spec 1.11
-/// The two least significiant bits nn represent the size of the item and must be added to this values
-/// </summary>
+/**
+ * Enumeration of all report descriptor item One-Byte prefixes from the USB HID spec 1.11.
+ * The two least significiant bits nn represent the size of the item and must be added to this values.
+ */
 typedef enum rd_items_ {
-	rd_main_input               = 0x80, ///< 1000 00 nn
-	rd_main_output              = 0x90, ///< 1001 00 nn
-	rd_main_feature             = 0xB0, ///< 1011 00 nn
-	rd_main_collection          = 0xA0, ///< 1010 00 nn
-	rd_main_collection_end      = 0xC0, ///< 1100 00 nn
-	rd_global_usage_page        = 0x04, ///< 0000 01 nn
-	rd_global_logical_minimum   = 0x14, ///< 0001 01 nn
-	rd_global_logical_maximum   = 0x24, ///< 0010 01 nn
-	rd_global_physical_minimum  = 0x34, ///< 0011 01 nn
-	rd_global_physical_maximum  = 0x44, ///< 0100 01 nn
-	rd_global_unit_exponent     = 0x54, ///< 0101 01 nn
-	rd_global_unit              = 0x64, ///< 0110 01 nn
-	rd_global_report_size       = 0x74, ///< 0111 01 nn
-	rd_global_report_id         = 0x84, ///< 1000 01 nn
-	rd_global_report_count      = 0x94, ///< 1001 01 nn
-	rd_global_push              = 0xA4, ///< 1010 01 nn
-	rd_global_pop               = 0xB4, ///< 1011 01 nn
-	rd_local_usage              = 0x08, ///< 0000 10 nn
-	rd_local_usage_minimum      = 0x18, ///< 0001 10 nn
-	rd_local_usage_maximum      = 0x28, ///< 0010 10 nn
-	rd_local_designator_index   = 0x38, ///< 0011 10 nn
-	rd_local_designator_minimum = 0x48, ///< 0100 10 nn
-	rd_local_designator_maximum = 0x58, ///< 0101 10 nn
-	rd_local_string             = 0x78, ///< 0111 10 nn
-	rd_local_string_minimum     = 0x88, ///< 1000 10 nn
-	rd_local_string_maximum     = 0x98, ///< 1001 10 nn
-	rd_local_delimiter          = 0xA8  ///< 1010 10 nn
-} RD_ITEMS;
+	rd_main_input               = 0x80, /* 1000 00 nn */
+	rd_main_output              = 0x90, /* 1001 00 nn */
+	rd_main_feature             = 0xB0, /* 1011 00 nn */
+	rd_main_collection          = 0xA0, /* 1010 00 nn */
+	rd_main_collection_end      = 0xC0, /* 1100 00 nn */
+	rd_global_usage_page        = 0x04, /* 0000 01 nn */
+	rd_global_logical_minimum   = 0x14, /* 0001 01 nn */
+	rd_global_logical_maximum   = 0x24, /* 0010 01 nn */
+	rd_global_physical_minimum  = 0x34, /* 0011 01 nn */
+	rd_global_physical_maximum  = 0x44, /* 0100 01 nn */
+	rd_global_unit_exponent     = 0x54, /* 0101 01 nn */
+	rd_global_unit              = 0x64, /* 0110 01 nn */
+	rd_global_report_size       = 0x74, /* 0111 01 nn */
+	rd_global_report_id         = 0x84, /* 1000 01 nn */
+	rd_global_report_count      = 0x94, /* 1001 01 nn */
+	rd_global_push              = 0xA4, /* 1010 01 nn */
+	rd_global_pop               = 0xB4, /* 1011 01 nn */
+	rd_local_usage              = 0x08, /* 0000 10 nn */
+	rd_local_usage_minimum      = 0x18, /* 0001 10 nn */
+	rd_local_usage_maximum      = 0x28, /* 0010 10 nn */
+	rd_local_designator_index   = 0x38, /* 0011 10 nn */
+	rd_local_designator_minimum = 0x48, /* 0100 10 nn */
+	rd_local_designator_maximum = 0x58, /* 0101 10 nn */
+	rd_local_string             = 0x78, /* 0111 10 nn */
+	rd_local_string_minimum     = 0x88, /* 1000 10 nn */
+	rd_local_string_maximum     = 0x98, /* 1001 10 nn */
+	rd_local_delimiter          = 0xA8  /* 1010 10 nn */
+} rd_items;
 
-/// <summary>
-/// List element of the encoded report descriptor
-/// </summary>
-struct rd_item_byte
-{
+/**
+ * @brief List element of the encoded report descriptor.
+ */
+struct rd_item_byte {
 	unsigned char byte;
 	struct rd_item_byte* next;
 };
 
-typedef enum _RD_MAIN_ITEMS {
+typedef enum rd_main_items_ {
 	rd_input = HidP_Input,
 	rd_output = HidP_Output,
 	rd_feature = HidP_Feature,
@@ -360,31 +360,28 @@ typedef enum _RD_MAIN_ITEMS {
 	rd_delimiter_open,
 	rd_delimiter_usage,
 	rd_delimiter_close,
-	RD_NUM_OF_MAIN_ITEMS
-} RD_MAIN_ITEMS;
+} rd_main_items;
 
-typedef struct _RD_BIT_RANGE {
+typedef struct rd_bit_range_ {
 	int FirstBit;
 	int LastBit;
-} RD_BIT_RANGE;
+} rd_bit_range;
 
-typedef enum _RD_ITEM_NODE_TYPE {
+typedef enum rd_item_node_type_ {
 	rd_item_node_cap,
 	rd_item_node_padding,
 	rd_item_node_collection,
-	RD_NUM_OF_ITEM_NODE_TYPES
-} RD_NODE_TYPE;
+} rd_node_type;
 
-struct rd_main_item_node
-{
-	int FirstBit; ///< Position of first bit in report (counting from 0)
-	int LastBit; ///< Position of last bit in report (counting from 0)
-	RD_NODE_TYPE TypeOfNode; ///< Information if caps index refers to the array of button caps, value caps,
-                             ///< or if the node is just a padding element to fill unused bit positions.
-                             ///< The node can also be a collection node without any bits in the report.
-	int CapsIndex; ///< Index in the array of caps
-	int CollectionIndex; ///< Index in the array of link collections
-	RD_MAIN_ITEMS MainItemType; ///< Input, Output, Feature, Collection or Collection End
+struct rd_main_item_node {
+	int FirstBit; /* Position of first bit in report (counting from 0) */
+	int LastBit; /* Position of last bit in report (counting from 0) */
+	rd_node_type TypeOfNode; /* Information if caps index refers to the array of button caps, value caps,
+                               or if the node is just a padding element to fill unused bit positions.
+                               The node can also be a collection node without any bits in the report. */
+	int CapsIndex; /* Index in the array of caps */
+	int CollectionIndex; /* Index in the array of link collections */
+	rd_main_items MainItemType; /* Input, Output, Feature, Collection or Collection End */
 	unsigned char ReportID;
 	struct rd_main_item_node* next;
 };
@@ -1369,13 +1366,14 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 	return 0;
 }
 
-/// <summary>
-/// Function that appends a byte to encoded report descriptor list
-/// </summary>
-/// <param name="byte">Single byte to append</param>
-/// <param name="list">Pointer to the list</param>
-static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
-	struct rd_item_byte* new_list_element;
+/**
+ * @brief Function that appends a byte to encoded report descriptor list.
+ *
+ * @param[in]  byte  Single byte to append.
+ * @param      list  Pointer to the list.
+ */
+static void rd_append_byte(unsigned char byte, struct rd_item_byte **list) {
+	struct rd_item_byte *new_list_element;
 	
 	/* Determine last list position */
 	while (*list != NULL)
@@ -1390,14 +1388,16 @@ static void rd_append_byte(unsigned char byte, struct rd_item_byte** list) {
 	*list = new_list_element;
 }
 
-/// <summary>
-///  Writes a short report descriptor item according USB HID spec 1.11 chapter 6.2.2.2
-/// </summary>
-/// <param name="rd_item">Enumeration identifying type (Main, Global, Local) and function (e.g Usage or Report Count) of the item.</param>
-/// <param name="data">Data (Size depends on rd_item 0,1,2 or 4bytes)</param>
-/// <param name="list">Chained list of report descriptor bytes</param>
-/// <returns>Returns 0 if successful, -1 for error</returns>
-static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byte** list) {
+/**
+ * @brief Writes a short report descriptor item according USB HID spec 1.11 chapter 6.2.2.2.
+ *
+ * @param[in]  rd_item  Enumeration identifying type (Main, Global, Local) and function (e.g Usage or Report Count) of the item.
+ * @param[in]  data     Data (Size depends on rd_item 0,1,2 or 4bytes).
+ * @param      list     Chained list of report descriptor bytes.
+ *
+ * @return Returns 0 if successful, -1 for error.
+ */
+static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byte** list) {
 	if (rd_item & 0x03) {
 		// Invalid input data, last to bits are reserved for data size
 		return -1;
@@ -1478,7 +1478,7 @@ static int rd_write_short_item(RD_ITEMS rd_item, LONG64 data, struct rd_item_byt
 	return 0;
 }
 
-static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int last_bit, rd_node_type type_of_node, int caps_index, int collection_index, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
 	struct rd_main_item_node* new_list_node;
 
 	// Determine last node in the list
@@ -1501,7 +1501,7 @@ static struct rd_main_item_node* rd_append_main_item_node(int first_bit, int las
 	return new_list_node;
 }
 
-static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, RD_NODE_TYPE type_of_node, int caps_index, int collection_index, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int last_bit, rd_node_type type_of_node, int caps_index, int collection_index, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
 	// Insert item after the main item node referenced by list
 	struct rd_main_item_node* next_item = (*list)->next;
 	(*list)->next = NULL;
@@ -1510,7 +1510,7 @@ static struct  rd_main_item_node* rd_insert_main_item_node(int first_bit, int la
 	return (*list)->next;
 }
 
-static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, RD_MAIN_ITEMS main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
+static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int search_bit, rd_main_items main_item_type, unsigned char report_id, struct rd_main_item_node** list) {
 	// Determine first INPUT/OUTPUT/FEATURE main item, where the last bit position is equal or greater than the search bit position
 
 	while (((*list)->next->MainItemType != rd_collection) &&
@@ -1525,17 +1525,19 @@ static struct rd_main_item_node* rd_search_main_item_list_for_bit_position(int s
 	return *list;
 }
 
-/// <summary>
-/// This function reconstructs a HID Report Descriptor from a Win32 PreparsedData structure.
-/// This reconstructed report descriptor is logical identical to the real report descriptor,
-/// but not byte wise identical.
-/// </summary>
-/// <param name="dev">Device structure needed - only used for error reporting</param>
-/// <param name="pp_data">Pointer to the preparsed data structure to read</param>
-/// <param name="buf">Pointer to the buffer where the report descriptor should be stored</param>
-/// <param name="buf_size">Size of the buffer</param>
-/// <returns>Returns size of reconstructed report descriptor if successful, -1 for error</returns>
-static int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsigned char* buf, size_t buf_size) {
+/**
+ * @brief This function reconstructs a HID Report Descriptor from a Win32 PreparsedData structure.
+ *  This reconstructed report descriptor is logical identical to the real report descriptor,
+ *  but not byte wise identical.
+ *
+ * @param      dev       Device structure needed - only used for error reporting.
+ * @param[in]  pp_data   Pointer to the preparsed data structure to read.
+ * @param      buf       Pointer to the buffer where the report descriptor should be stored.
+ * @param[in]  buf_size  Size of the buffer.
+ *
+ * @return Returns size of reconstructed report descriptor if successful, -1 for error.
+ */
+static int rd_reconstructor(hid_device *dev, PHIDP_PREPARSED_DATA pp_data, unsigned char *buf, size_t buf_size) {
 
 	// Check if MagicKey is correct, to ensure that pp_data points to an valid preparse data structure
 	if (strncmp(pp_data->MagicKey, "HidP KDR", 8)) {
@@ -1554,14 +1556,14 @@ static int rd_reconstructor(hid_device * dev, PHIDP_PREPARSED_DATA pp_data, unsi
 	// ****************************************************************************************************************************
 	
 	// Allocate memory and initialize lookup table
-	RD_BIT_RANGE**** coll_bit_range;
+	rd_bit_range**** coll_bit_range;
 	coll_bit_range = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 			coll_bit_range[collection_node_idx][reportid_idx] = malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(coll_bit_range[0][0]));
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
-				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = malloc(sizeof(RD_BIT_RANGE));
+				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = malloc(sizeof(rd_bit_range));
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit = -1;
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->LastBit = -1;
 			}
