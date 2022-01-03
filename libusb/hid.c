@@ -923,7 +923,6 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	if (libusb_kernel_driver_active(dev->device_handle, intf_desc->bInterfaceNumber) == 1) {
 		res = libusb_detach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
 		if (res < 0) {
-			libusb_close(dev->device_handle);
 			LOG("Unable to detach Kernel Driver\n");
 			return 0;
 		}
