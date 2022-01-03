@@ -2375,14 +2375,10 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device* dev, unsigned char
 		return -1;
 	}
 	
-	int res;
-	res = rd_reconstructor(dev, pp_data, buf, buf_size);
+	int res = rd_reconstructor(dev, pp_data, buf, buf_size);
 
-	if (!HidD_FreePreparsedData(pp_data)) {
-		register_error(dev, "HidD_FreePreparsedData");
-		return -1;
-	}
-	
+	HidD_FreePreparsedData(pp_data);
+
 	return res;
 }
 
