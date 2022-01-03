@@ -469,7 +469,7 @@ static void register_error(hid_device *dev, const char *op)
 	dev->last_error_str = msg;
 }
 
-static void register_error_msg(hid_device* dev, const WCHAR err_msg[]) {
+static void register_error_msg(hid_device* dev, const WCHAR *err_msg) {
 	LocalFree(dev->last_error_str);
 	dev->last_error_str = LocalAlloc(LPTR, (wcslen(err_msg) + 1) * sizeof(WCHAR));
 	wcscpy(dev->last_error_str, err_msg);
