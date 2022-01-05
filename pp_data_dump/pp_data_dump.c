@@ -30,7 +30,7 @@ void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
 	fprintf(file, "pp_data->cap[%d]->IsStringRange                = %hhu\n", cap_idx, pp_cap->IsStringRange);
 	fprintf(file, "pp_data->cap[%d]->IsDesignatorRange            = %hhu\n", cap_idx, pp_cap->IsDesignatorRange);
 
-	fprintf(file, "pp_data->cap[%d]->Reserved1                    = 0x%hhu%hhu%hhu\n", cap_idx, pp_cap->Reserved1[0], pp_cap->Reserved1[1], pp_cap->Reserved1[2]);
+	fprintf(file, "pp_data->cap[%d]->Reserved1                    = 0x%02hhX%02hhX%02hhX\n", cap_idx, pp_cap->Reserved1[0], pp_cap->Reserved1[1], pp_cap->Reserved1[2]);
 
 	for (int token_idx = 0; token_idx < 4; token_idx++) {
 		fprintf(file, "pp_data->cap[%d]->pp_cap->UnknownTokens[%d].Token    = 0x%02hhX\n", cap_idx, token_idx, pp_cap->UnknownTokens[token_idx].Token);
