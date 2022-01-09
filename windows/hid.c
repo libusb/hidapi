@@ -647,11 +647,14 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		}
 
 		device_interface_list = (wchar_t*)calloc(len, sizeof(wchar_t));
+		if (device_interface_list == NULL) {
+			return NULL;
+		}
 		cr = CM_Get_Device_Interface_ListW(&interface_class_guid, NULL, device_interface_list, len, CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
 	} while (cr == CR_BUFFER_SMALL);
 
 	if (cr != CR_SUCCESS) {
-		return NULL;
+		goto end_of_function;
 	}
 
 	/* Iterate over each device interface in the HID class, looking for the right one. */
@@ -697,6 +700,7 @@ cont_close:
 		CloseHandle(device_handle);
 	}
 
+end_of_function:
 	free(device_interface_list);
 
 	return root;
