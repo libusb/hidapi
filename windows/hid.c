@@ -302,46 +302,74 @@ int HID_API_EXPORT hid_exit(void)
 	return 0;
 }
 
-static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
+static void* hid_internal_get_devnode_property(DEVINST dev_node, const DEVPROPKEY* property_key, DEVPROPTYPE expected_property_type)
 {
-	ULONG len;
+	ULONG len = 0;
 	CONFIGRET cr;
 	DEVPROPTYPE property_type;
+	PBYTE property_value = NULL;
 
-	static DEVPROPKEY DEVPKEY_NAME = { { 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac }, 10 }; /* DEVPROP_TYPE_STRING */
-	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_DeviceAddress = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 1 }; /* DEVPROP_TYPE_STRING */
-	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_Manufacturer = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 4 }; /* DEVPROP_TYPE_STRING */
+	cr = CM_Get_DevNode_PropertyW(dev_node, property_key, &property_type, NULL, &len, 0);
+	if (cr != CR_BUFFER_SMALL || property_type != expected_property_type)
+		return NULL;
 
+	property_value = (PBYTE)calloc(len, sizeof(BYTE));
+	cr = CM_Get_DevNode_PropertyW(dev_node, property_key, &property_type, property_value, &len, 0);
+	if (cr != CR_SUCCESS) {
+		free(property_value);
+		return NULL;
+	}
+
+	return property_value;
+}
+
+static void* hid_internal_get_device_interface_property(const wchar_t* interface_path, const DEVPROPKEY* property_key, DEVPROPTYPE expected_property_type)
+{
+	ULONG len = 0;
+	CONFIGRET cr;
+	DEVPROPTYPE property_type;
+	PBYTE property_value = NULL;
+
+	cr = CM_Get_Device_Interface_PropertyW(interface_path, property_key, &property_type, NULL, &len, 0);
+	if (cr != CR_BUFFER_SMALL || property_type != expected_property_type)
+		return NULL;
+
+	property_value = (PBYTE)calloc(len, sizeof(BYTE));
+	cr = CM_Get_Device_Interface_PropertyW(interface_path, property_key, &property_type, property_value, &len, 0);
+	if (cr != CR_SUCCESS) {
+		free(property_value);
+		return NULL;
+	}
+
+	return property_value;
+}
+
+static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
+{
+	wchar_t *manufacturer_string, *serial_number, *product_string;
 	/* Manufacturer String */
-	len = 0;
-	cr = CM_Get_DevNode_PropertyW(dev_node, &PKEY_DeviceInterface_Bluetooth_Manufacturer, &property_type, NULL, &len, 0);
-	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING) {
+	manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
+	if (manufacturer_string) {
 		free(dev->manufacturer_string);
-		dev->manufacturer_string = (wchar_t*)calloc(len, sizeof(BYTE));
-		CM_Get_DevNode_PropertyW(dev_node, &PKEY_DeviceInterface_Bluetooth_Manufacturer, &property_type, (PBYTE)dev->manufacturer_string, &len, 0);
+		dev->manufacturer_string = manufacturer_string;
 	}
 
 	/* Serial Number String (MAC Address) */
-	len = 0;
-	cr = CM_Get_DevNode_PropertyW(dev_node, &PKEY_DeviceInterface_Bluetooth_DeviceAddress, &property_type, NULL, &len, 0);
-	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING) {
+	serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
+	if (serial_number) {
 		free(dev->serial_number);
-		dev->serial_number = (wchar_t*)calloc(len, sizeof(BYTE));
-		CM_Get_DevNode_PropertyW(dev_node, &PKEY_DeviceInterface_Bluetooth_DeviceAddress, &property_type, (PBYTE)dev->serial_number, &len, 0);
+		dev->serial_number = serial_number;
 	}
 
 	/* Get devnode grandparent to reach out Bluetooth LE device node */
-	cr = CM_Get_Parent(&dev_node, dev_node, 0);
-	if (cr != CR_SUCCESS)
+	if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
 		return;
 
 	/* Product String */
-	len = 0;
-	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_NAME, &property_type, NULL, &len, 0);
-	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING) {
+	product_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+	if (product_string) {
 		free(dev->product_string);
-		dev->product_string = (wchar_t*)calloc(len, sizeof(BYTE));
-		CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_NAME, &property_type, (PBYTE)dev->product_string, &len, 0);
+		dev->product_string = product_string;
 	}
 }
 
@@ -373,23 +401,12 @@ static int hid_internal_get_interface_number(const wchar_t* hardware_id)
 static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
 	wchar_t *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
-	ULONG len;
 	CONFIGRET cr;
-	DEVPROPTYPE property_type;
 	DEVINST dev_node;
 
-	static DEVPROPKEY DEVPKEY_Device_InstanceId = { { 0x78c34fc8, 0x104a, 0x4aca, 0x9e, 0xa4, 0x52, 0x4d, 0x52, 0x99, 0x6e, 0x57 }, 256 }; /* DEVPROP_TYPE_STRING */
-	static DEVPROPKEY DEVPKEY_Device_HardwareIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 3 }; /* DEVPROP_TYPE_STRING_LIST */
-	static DEVPROPKEY DEVPKEY_Device_CompatibleIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 4 }; /* DEVPROP_TYPE_STRING_LIST */
-
 	/* Get the device id from interface path */
-	len = 0;
-	cr = CM_Get_Device_Interface_PropertyW(interface_path, &DEVPKEY_Device_InstanceId, &property_type, NULL, &len, 0);
-	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING) {
-		device_id = (wchar_t*)calloc(len, sizeof(BYTE));
-		cr = CM_Get_Device_Interface_PropertyW(interface_path, &DEVPKEY_Device_InstanceId, &property_type, (PBYTE)device_id, &len, 0);
-	}
-	if (cr != CR_SUCCESS)
+	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	if (!device_id)
 		goto end;
 
 	/* Open devnode from device id */
@@ -398,13 +415,8 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 		goto end;
 
 	/* Get the hardware ids from devnode */
-	len = 0;
-	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_HardwareIds, &property_type, NULL, &len, 0);
-	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING_LIST) {
-		hardware_ids = (wchar_t*)calloc(len, sizeof(BYTE));
-		cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_HardwareIds, &property_type, (PBYTE)hardware_ids, &len, 0);
-	}
-	if (cr != CR_SUCCESS)
+	hardware_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
+	if (!hardware_ids)
 		goto end;
 
 	/* Search for interface number in hardware ids */
@@ -424,13 +436,8 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 		goto end;
 
 	/* Get the compatible ids from parent devnode */
-	len = 0;
-	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_CompatibleIds, &property_type, NULL, &len, 0);
-	if (cr == CR_BUFFER_SMALL && property_type == DEVPROP_TYPE_STRING_LIST) {
-		compatible_ids = (wchar_t*)calloc(len, sizeof(BYTE));
-		cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_CompatibleIds, &property_type, (PBYTE)compatible_ids, &len, 0);
-	}
-	if (cr != CR_SUCCESS)
+	compatible_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_CompatibleIds, DEVPROP_TYPE_STRING_LIST);
+	if (!compatible_ids)
 		goto end;
 
 	/* Now we can parse parent's compatible IDs to find out the device bus type */
@@ -591,7 +598,9 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 		/* Get the Vendor ID and Product ID for this device. */
 		attrib.Size = sizeof(HIDD_ATTRIBUTES);
-		HidD_GetAttributes(device_handle, &attrib);
+		if (!HidD_GetAttributes(device_handle, &attrib)) {
+			goto cont_close;
+		}
 
 		/* Check the VID/PID to see if we should add this
 		   device to the enumeration list. */
@@ -638,7 +647,6 @@ void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *d
 		d = next;
 	}
 }
-
 
 HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
 {
