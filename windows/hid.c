@@ -21,10 +21,16 @@
 ********************************************************/
 
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-// Do not warn about mbsrtowcs and wcsncpy usage.
+// Do not warn about wcsncpy usage.
 // https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt
 #define _CRT_SECURE_NO_WARNINGS
 #endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "hidapi.h"
 
 #include <windows.h>
 
@@ -33,54 +39,31 @@ typedef LONG NTSTATUS;
 #endif
 
 #ifdef __MINGW32__
-#include <devpropdef.h>
 #include <ntdef.h>
 #include <winbase.h>
+#define WC_ERR_INVALID_CHARS 0x00000080
 #endif
 
 #ifdef __CYGWIN__
 #include <ntdef.h>
+#include <wctype.h>
 #define _wcsdup wcsdup
 #endif
 
-/* The maximum number of characters that can be passed into the
-   HidD_Get*String() functions without it failing.*/
-#define MAX_STRING_WCHARS 0xFFF
+/* MAXIMUM_USB_STRING_LENGTH from usbspec.h is 255 */
+/* BLUETOOTH_DEVICE_NAME_SIZE from bluetoothapis.h is 256 */
+#define MAX_STRING_WCHARS 256
 
 /*#define HIDAPI_USE_DDK*/
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-	#include <setupapi.h>
-	#include <winioctl.h>
-	#ifdef HIDAPI_USE_DDK
-		#include <hidsdi.h>
-	#endif
-
-	/* Copied from inc/ddk/hidclass.h, part of the Windows DDK. */
-	#define HID_OUT_CTL_CODE(id)  \
-		CTL_CODE(FILE_DEVICE_KEYBOARD, (id), METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
-	#define IOCTL_HID_GET_FEATURE                   HID_OUT_CTL_CODE(100)
-	#define IOCTL_HID_GET_INPUT_REPORT              HID_OUT_CTL_CODE(104)
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wctype.h>
 
-#include "hidapi.h"
+#include <devpropdef.h>
 
 #undef MIN
 #define MIN(x,y) ((x) < (y)? (x): (y))
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
@@ -88,7 +71,15 @@ static struct hid_api_version api_version = {
 	.patch = HID_API_VERSION_PATCH
 };
 
-#ifndef HIDAPI_USE_DDK
+#ifdef HIDAPI_USE_DDK
+	#include <cfgmgr32.h>
+	#include <hidsdi.h>
+	#include <hidclass.h>
+#else /* !HIDAPI_USE_DDK */
+	#define HID_OUT_CTL_CODE(id) CTL_CODE(FILE_DEVICE_KEYBOARD, (id), METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
+	#define IOCTL_HID_GET_FEATURE HID_OUT_CTL_CODE(100)
+	#define IOCTL_HID_GET_INPUT_REPORT HID_OUT_CTL_CODE(104)
+
 	/* Since we're not building with the DDK, and the HID header
 	   files aren't part of the SDK, we have to define all this
 	   stuff here. In lookup_functions(), the function pointers
@@ -155,6 +146,8 @@ static struct hid_api_version api_version = {
 
 #define CM_LOCATE_DEVNODE_NORMAL 0x00000000
 
+#define CM_GET_DEVICE_INTERFACE_LIST_PRESENT (0x00000000)
+
 #define DEVPROP_TYPEMOD_LIST 0x00002000
 
 #define DEVPROP_TYPE_STRING 0x00000012
@@ -164,11 +157,15 @@ static struct hid_api_version api_version = {
 	typedef CONFIGRET(__stdcall* CM_Get_Parent_)(PDEVINST pdnDevInst, DEVINST dnDevInst, ULONG ulFlags);
 	typedef CONFIGRET(__stdcall* CM_Get_DevNode_PropertyW_)(DEVINST dnDevInst, CONST DEVPROPKEY* PropertyKey, DEVPROPTYPE* PropertyType, PBYTE PropertyBuffer, PULONG PropertyBufferSize, ULONG ulFlags);
 	typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_PropertyW_)(LPCWSTR pszDeviceInterface, CONST DEVPROPKEY* PropertyKey, DEVPROPTYPE* PropertyType, PBYTE PropertyBuffer, PULONG PropertyBufferSize, ULONG ulFlags);
+	typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_List_SizeW_)(PULONG pulLen, LPGUID InterfaceClassGuid, DEVINSTID_W pDeviceID, ULONG ulFlags);
+	typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_ListW_)(LPGUID InterfaceClassGuid, DEVINSTID_W pDeviceID, PZZWSTR Buffer, ULONG BufferLen, ULONG ulFlags);
 
 	static CM_Locate_DevNodeW_ CM_Locate_DevNodeW = NULL;
 	static CM_Get_Parent_ CM_Get_Parent = NULL;
 	static CM_Get_DevNode_PropertyW_ CM_Get_DevNode_PropertyW = NULL;
 	static CM_Get_Device_Interface_PropertyW_ CM_Get_Device_Interface_PropertyW = NULL;
+	static CM_Get_Device_Interface_List_SizeW_ CM_Get_Device_Interface_List_SizeW = NULL;
+	static CM_Get_Device_Interface_ListW_ CM_Get_Device_Interface_ListW = NULL;
 
 	static HMODULE cfgmgr32_lib_handle = NULL;
 #endif /* HIDAPI_USE_DDK */
@@ -298,6 +295,8 @@ static int lookup_functions()
 		RESOLVE(CM_Get_Parent);
 		RESOLVE(CM_Get_DevNode_PropertyW);
 		RESOLVE(CM_Get_Device_Interface_PropertyW);
+		RESOLVE(CM_Get_Device_Interface_List_SizeW);
+		RESOLVE(CM_Get_Device_Interface_ListW);
 #undef RESOLVE
 #if defined(__GNUC__)
 # pragma GCC diagnostic pop
@@ -308,19 +307,21 @@ static int lookup_functions()
 		CM_Get_Parent = NULL;
 		CM_Get_DevNode_PropertyW = NULL;
 		CM_Get_Device_Interface_PropertyW = NULL;
+		CM_Get_Device_Interface_List_SizeW = NULL;
+		CM_Get_Device_Interface_ListW = NULL;
 	}
 
 	return 0;
 }
 #endif
 
-static HANDLE open_device(const char *path, BOOL open_rw)
+static HANDLE open_device(const wchar_t *path, BOOL open_rw)
 {
 	HANDLE handle;
 	DWORD desired_access = (open_rw)? (GENERIC_WRITE | GENERIC_READ): 0;
 	DWORD share_mode = FILE_SHARE_READ|FILE_SHARE_WRITE;
 
-	handle = CreateFileA(path,
+	handle = CreateFileW(path,
 		desired_access,
 		share_mode,
 		NULL,
@@ -376,8 +377,8 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	DEVPROPTYPE property_type;
 
 	static DEVPROPKEY DEVPKEY_NAME = { { 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac }, 10 }; // DEVPROP_TYPE_STRING
-	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_DeviceAddress = { { 0x2BD67D8B, 0x8BEB, 0x48D5, 0x87, 0xE0, 0x6C, 0xDA, 0x34, 0x28, 0x04, 0x0A }, 1 }; // DEVPROP_TYPE_STRING
-	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_Manufacturer = { { 0x2BD67D8B, 0x8BEB, 0x48D5, 0x87, 0xE0, 0x6C, 0xDA, 0x34, 0x28, 0x04, 0x0A }, 4 }; // DEVPROP_TYPE_STRING
+	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_DeviceAddress = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 1 }; // DEVPROP_TYPE_STRING
+	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_Manufacturer = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 4 }; // DEVPROP_TYPE_STRING
 
 	/* Manufacturer String */
 	len = 0;
@@ -437,11 +438,9 @@ static int hid_internal_get_interface_number(const wchar_t* hardware_id)
 	return interface_number;
 }
 
-static void hid_internal_get_info(struct hid_device_info* dev)
+static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
-	const char *tmp = NULL;
-	wchar_t *interface_path = NULL, *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
-	mbstate_t state;
+	wchar_t *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
 	ULONG len;
 	CONFIGRET cr;
 	DEVPROPTYPE property_type;
@@ -451,20 +450,13 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 	static DEVPROPKEY DEVPKEY_Device_HardwareIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 3 }; // DEVPROP_TYPE_STRING_LIST
 	static DEVPROPKEY DEVPKEY_Device_CompatibleIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 4 }; // DEVPROP_TYPE_STRING_LIST
 
+#ifndef HIDAPI_USE_DDK
 	if (!CM_Get_Device_Interface_PropertyW ||
 		!CM_Locate_DevNodeW ||
 		!CM_Get_Parent ||
 		!CM_Get_DevNode_PropertyW)
 		goto end;
-
-	tmp = dev->path;
-
-	len = (ULONG)strlen(tmp);
-	interface_path = (wchar_t*)calloc(len + 1, sizeof(wchar_t));
-	memset(&state, 0, sizeof(state));
-
-	if (mbsrtowcs(interface_path, &tmp, len, &state) == (size_t)-1)
-		goto end;
+#endif
 
 	/* Get the device id from interface path */
 	len = 0;
@@ -532,41 +524,52 @@ static void hid_internal_get_info(struct hid_device_info* dev)
 		}
 	}
 end:
-	free(interface_path);
 	free(device_id);
 	free(hardware_ids);
 	free(compatible_ids);
 }
 
-static struct hid_device_info *hid_get_device_info(const char *path, HANDLE handle)
+static char *hid_internal_UTF16toUTF8(const wchar_t *src)
+{
+	char *dst = NULL;
+	int len = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, NULL, 0, NULL, NULL);
+	if (len) {
+		dst = (char*)calloc(len, sizeof(char));
+		WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, dst, len, NULL, NULL);
+	}
+
+	return dst;
+}
+
+static wchar_t *hid_internal_UTF8toUTF16(const char *src)
+{
+	wchar_t *dst = NULL;
+	int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, NULL, 0);
+	if (len) {
+		dst = (wchar_t*)calloc(len, sizeof(wchar_t));
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, dst, len);
+	}
+
+	return dst;
+}
+
+static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path, HANDLE handle)
 {
 	struct hid_device_info *dev = NULL; /* return object */
-
-	BOOL res;
 	HIDD_ATTRIBUTES attrib;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	HIDP_CAPS caps;
-
-	#define WSTR_LEN 512
-	wchar_t wstr[WSTR_LEN]; /* TODO: Determine Size */
+	wchar_t string[MAX_STRING_WCHARS];
 
 	/* Create the record. */
 	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
 
 	/* Fill out the record */
 	dev->next = NULL;
-
-	if (path) {
-		size_t len = strlen(path);
-		dev->path = (char*)calloc(len + 1, sizeof(char));
-		memcpy(dev->path, path, len + 1);
-	}
-	else
-		dev->path = NULL;
+	dev->path = hid_internal_UTF16toUTF8(path);
 
 	attrib.Size = sizeof(HIDD_ATTRIBUTES);
-	res = HidD_GetAttributes(handle, &attrib);
-	if (res) {
+	if (HidD_GetAttributes(handle, &attrib)) {
 		/* VID/PID */
 		dev->vendor_id = attrib.VendorID;
 		dev->product_id = attrib.ProductID;
@@ -576,10 +579,8 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 	}
 
 	/* Get the Usage Page and Usage for this device. */
-	res = HidD_GetPreparsedData(handle, &pp_data);
-	if (res) {
-		NTSTATUS nt_res = HidP_GetCaps(pp_data, &caps);
-		if (nt_res == HIDP_STATUS_SUCCESS) {
+	if (HidD_GetPreparsedData(handle, &pp_data)) {
+		if (HidP_GetCaps(pp_data, &caps) == HIDP_STATUS_SUCCESS) {
 			dev->usage_page = caps.UsagePage;
 			dev->usage = caps.Usage;
 		}
@@ -588,136 +589,91 @@ static struct hid_device_info *hid_get_device_info(const char *path, HANDLE hand
 	}
 
 	/* Serial Number */
-	wstr[0] = L'\0';
-	res = HidD_GetSerialNumberString(handle, wstr, sizeof(wstr));
-	wstr[WSTR_LEN - 1] = L'\0';
-	dev->serial_number = _wcsdup(wstr);
+	string[0] = L'\0';
+	HidD_GetSerialNumberString(handle, string, sizeof(string));
+	string[MAX_STRING_WCHARS - 1] = L'\0';
+	dev->serial_number = _wcsdup(string);
 
 	/* Manufacturer String */
-	wstr[0] = L'\0';
-	res = HidD_GetManufacturerString(handle, wstr, sizeof(wstr));
-	wstr[WSTR_LEN - 1] = L'\0';
-	dev->manufacturer_string = _wcsdup(wstr);
+	string[0] = L'\0';
+	HidD_GetManufacturerString(handle, string, sizeof(string));
+	string[MAX_STRING_WCHARS - 1] = L'\0';
+	dev->manufacturer_string = _wcsdup(string);
 
 	/* Product String */
-	wstr[0] = L'\0';
-	res = HidD_GetProductString(handle, wstr, sizeof(wstr));
-	wstr[WSTR_LEN - 1] = L'\0';
-	dev->product_string = _wcsdup(wstr);
+	string[0] = L'\0';
+	HidD_GetProductString(handle, string, sizeof(string));
+	string[MAX_STRING_WCHARS - 1] = L'\0';
+	dev->product_string = _wcsdup(string);
 
-	hid_internal_get_info(dev);
+	hid_internal_get_info(path, dev);
 
 	return dev;
 }
 
 struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
-	BOOL res;
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 	GUID interface_class_guid;
-
-	/* Windows objects for interacting with the driver. */
-	SP_DEVINFO_DATA devinfo_data;
-	SP_DEVICE_INTERFACE_DATA device_interface_data;
-	SP_DEVICE_INTERFACE_DETAIL_DATA_A *device_interface_detail_data = NULL;
-	HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
-	char driver_name[256];
-	int device_index = 0;
+	CONFIGRET cr;
+	wchar_t* device_interface_list = NULL;
+	DWORD len;
 
 	if (hid_init() < 0)
 		return NULL;
+
+#ifndef HIDAPI_USE_DDK
+	if (!CM_Get_Device_Interface_List_SizeW ||
+		!CM_Get_Device_Interface_ListW)
+		return NULL;
+#endif
 
 	/* Retrieve HID Interface Class GUID
 	   https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
 	HidD_GetHidGuid(&interface_class_guid);
 
-	/* Initialize the Windows objects. */
-	memset(&devinfo_data, 0x0, sizeof(devinfo_data));
-	devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
-	device_interface_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-	/* Get information for all the devices belonging to the HID class. */
-	device_info_set = SetupDiGetClassDevsA(&interface_class_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-
-	/* Iterate over each device in the HID class, looking for the right one. */
-
-	for (;;) {
-		HANDLE read_handle = INVALID_HANDLE_VALUE;
-		DWORD required_size = 0;
-		HIDD_ATTRIBUTES attrib;
-
-		res = SetupDiEnumDeviceInterfaces(device_info_set,
-			NULL,
-			&interface_class_guid,
-			device_index,
-			&device_interface_data);
-
-		if (!res) {
-			/* A return of FALSE from this function means that
-			   there are no more devices. */
+	/* Get the list of all device interfaces belonging to the HID class. */
+	/* Retry in case of list was changed between calls to
+	  CM_Get_Device_Interface_List_SizeW and CM_Get_Device_Interface_ListW */
+	do {
+		cr = CM_Get_Device_Interface_List_SizeW(&len, &interface_class_guid, NULL, CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
+		if (cr != CR_SUCCESS) {
 			break;
 		}
 
-		/* Call with 0-sized detail size, and let the function
-		   tell us how long the detail struct needs to be. The
-		   size is put in &required_size. */
-		res = SetupDiGetDeviceInterfaceDetailA(device_info_set,
-			&device_interface_data,
-			NULL,
-			0,
-			&required_size,
-			NULL);
-
-		/* Allocate a long enough structure for device_interface_detail_data. */
-		device_interface_detail_data = (SP_DEVICE_INTERFACE_DETAIL_DATA_A*) malloc(required_size);
-		device_interface_detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
-
-		/* Get the detailed data for this device. The detail data gives us
-		   the device path for this device, which is then passed into
-		   CreateFile() to get a handle to the device. */
-		res = SetupDiGetDeviceInterfaceDetailA(device_info_set,
-			&device_interface_data,
-			device_interface_detail_data,
-			required_size,
-			NULL,
-			NULL);
-
-		if (!res) {
-			/* register_error(dev, "Unable to call SetupDiGetDeviceInterfaceDetail");
-			   Continue to the next device. */
-			goto cont;
+		if (device_interface_list != NULL) {
+			free(device_interface_list);
 		}
 
-		/* Populate devinfo_data. This function will return failure
-		   when the device with such index doesn't exist. We've already checked it does. */
-		res = SetupDiEnumDeviceInfo(device_info_set, device_index, &devinfo_data);
-		if (!res)
-			goto cont;
+		device_interface_list = (wchar_t*)calloc(len, sizeof(wchar_t));
+		if (device_interface_list == NULL) {
+			return NULL;
+		}
+		cr = CM_Get_Device_Interface_ListW(&interface_class_guid, NULL, device_interface_list, len, CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
+	} while (cr == CR_BUFFER_SMALL);
 
+	if (cr != CR_SUCCESS) {
+		goto end_of_function;
+	}
 
-		/* Make sure this device has a driver bound to it. */
-		res = SetupDiGetDeviceRegistryPropertyA(device_info_set, &devinfo_data,
-			   SPDRP_DRIVER, NULL, (PBYTE)driver_name, sizeof(driver_name), NULL);
-		if (!res)
-			goto cont;
-
-		//wprintf(L"HandleName: %s\n", device_interface_detail_data->DevicePath);
+	/* Iterate over each device interface in the HID class, looking for the right one. */
+	for (wchar_t* device_interface = device_interface_list; *device_interface; device_interface += wcslen(device_interface) + 1) {
+		HANDLE device_handle = INVALID_HANDLE_VALUE;
+		HIDD_ATTRIBUTES attrib;
 
 		/* Open read-only handle to the device */
-		read_handle = open_device(device_interface_detail_data->DevicePath, FALSE);
+		device_handle = open_device(device_interface, FALSE);
 
-		/* Check validity of read_handle. */
-		if (read_handle == INVALID_HANDLE_VALUE) {
+		/* Check validity of device_handle. */
+		if (device_handle == INVALID_HANDLE_VALUE) {
 			/* Unable to open the device. */
-			//register_error(dev, "CreateFile");
-			goto cont;
+			continue;
 		}
 
 		/* Get the Vendor ID and Product ID for this device. */
 		attrib.Size = sizeof(HIDD_ATTRIBUTES);
-		HidD_GetAttributes(read_handle, &attrib);
-		//wprintf(L"Product/Vendor: %x %x\n", attrib.ProductID, attrib.VendorID);
+		HidD_GetAttributes(device_handle, &attrib);
 
 		/* Check the VID/PID to see if we should add this
 		   device to the enumeration list. */
@@ -725,7 +681,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		    (product_id == 0x0 || attrib.ProductID == product_id)) {
 
 			/* VID/PID match. Create the record. */
-			struct hid_device_info *tmp = hid_get_device_info(device_interface_detail_data->DevicePath, read_handle);
+			struct hid_device_info *tmp = hid_internal_get_device_info(device_interface, device_handle);
 
 			if (tmp == NULL) {
 				goto cont_close;
@@ -741,17 +697,11 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		}
 
 cont_close:
-		CloseHandle(read_handle);
-cont:
-		/* We no longer need the detail data. It can be freed */
-		free(device_interface_detail_data);
-
-		device_index++;
-
+		CloseHandle(device_handle);
 	}
 
-	/* Close the device information handle. */
-	SetupDiDestroyDeviceInfoList(device_info_set);
+end_of_function:
+	free(device_interface_list);
 
 	return root;
 }
@@ -811,6 +761,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 {
 	hid_device *dev = NULL;
+	wchar_t* interface_path = NULL;
 	HANDLE device_handle = INVALID_HANDLE_VALUE;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	HIDP_CAPS caps;
@@ -818,8 +769,12 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	if (hid_init() < 0)
 		goto end_of_function;
 
+	interface_path = hid_internal_UTF8toUTF16(path);
+	if (!interface_path)
+		goto end_of_function;
+
 	/* Open a handle to the device */
-	device_handle = open_device(path, TRUE);
+	device_handle = open_device(interface_path, TRUE);
 
 	/* Check validity of write_handle. */
 	if (device_handle == INVALID_HANDLE_VALUE) {
@@ -828,7 +783,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 		   them.  This is to prevent keyloggers.  However, feature reports
 		   can still be sent and received.  Retry opening the device, but
 		   without read/write access. */
-		device_handle = open_device(path, FALSE);
+		device_handle = open_device(interface_path, FALSE);
 
 		/* Check the validity of the limited device_handle. */
 		if (device_handle == INVALID_HANDLE_VALUE)
@@ -855,9 +810,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	dev->input_report_length = caps.InputReportByteLength;
 	dev->feature_report_length = caps.FeatureReportByteLength;
 	dev->read_buf = (char*) malloc(dev->input_report_length);
-	dev->device_info = hid_get_device_info(path, dev->device_handle);
+	dev->device_info = hid_internal_get_device_info(interface_path, dev->device_handle);
 
 end_of_function:
+	free(interface_path);
 	CloseHandle(device_handle);
 	HidD_FreePreparsedData(pp_data);
 
@@ -1112,6 +1068,7 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 {
 	if (!dev)
 		return;
+
 	CancelIo(dev->device_handle);
 	free_hid_device(dev);
 }
