@@ -271,7 +271,7 @@ static int uses_numbered_reports(__u8 *report_descriptor, __u32 size) {
 		if (!get_hid_item_size(report_descriptor, i, size, &data_len, &key_size))
 			return 0; /* malformed report */
 
-		/* Skip over this key and it's associated data */
+		/* Skip over this key and its associated data */
 		i += data_len + key_size;
 	}
 
@@ -368,7 +368,7 @@ static int get_next_hid_usage(__u8 *report_descriptor, __u32 size, unsigned int 
 			break;
 		}
 
-		/* Skip over this key and it's associated data */
+		/* Skip over this key and its associated data */
 		*pos += data_len + key_size;
 
 		/* Return usage pair */
