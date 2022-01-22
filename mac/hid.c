@@ -5,9 +5,9 @@
  Alan Ott
  Signal 11 Software
 
- 2010-07-03
+ libusb/hidapi Team
 
- Copyright 2010, All Rights Reserved.
+ Copyright 2022, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
