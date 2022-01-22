@@ -21,8 +21,8 @@
 ********************************************************/
 
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-// Do not warn about wcsncpy usage.
-// https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt
+/* Do not warn about wcsncpy usage.
+   https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt */
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
@@ -50,20 +50,25 @@ typedef LONG NTSTATUS;
 #define _wcsdup wcsdup
 #endif
 
-/* MAXIMUM_USB_STRING_LENGTH from usbspec.h is 255 */
-/* BLUETOOTH_DEVICE_NAME_SIZE from bluetoothapis.h is 256 */
-#define MAX_STRING_WCHARS 256
-
 /*#define HIDAPI_USE_DDK*/
+
+#include <devpropdef.h>
+#include "hidapi_cfgmgr32.h"
+#include "hidapi_hidclass.h"
+#include "hidapi_hidsdi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <devpropdef.h>
-
+#ifdef MIN
 #undef MIN
+#endif
 #define MIN(x,y) ((x) < (y)? (x): (y))
+
+/* MAXIMUM_USB_STRING_LENGTH from usbspec.h is 255 */
+/* BLUETOOTH_DEVICE_NAME_SIZE from bluetoothapis.h is 256 */
+#define MAX_STRING_WCHARS 256
 
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
@@ -71,103 +76,98 @@ static struct hid_api_version api_version = {
 	.patch = HID_API_VERSION_PATCH
 };
 
-#ifdef HIDAPI_USE_DDK
-	#include <cfgmgr32.h>
-	#include <hidsdi.h>
-	#include <hidclass.h>
-#else /* !HIDAPI_USE_DDK */
-	#define HID_OUT_CTL_CODE(id) CTL_CODE(FILE_DEVICE_KEYBOARD, (id), METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
-	#define IOCTL_HID_GET_FEATURE HID_OUT_CTL_CODE(100)
-	#define IOCTL_HID_GET_INPUT_REPORT HID_OUT_CTL_CODE(104)
+#ifndef HIDAPI_USE_DDK
+/* Since we're not building with the DDK, and the HID header
+   files aren't part of the Windows SDK, we define what we need ourselves.
+   In lookup_functions(), the function pointers
+   defined below are set. */
 
-	/* Since we're not building with the DDK, and the HID header
-	   files aren't part of the SDK, we have to define all this
-	   stuff here. In lookup_functions(), the function pointers
-	   defined below are set. */
-	typedef struct _HIDD_ATTRIBUTES{
-		ULONG Size;
-		USHORT VendorID;
-		USHORT ProductID;
-		USHORT VersionNumber;
-	} HIDD_ATTRIBUTES, *PHIDD_ATTRIBUTES;
+static HidD_GetHidGuid_ HidD_GetHidGuid;
+static HidD_GetAttributes_ HidD_GetAttributes;
+static HidD_GetSerialNumberString_ HidD_GetSerialNumberString;
+static HidD_GetManufacturerString_ HidD_GetManufacturerString;
+static HidD_GetProductString_ HidD_GetProductString;
+static HidD_SetFeature_ HidD_SetFeature;
+static HidD_GetFeature_ HidD_GetFeature;
+static HidD_GetInputReport_ HidD_GetInputReport;
+static HidD_GetIndexedString_ HidD_GetIndexedString;
+static HidD_GetPreparsedData_ HidD_GetPreparsedData;
+static HidD_FreePreparsedData_ HidD_FreePreparsedData;
+static HidP_GetCaps_ HidP_GetCaps;
+static HidD_SetNumInputBuffers_ HidD_SetNumInputBuffers;
 
-	typedef USHORT USAGE;
-	typedef struct _HIDP_CAPS {
-		USAGE Usage;
-		USAGE UsagePage;
-		USHORT InputReportByteLength;
-		USHORT OutputReportByteLength;
-		USHORT FeatureReportByteLength;
-		USHORT Reserved[17];
-		USHORT fields_not_used_by_hidapi[10];
-	} HIDP_CAPS, *PHIDP_CAPS;
-	typedef void* PHIDP_PREPARSED_DATA;
-	#define HIDP_STATUS_SUCCESS 0x110000
+static CM_Locate_DevNodeW_ CM_Locate_DevNodeW = NULL;
+static CM_Get_Parent_ CM_Get_Parent = NULL;
+static CM_Get_DevNode_PropertyW_ CM_Get_DevNode_PropertyW = NULL;
+static CM_Get_Device_Interface_PropertyW_ CM_Get_Device_Interface_PropertyW = NULL;
+static CM_Get_Device_Interface_List_SizeW_ CM_Get_Device_Interface_List_SizeW = NULL;
+static CM_Get_Device_Interface_ListW_ CM_Get_Device_Interface_ListW = NULL;
 
-	typedef void (__stdcall *HidD_GetHidGuid_)(LPGUID hid_guid);
-	typedef BOOLEAN (__stdcall *HidD_GetAttributes_)(HANDLE device, PHIDD_ATTRIBUTES attrib);
-	typedef BOOLEAN (__stdcall *HidD_GetSerialNumberString_)(HANDLE device, PVOID buffer, ULONG buffer_len);
-	typedef BOOLEAN (__stdcall *HidD_GetManufacturerString_)(HANDLE handle, PVOID buffer, ULONG buffer_len);
-	typedef BOOLEAN (__stdcall *HidD_GetProductString_)(HANDLE handle, PVOID buffer, ULONG buffer_len);
-	typedef BOOLEAN (__stdcall *HidD_SetFeature_)(HANDLE handle, PVOID data, ULONG length);
-	typedef BOOLEAN (__stdcall *HidD_GetFeature_)(HANDLE handle, PVOID data, ULONG length);
-	typedef BOOLEAN (__stdcall *HidD_GetInputReport_)(HANDLE handle, PVOID data, ULONG length);
-	typedef BOOLEAN (__stdcall *HidD_GetIndexedString_)(HANDLE handle, ULONG string_index, PVOID buffer, ULONG buffer_len);
-	typedef BOOLEAN (__stdcall *HidD_GetPreparsedData_)(HANDLE handle, PHIDP_PREPARSED_DATA *preparsed_data);
-	typedef BOOLEAN (__stdcall *HidD_FreePreparsedData_)(PHIDP_PREPARSED_DATA preparsed_data);
-	typedef NTSTATUS (__stdcall *HidP_GetCaps_)(PHIDP_PREPARSED_DATA preparsed_data, HIDP_CAPS *caps);
-	typedef BOOLEAN (__stdcall *HidD_SetNumInputBuffers_)(HANDLE handle, ULONG number_buffers);
+static HMODULE hid_lib_handle = NULL;
+static HMODULE cfgmgr32_lib_handle = NULL;
+static BOOLEAN hidapi_initialized = FALSE;
 
-	static HidD_GetHidGuid_ HidD_GetHidGuid;
-	static HidD_GetAttributes_ HidD_GetAttributes;
-	static HidD_GetSerialNumberString_ HidD_GetSerialNumberString;
-	static HidD_GetManufacturerString_ HidD_GetManufacturerString;
-	static HidD_GetProductString_ HidD_GetProductString;
-	static HidD_SetFeature_ HidD_SetFeature;
-	static HidD_GetFeature_ HidD_GetFeature;
-	static HidD_GetInputReport_ HidD_GetInputReport;
-	static HidD_GetIndexedString_ HidD_GetIndexedString;
-	static HidD_GetPreparsedData_ HidD_GetPreparsedData;
-	static HidD_FreePreparsedData_ HidD_FreePreparsedData;
-	static HidP_GetCaps_ HidP_GetCaps;
-	static HidD_SetNumInputBuffers_ HidD_SetNumInputBuffers;
+static void free_library_handles()
+{
+	if (hid_lib_handle)
+		FreeLibrary(hid_lib_handle);
+	hid_lib_handle = NULL;
+	if (cfgmgr32_lib_handle)
+		FreeLibrary(cfgmgr32_lib_handle);
+	cfgmgr32_lib_handle = NULL;
+}
 
-	static HMODULE lib_handle = NULL;
-	static BOOLEAN initialized = FALSE;
+static int lookup_functions()
+{
+	hid_lib_handle = LoadLibraryW(L"hid.dll");
+	if (hid_lib_handle == NULL) {
+		goto err;
+	}
 
-	typedef DWORD RETURN_TYPE;
-	typedef RETURN_TYPE CONFIGRET;
-	typedef DWORD DEVNODE, DEVINST;
-	typedef DEVNODE* PDEVNODE, * PDEVINST;
-	typedef WCHAR* DEVNODEID_W, * DEVINSTID_W;
+	cfgmgr32_lib_handle = LoadLibraryW(L"cfgmgr32.dll");
+	if (cfgmgr32_lib_handle == NULL) {
+		goto err;
+	}
 
-#define CR_SUCCESS (0x00000000)
-#define CR_BUFFER_SMALL (0x0000001A)
+#if defined(__GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
+#define RESOLVE(lib_handle, x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) goto err;
 
-#define CM_LOCATE_DEVNODE_NORMAL 0x00000000
+	RESOLVE(hid_lib_handle, HidD_GetHidGuid);
+	RESOLVE(hid_lib_handle, HidD_GetAttributes);
+	RESOLVE(hid_lib_handle, HidD_GetSerialNumberString);
+	RESOLVE(hid_lib_handle, HidD_GetManufacturerString);
+	RESOLVE(hid_lib_handle, HidD_GetProductString);
+	RESOLVE(hid_lib_handle, HidD_SetFeature);
+	RESOLVE(hid_lib_handle, HidD_GetFeature);
+	RESOLVE(hid_lib_handle, HidD_GetInputReport);
+	RESOLVE(hid_lib_handle, HidD_GetIndexedString);
+	RESOLVE(hid_lib_handle, HidD_GetPreparsedData);
+	RESOLVE(hid_lib_handle, HidD_FreePreparsedData);
+	RESOLVE(hid_lib_handle, HidP_GetCaps);
+	RESOLVE(hid_lib_handle, HidD_SetNumInputBuffers);
 
-#define CM_GET_DEVICE_INTERFACE_LIST_PRESENT (0x00000000)
+	RESOLVE(cfgmgr32_lib_handle, CM_Locate_DevNodeW);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_Parent);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_DevNode_PropertyW);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_PropertyW);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_List_SizeW);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_ListW);
 
-#define DEVPROP_TYPEMOD_LIST 0x00002000
+#undef RESOLVE
+#if defined(__GNUC__)
+# pragma GCC diagnostic pop
+#endif
 
-#define DEVPROP_TYPE_STRING 0x00000012
-#define DEVPROP_TYPE_STRING_LIST (DEVPROP_TYPE_STRING|DEVPROP_TYPEMOD_LIST)
+	return 0;
 
-	typedef CONFIGRET(__stdcall* CM_Locate_DevNodeW_)(PDEVINST pdnDevInst, DEVINSTID_W pDeviceID, ULONG ulFlags);
-	typedef CONFIGRET(__stdcall* CM_Get_Parent_)(PDEVINST pdnDevInst, DEVINST dnDevInst, ULONG ulFlags);
-	typedef CONFIGRET(__stdcall* CM_Get_DevNode_PropertyW_)(DEVINST dnDevInst, CONST DEVPROPKEY* PropertyKey, DEVPROPTYPE* PropertyType, PBYTE PropertyBuffer, PULONG PropertyBufferSize, ULONG ulFlags);
-	typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_PropertyW_)(LPCWSTR pszDeviceInterface, CONST DEVPROPKEY* PropertyKey, DEVPROPTYPE* PropertyType, PBYTE PropertyBuffer, PULONG PropertyBufferSize, ULONG ulFlags);
-	typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_List_SizeW_)(PULONG pulLen, LPGUID InterfaceClassGuid, DEVINSTID_W pDeviceID, ULONG ulFlags);
-	typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_ListW_)(LPGUID InterfaceClassGuid, DEVINSTID_W pDeviceID, PZZWSTR Buffer, ULONG BufferLen, ULONG ulFlags);
+err:
+	free_library_handles();
+	return -1;
+}
 
-	static CM_Locate_DevNodeW_ CM_Locate_DevNodeW = NULL;
-	static CM_Get_Parent_ CM_Get_Parent = NULL;
-	static CM_Get_DevNode_PropertyW_ CM_Get_DevNode_PropertyW = NULL;
-	static CM_Get_Device_Interface_PropertyW_ CM_Get_Device_Interface_PropertyW = NULL;
-	static CM_Get_Device_Interface_List_SizeW_ CM_Get_Device_Interface_List_SizeW = NULL;
-	static CM_Get_Device_Interface_ListW_ CM_Get_Device_Interface_ListW = NULL;
-
-	static HMODULE cfgmgr32_lib_handle = NULL;
 #endif /* HIDAPI_USE_DDK */
 
 struct hid_device_ {
@@ -226,7 +226,7 @@ static void free_hid_device(hid_device *dev)
 static void register_error(hid_device *dev, const char *op)
 {
 	WCHAR *ptr, *msg;
-	(void)op; // unreferenced  param
+	(void)op;
 	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
 		FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -252,68 +252,6 @@ static void register_error(hid_device *dev, const char *op)
 	LocalFree(dev->last_error_str);
 	dev->last_error_str = msg;
 }
-
-#ifndef HIDAPI_USE_DDK
-static int lookup_functions()
-{
-	lib_handle = LoadLibraryA("hid.dll");
-	if (lib_handle) {
-#if defined(__GNUC__)
-# pragma GCC diagnostic push
-# pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-#define RESOLVE(x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) return -1;
-		RESOLVE(HidD_GetHidGuid);
-		RESOLVE(HidD_GetAttributes);
-		RESOLVE(HidD_GetSerialNumberString);
-		RESOLVE(HidD_GetManufacturerString);
-		RESOLVE(HidD_GetProductString);
-		RESOLVE(HidD_SetFeature);
-		RESOLVE(HidD_GetFeature);
-		RESOLVE(HidD_GetInputReport);
-		RESOLVE(HidD_GetIndexedString);
-		RESOLVE(HidD_GetPreparsedData);
-		RESOLVE(HidD_FreePreparsedData);
-		RESOLVE(HidP_GetCaps);
-		RESOLVE(HidD_SetNumInputBuffers);
-#undef RESOLVE
-#if defined(__GNUC__)
-# pragma GCC diagnostic pop
-#endif
-	}
-	else
-		return -1;
-
-	cfgmgr32_lib_handle = LoadLibraryA("cfgmgr32.dll");
-	if (cfgmgr32_lib_handle) {
-#if defined(__GNUC__)
-# pragma GCC diagnostic push
-# pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-#define RESOLVE(x) x = (x##_)GetProcAddress(cfgmgr32_lib_handle, #x);
-		RESOLVE(CM_Locate_DevNodeW);
-		RESOLVE(CM_Get_Parent);
-		RESOLVE(CM_Get_DevNode_PropertyW);
-		RESOLVE(CM_Get_Device_Interface_PropertyW);
-		RESOLVE(CM_Get_Device_Interface_List_SizeW);
-		RESOLVE(CM_Get_Device_Interface_ListW);
-#undef RESOLVE
-#if defined(__GNUC__)
-# pragma GCC diagnostic pop
-#endif
-	}
-	else {
-		CM_Locate_DevNodeW = NULL;
-		CM_Get_Parent = NULL;
-		CM_Get_DevNode_PropertyW = NULL;
-		CM_Get_Device_Interface_PropertyW = NULL;
-		CM_Get_Device_Interface_List_SizeW = NULL;
-		CM_Get_Device_Interface_ListW = NULL;
-	}
-
-	return 0;
-}
-#endif
 
 static HANDLE open_device(const wchar_t *path, BOOL open_rw)
 {
@@ -345,12 +283,11 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str()
 int HID_API_EXPORT hid_init(void)
 {
 #ifndef HIDAPI_USE_DDK
-	if (!initialized) {
+	if (!hidapi_initialized) {
 		if (lookup_functions() < 0) {
-			hid_exit();
 			return -1;
 		}
-		initialized = TRUE;
+		hidapi_initialized = TRUE;
 	}
 #endif
 	return 0;
@@ -359,13 +296,8 @@ int HID_API_EXPORT hid_init(void)
 int HID_API_EXPORT hid_exit(void)
 {
 #ifndef HIDAPI_USE_DDK
-	if (lib_handle)
-		FreeLibrary(lib_handle);
-	lib_handle = NULL;
-	if (cfgmgr32_lib_handle)
-		FreeLibrary(cfgmgr32_lib_handle);
-	cfgmgr32_lib_handle = NULL;
-	initialized = FALSE;
+	free_library_handles();
+	hidapi_initialized = FALSE;
 #endif
 	return 0;
 }
@@ -376,9 +308,9 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	CONFIGRET cr;
 	DEVPROPTYPE property_type;
 
-	static DEVPROPKEY DEVPKEY_NAME = { { 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac }, 10 }; // DEVPROP_TYPE_STRING
-	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_DeviceAddress = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 1 }; // DEVPROP_TYPE_STRING
-	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_Manufacturer = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 4 }; // DEVPROP_TYPE_STRING
+	static DEVPROPKEY DEVPKEY_NAME = { { 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac }, 10 }; /* DEVPROP_TYPE_STRING */
+	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_DeviceAddress = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 1 }; /* DEVPROP_TYPE_STRING */
+	static DEVPROPKEY PKEY_DeviceInterface_Bluetooth_Manufacturer = { { 0x2bd67d8b, 0x8beb, 0x48d5, 0x87, 0xe0, 0x6c, 0xda, 0x34, 0x28, 0x04, 0x0a }, 4 }; /* DEVPROP_TYPE_STRING */
 
 	/* Manufacturer String */
 	len = 0;
@@ -446,17 +378,9 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	DEVPROPTYPE property_type;
 	DEVINST dev_node;
 
-	static DEVPROPKEY DEVPKEY_Device_InstanceId = { { 0x78c34fc8, 0x104a, 0x4aca, 0x9e, 0xa4, 0x52, 0x4d, 0x52, 0x99, 0x6e, 0x57 }, 256 }; // DEVPROP_TYPE_STRING
-	static DEVPROPKEY DEVPKEY_Device_HardwareIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 3 }; // DEVPROP_TYPE_STRING_LIST
-	static DEVPROPKEY DEVPKEY_Device_CompatibleIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 4 }; // DEVPROP_TYPE_STRING_LIST
-
-#ifndef HIDAPI_USE_DDK
-	if (!CM_Get_Device_Interface_PropertyW ||
-		!CM_Locate_DevNodeW ||
-		!CM_Get_Parent ||
-		!CM_Get_DevNode_PropertyW)
-		goto end;
-#endif
+	static DEVPROPKEY DEVPKEY_Device_InstanceId = { { 0x78c34fc8, 0x104a, 0x4aca, 0x9e, 0xa4, 0x52, 0x4d, 0x52, 0x99, 0x6e, 0x57 }, 256 }; /* DEVPROP_TYPE_STRING */
+	static DEVPROPKEY DEVPKEY_Device_HardwareIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 3 }; /* DEVPROP_TYPE_STRING_LIST */
+	static DEVPROPKEY DEVPKEY_Device_CompatibleIds = { { 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}, 4 }; /* DEVPROP_TYPE_STRING_LIST */
 
 	/* Get the device id from interface path */
 	len = 0;
@@ -483,7 +407,7 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	if (cr != CR_SUCCESS)
 		goto end;
 
-	// Search for interface number in hardware ids
+	/* Search for interface number in hardware ids */
 	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
 		/* Normalize to upper case */
 		for (wchar_t* p = hardware_id; *p; ++p) *p = towupper(*p);
@@ -622,12 +546,6 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 	if (hid_init() < 0)
 		return NULL;
-
-#ifndef HIDAPI_USE_DDK
-	if (!CM_Get_Device_Interface_List_SizeW ||
-		!CM_Get_Device_Interface_ListW)
-		return NULL;
-#endif
 
 	/* Retrieve HID Interface Class GUID
 	   https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
@@ -1131,7 +1049,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 		return (wchar_t*)dev->last_error_str;
 	}
 
-	// Global error messages are not (yet) implemented on Windows.
+	/* Global error messages are not (yet) implemented on Windows. */
 	return L"hid_error for global errors is not implemented yet";
 }
 

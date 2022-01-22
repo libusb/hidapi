@@ -1,6 +1,10 @@
 add_library(hidapi_winapi
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
+    hidapi_cfgmgr32.h
+    hidapi_hidclass.h
+    hidapi_hidpi.h
+    hidapi_hidsdi.h
 )
 target_link_libraries(hidapi_winapi
     PUBLIC hidapi_include
