@@ -27,6 +27,7 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 * [Installing HIDAPI](#installing-hidapi)
 * [Build from Source](#build-from-source)
 
+
 ## About
 
 ### HIDAPI has four back-ends:
