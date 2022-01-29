@@ -815,7 +815,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 end_of_function:
 	free(interface_path);
 	CloseHandle(device_handle);
-	HidD_FreePreparsedData(pp_data);
+
+	if (pp_data) {
+		HidD_FreePreparsedData(pp_data);
+	}
 
 	return dev;
 }
