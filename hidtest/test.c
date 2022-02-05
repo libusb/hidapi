@@ -38,7 +38,6 @@ int main(int argc, char* argv[])
 	#define MAX_STR 255
 	wchar_t wstr[MAX_STR];
 	hid_device *handle;
-	int i;
 
 	struct hid_device_info *devs, *cur_dev;
 
@@ -63,6 +62,33 @@ int main(int argc, char* argv[])
 		printf("  Release:      %hx\n", cur_dev->release_number);
 		printf("  Interface:    %d\n",  cur_dev->interface_number);
 		printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
+
+		hid_device *device = hid_open_path(cur_dev->path);
+		if (device) {
+			unsigned char descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+
+			printf("  Report Descriptor: ");
+			res = hid_get_report_descriptor(device, descriptor, sizeof(descriptor));
+			if (res < 0) {
+				printf("error getting: %ls", hid_error(device));
+			}
+			else {
+				printf("(%d bytes)", res);
+			}
+			for (int i = 0; i < res; i++) {
+				if (i % 10 == 0) {
+					printf("\n");
+				}
+				printf("0x%02x, ", descriptor[i]);
+			}
+			printf("\n");
+
+			hid_close(device);
+		}
+		else {
+			printf("  Report Descriptor: not available.\n");
+		}
+
 		printf("\n");
 		cur_dev = cur_dev->next;
 	}
@@ -142,7 +168,7 @@ int main(int argc, char* argv[])
 	else {
 		// Print out the returned buffer.
 		printf("Feature Report\n   ");
-		for (i = 0; i < res; i++)
+		for (int i = 0; i < res; i++)
 			printf("%02hhx ", buf[i]);
 		printf("\n");
 	}
@@ -184,8 +210,8 @@ int main(int argc, char* argv[])
 	}
 
 	printf("Data read:\n   ");
-	// Print out the returned buffer.
-	for (i = 0; i < res; i++)
+	/* Print out the returned buffer.*/
+	for (int i = 0; i < res; i++)
 		printf("%02hhx ", buf[i]);
 	printf("\n");
 

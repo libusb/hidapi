@@ -101,15 +101,18 @@ jobs:
       shell: cmd
       run: |
         RMDIR /Q /S build install
-        cmake -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
+        cmake -B build -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install -DCMAKE_SYSTEM_VERSION=10.0.18362.0 -DCMAKE_BUILD_TYPE=RelWithDebInfo
     - name: Build CMake
       working-directory: build
-      run: cmake --build . --target install
+      run: cmake --build . --config RelWithDebInfo --target install
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
         files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
         allow_failure: true
+    - name: Run CTest
+      working-directory: build
+      run: ctest -C RelWithDebInfo --output-on-failure
 
   windows-cmake-nmake:
 
@@ -124,7 +127,7 @@ jobs:
       run: |
         RMDIR /Q /S build install
         call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cmake -G"NMake Makefiles" -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
+        cmake -G"NMake Makefiles" -B build -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install
     - name: Build CMake
       working-directory: build
       shell: cmd
@@ -136,6 +139,9 @@ jobs:
       with:
         files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
         allow_failure: true
+    - name: Run CTest
+      working-directory: build
+      run: ctest --output-on-failure
 
   windows-cmake-mingw:
 
@@ -149,7 +155,7 @@ jobs:
       shell: cmd
       run: |
         RMDIR /Q /S build install
-        cmake -G"MinGW Makefiles" -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
+        cmake -G"MinGW Makefiles" -B build -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install
     - name: Build CMake
       working-directory: build
       run: cmake --build . --target install
@@ -158,3 +164,6 @@ jobs:
       with:
         files: "install/lib/libhidapi.dll.a, install/bin/libhidapi.dll, install/include/hidapi/hidapi.h"
         allow_failure: true
+    - name: Run CTest
+      working-directory: build
+      run: ctest --output-on-failure

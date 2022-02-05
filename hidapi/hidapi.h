@@ -66,6 +66,14 @@
 */
 #define HID_API_VERSION_STR HID_API_TO_VERSION_STR(HID_API_VERSION_MAJOR, HID_API_VERSION_MINOR, HID_API_VERSION_PATCH)
 
+/** @brief Maximum expected report descriptor size in bytes.
+
+	@ingroup API
+
+	@see hid_get_report_descriptor.
+*/
+#define HID_API_MAX_REPORT_DESCRIPTOR_SIZE 4096
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -449,6 +457,21 @@ extern "C" {
 				This function returns 0 on success and -1 on error.
 		*/
 		int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen);
+
+		/** @brief Get a report descriptor from a HID device.
+
+			User has to provide a preallocated buffer where descriptor will be copied to.
+			The recommended size for preallocated buffer is @ref HID_API_MAX_REPORT_DESCRIPTOR_SIZE bytes.
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+			@param buf The buffer to copy descriptor into.
+			@param buf_size The size of the buffer in bytes.
+
+			@returns
+				This function returns non-negative number of bytes actually copied, or -1 on error.
+		*/
+		int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size);
 
 		/** @brief Get a string describing the last error which occurred.
 
