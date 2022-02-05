@@ -1,7 +1,11 @@
+list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_winapi.h")
+
 add_library(hidapi_winapi
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
     hidapi_cfgmgr32.h
+    hidapi_descriptor_reconstruct.c
+    hidapi_descriptor_reconstruct.h
     hidapi_hidclass.h
     hidapi_hidpi.h
     hidapi_hidsdi.h
@@ -33,3 +37,7 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+
+if(HIDAPI_WITH_TESTS)
+     add_subdirectory(test)
+endif()

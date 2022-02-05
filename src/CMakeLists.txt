@@ -26,6 +26,9 @@ project(hidapi VERSION "${VERSION}" LANGUAGES C)
 
 # Defaults and required options
 
+if(NOT DEFINED HIDAPI_WITH_TESTS)
+    set(HIDAPI_WITH_TESTS OFF)
+endif()
 if(NOT DEFINED BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ON)
 endif()

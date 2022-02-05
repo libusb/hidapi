@@ -49,13 +49,25 @@ option(BUILD_SHARED_LIBS "Build shared version of the libraries, otherwise build
 set(HIDAPI_INSTALL_TARGETS ON)
 set(HIDAPI_PRINT_VERSION ON)
 
+set(IS_DEBUG_BUILD OFF)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(IS_DEBUG_BUILD ON)
+endif()
+
+if(WIN32)
+    # so far only Windows has tests
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+else()
+    set(HIDAPI_WITH_TESTS OFF)
+endif()
+
+if(HIDAPI_WITH_TESTS)
+    enable_testing()
+endif()
+
 add_subdirectory(src)
 
-set(BUILD_HIDTEST_DEFAULT OFF)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(BUILD_HIDTEST_DEFAULT ON)
-endif()
-option(HIDAPI_BUILD_HIDTEST "Build small console test application hidtest" ${BUILD_HIDTEST_DEFAULT})
+option(HIDAPI_BUILD_HIDTEST "Build small console test application hidtest" ${IS_DEBUG_BUILD})
 if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
 endif()
