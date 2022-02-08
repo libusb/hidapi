@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.4.3 FATAL_ERROR)
 
+list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_darwin.h")
+
 add_library(hidapi_darwin
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
