@@ -1051,7 +1051,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *container_id)
 {
 	wchar_t *interface_path = NULL, *device_id = NULL;
-	CONFIGRET cr = CR_DEFAULT;
+	CONFIGRET cr = CR_FAILURE;
 	DEVINST dev_node;
 	DEVPROPTYPE property_type;
 	ULONG len;
@@ -1077,7 +1077,7 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	len = sizeof(*container_id);
 	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_ContainerId, &property_type, (PBYTE)container_id, &len, 0);
 	if (cr == CR_SUCCESS && property_type != DEVPROP_TYPE_GUID)
-		cr = CR_WRONG_TYPE;
+		cr = CR_FAILURE;
 
 end:
 	free(interface_path);
