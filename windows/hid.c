@@ -215,7 +215,8 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->device_handle);
-	LocalFree(dev->last_error_str);
+	free(dev->last_error_str);
+	dev->last_error_str = NULL;
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
@@ -225,9 +226,15 @@ static void free_hid_device(hid_device *dev)
 
 static void register_error(hid_device *dev, const char *op)
 {
-	WCHAR *ptr, *msg;
-	(void)op;
-	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+	/* Clear out error messages if NULL is passed into op */
+	if (dev && !op) {
+		free(dev->last_error_str);
+		dev->last_error_str = NULL;
+		return;
+	}
+
+	WCHAR *msg;
+	DWORD msg_size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
 		FORMAT_MESSAGE_FROM_SYSTEM |
 		FORMAT_MESSAGE_IGNORE_INSERTS,
 		NULL,
@@ -238,19 +245,31 @@ static void register_error(hid_device *dev, const char *op)
 
 	/* Get rid of the CR and LF that FormatMessage() sticks at the
 	   end of the message. Thanks Microsoft! */
-	ptr = msg;
-	while (*ptr) {
-		if (*ptr == L'\r') {
-			*ptr = L'\0';
-			break;
-		}
-		ptr++;
-	}
+	msg[msg_size - 2] = L'\0';
+	msg_size -= 2;
 
-	/* Store the message off in the Device entry so that
-	   the hid_error() function can pick it up. */
-	LocalFree(dev->last_error_str);
-	dev->last_error_str = msg;
+	/* If an error string was passed to register_error then use it
+	   in a bigger string. */
+	WCHAR *msg_out = NULL;
+	if (op) {
+		size_t length = 64 + msg_size + (strlen(op) * sizeof (WCHAR));
+		msg_out = (WCHAR *)calloc(length, sizeof (WCHAR));
+		if (msg_out)
+			swprintf(msg_out, length, L"hidapi err: %hs, windows err: %s", op, msg);
+	} else {
+		size_t length = wcslen(msg) + 1;
+		msg_out = (WCHAR *)calloc(length, sizeof (WCHAR));
+		if (msg_out)
+			wcsncpy(msg_out, msg, length);
+	}
+	LocalFree(msg);
+
+	if (dev) {
+		/* Store the message off in the Device entry so that
+		   the hid_error() function can pick it up. */
+		free(dev->last_error_str);
+		dev->last_error_str = msg_out;
+	}
 }
 
 static HANDLE open_device(const wchar_t *path, BOOL open_rw)
@@ -656,6 +675,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 	hid_device *handle = NULL;
 
 	devs = hid_enumerate(vendor_id, product_id);
+	if (!devs) {
+		return NULL;
+	}
+
 	cur_dev = devs;
 	while (cur_dev) {
 		if (cur_dev->vendor_id == vendor_id &&
