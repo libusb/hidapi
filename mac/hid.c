@@ -34,7 +34,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 
-#include "hidapi.h"
+#include "hidapi_darwin.h"
 
 /* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
 extern const double NSAppKitVersionNumber;
@@ -1186,6 +1186,17 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	/* TODO: */
 
 	return 0;
+}
+
+int HID_API_EXPORT_CALL hid_darwin_get_location_id(hid_device *dev, uint32_t *location_id)
+{
+	int res = get_int_property(dev->device_handle, CFSTR(kIOHIDLocationIDKey));
+	if (res != 0) {
+		*location_id = (uint32_t) res;
+		return 0;
+	} else {
+		return -1;
+	}
 }
 
 
