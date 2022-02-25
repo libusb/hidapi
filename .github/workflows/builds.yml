@@ -123,13 +123,13 @@ jobs:
       shell: cmd
       run: |
         RMDIR /Q /S build install
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake -G"NMake Makefiles" -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
     - name: Build CMake
       working-directory: build
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
