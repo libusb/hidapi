@@ -1,3 +1,5 @@
+list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_winapi.h")
+
 add_library(hidapi_winapi
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
