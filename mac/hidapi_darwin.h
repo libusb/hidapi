@@ -19,6 +19,8 @@
 
 /** @file
  * @defgroup API hidapi API
+
+ * Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
  */
 
 #ifndef HIDAPI_DARWIN_H__
@@ -33,6 +35,8 @@ extern "C" {
 #endif
 
 		/** @brief Get the location ID for a HID device.
+
+			Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
@@ -49,6 +53,8 @@ extern "C" {
 			By default on Darwin platform all devices opened by HIDAPI with @ref hid_open or @ref hid_open_path
 			are opened in exclusive mode (see kIOHIDOptionsTypeSeizeDevice).
 
+			Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+
 			@ingroup API
 			@param open_exclusive When set to 0 - all further devices will be opened
 				in non-exclusive mode. Otherwise - all further devices will be opened
@@ -63,6 +69,8 @@ extern "C" {
 
 		/** @brief Getter for option set by @ref hid_darwin_set_open_exclusive.
 
+			Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+
 			@ingroup API
 			@return 1 if all further devices will be opened in exclusive mode.
 
@@ -72,6 +80,8 @@ extern "C" {
 		int HID_API_EXPORT_CALL hid_darwin_get_open_exclusive(void);
 
 		/** @brief Check how the device was opened.
+
+			Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
 
 			@ingroup API
 			@param dev A device to get property from.

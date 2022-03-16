@@ -19,6 +19,8 @@
 
 /** @file
  * @defgroup API hidapi API
+
+ * Since version 0.11.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 11, 0).
  */
 
 #ifndef HIDAPI_LIBUSB_H__

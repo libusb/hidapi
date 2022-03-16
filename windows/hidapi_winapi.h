@@ -19,6 +19,8 @@
 
 /** @file
  * @defgroup API hidapi API
+
+ * Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
  */
 
 #ifndef HIDAPI_WINAPI_H__
@@ -33,6 +35,8 @@ extern "C" {
 #endif
 
 		/** @brief Get the container ID for a HID device.
+
+			Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
 
 			This function returns the `DEVPKEY_Device_ContainerId` property of
 			the given device. This can be used to correlate different
