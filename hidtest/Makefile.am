@@ -18,3 +18,7 @@ hidtest_SOURCES = test.c
 hidtest_LDADD = $(top_builddir)/$(backend)/libhidapi.la
 
 endif
+
+if OS_DARWIN
+AM_CPPFLAGS += -I$(top_srcdir)/mac/
+endif
