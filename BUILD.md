@@ -82,10 +82,9 @@ to your project's build system, then you need:
 - include a _single source file_ into your project's build system,
 depending on your platform and the backend you want to use:
     - [`windows\hid.c`](windows/hid.c);
-    - [`linux/hid.c`](windows/hid.c);
-    - [`libusb/hid.c`](windows/hid.c);
-    - [`libusb/hid.c`](windows/hid.c);
-    - [`mac/hid.c`](windows/hid.c);
+    - [`linux/hid.c`](linux/hid.c);
+    - [`libusb/hid.c`](libusb/hid.c);
+    - [`mac/hid.c`](mac/hid.c);
 - add a [`hidapi`](hidapi) folder to the include path when building `hid.c`;
 - make the platform/backend specific [dependencies](#prerequisites) available during the compilation/linking, when building `hid.c`;
 
