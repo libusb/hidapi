@@ -5,9 +5,9 @@
  Alan Ott
  Signal 11 Software
 
- 2010-07-03
+ libusb/hidapi Team
 
- Copyright 2010, All Rights Reserved.
+ Copyright 2022, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
@@ -34,7 +34,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 
-#include "hidapi.h"
+#include "hidapi_darwin.h"
 
 /* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
 extern const double NSAppKitVersionNumber;
@@ -108,8 +108,21 @@ struct input_report {
 	struct input_report *next;
 };
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
+/* - Run context - */
+static	IOHIDManagerRef hid_mgr = 0x0;
+static	int is_macos_10_10_or_greater = 0;
+static	IOOptionBits device_open_options = 0;
+/* --- */
+
 struct hid_device_ {
 	IOHIDDeviceRef device_handle;
+	IOOptionBits open_options;
 	int blocking;
 	int uses_numbered_reports;
 	int disconnected;
@@ -132,6 +145,7 @@ static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
 	dev->device_handle = NULL;
+	dev->open_options = device_open_options;
 	dev->blocking = 1;
 	dev->uses_numbered_reports = 0;
 	dev->disconnected = 0;
@@ -183,23 +197,6 @@ static void free_hid_device(hid_device *dev)
 	/* Free the structure itself. */
 	free(dev);
 }
-
-static struct hid_api_version api_version = {
-	.major = HID_API_VERSION_MAJOR,
-	.minor = HID_API_VERSION_MINOR,
-	.patch = HID_API_VERSION_PATCH
-};
-
-static	IOHIDManagerRef hid_mgr = 0x0;
-static	int is_macos_10_10_or_greater = 0;
-
-
-#if 0
-static void register_error(hid_device *dev, const char *op)
-{
-
-}
-#endif
 
 static CFArrayRef get_array_property(IOHIDDeviceRef device, CFStringRef key)
 {
@@ -345,6 +342,7 @@ int HID_API_EXPORT hid_init(void)
 {
 	if (!hid_mgr) {
 		is_macos_10_10_or_greater = (NSAppKitVersionNumber >= 1343); /* NSAppKitVersionNumber10_10 */
+		hid_darwin_set_open_exclusive(1); /* Backward compatibility */
 		return init_hid_manager();
 	}
 
@@ -381,7 +379,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	struct hid_device_info *cur_dev;
 	io_object_t iokit_dev;
 	kern_return_t res;
-	uint64_t entry_id;
+	uint64_t entry_id = 0;
 
 	if (dev == NULL) {
 		return NULL;
@@ -830,7 +828,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 
 	/* Open the IOHIDDevice */
-	ret = IOHIDDeviceOpen(dev->device_handle, kIOHIDOptionsTypeSeizeDevice);
+	ret = IOHIDDeviceOpen(dev->device_handle, dev->open_options);
 	if (ret == kIOReturnSuccess) {
 		char str[32];
 
@@ -905,7 +903,7 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 	                           data_to_send, length_to_send);
 
 	if (res == kIOReturnSuccess) {
-		return length;
+		return (int) length;
 	}
 
 	return -1;
@@ -939,7 +937,7 @@ static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data
 		if (report_id == 0x0) { /* 0 report number still present at the beginning */
 			report_length++;
 		}
-		return report_length;
+		return (int) report_length;
 	}
 
 	return -1;
@@ -961,7 +959,7 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length)
 	dev->input_reports = rpt->next;
 	free(rpt->data);
 	free(rpt);
-	return len;
+	return (int) len;
 }
 
 static int cond_wait(const hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mutex)
@@ -1147,7 +1145,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	   Not leaking a resource in all tested environments.
 	*/
 	if (is_macos_10_10_or_greater || !dev->disconnected) {
-		IOHIDDeviceClose(dev->device_handle, kIOHIDOptionsTypeSeizeDevice);
+		IOHIDDeviceClose(dev->device_handle, dev->open_options);
 	}
 
 	/* Clear out the queue of received reports. */
@@ -1188,6 +1186,34 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	return 0;
 }
 
+int HID_API_EXPORT_CALL hid_darwin_get_location_id(hid_device *dev, uint32_t *location_id)
+{
+	int res = get_int_property(dev->device_handle, CFSTR(kIOHIDLocationIDKey));
+	if (res != 0) {
+		*location_id = (uint32_t) res;
+		return 0;
+	} else {
+		return -1;
+	}
+}
+
+void HID_API_EXPORT_CALL hid_darwin_set_open_exclusive(int open_exclusive)
+{
+	device_open_options = (open_exclusive == 0) ? kIOHIDOptionsTypeNone : kIOHIDOptionsTypeSeizeDevice;
+}
+
+int HID_API_EXPORT_CALL hid_darwin_get_open_exclusive(void)
+{
+	return (device_open_options == kIOHIDOptionsTypeSeizeDevice) ? 1 : 0;
+}
+
+int HID_API_EXPORT_CALL hid_darwin_is_device_open_exclusive(hid_device *dev)
+{
+	if (!dev)
+		return -1;
+
+	return (dev->open_options == kIOHIDOptionsTypeSeizeDevice) ? 1 : 0;
+}
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
@@ -1196,77 +1222,3 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 
 	return L"hid_error is not implemented yet";
 }
-
-
-
-
-
-
-
-#if 0
-static int32_t get_location_id(IOHIDDeviceRef device)
-{
-	return get_int_property(device, CFSTR(kIOHIDLocationIDKey));
-}
-
-static int32_t get_usage(IOHIDDeviceRef device)
-{
-	int32_t res;
-	res = get_int_property(device, CFSTR(kIOHIDDeviceUsageKey));
-	if (!res)
-		res = get_int_property(device, CFSTR(kIOHIDPrimaryUsageKey));
-	return res;
-}
-
-static int32_t get_usage_page(IOHIDDeviceRef device)
-{
-	int32_t res;
-	res = get_int_property(device, CFSTR(kIOHIDDeviceUsagePageKey));
-	if (!res)
-		res = get_int_property(device, CFSTR(kIOHIDPrimaryUsagePageKey));
-	return res;
-}
-
-static int get_transport(IOHIDDeviceRef device, wchar_t *buf, size_t len)
-{
-	return get_string_property(device, CFSTR(kIOHIDTransportKey), buf, len);
-}
-
-
-int main(void)
-{
-	IOHIDManagerRef mgr;
-	int i;
-
-	mgr = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
-	IOHIDManagerSetDeviceMatching(mgr, NULL);
-	IOHIDManagerOpen(mgr, kIOHIDOptionsTypeNone);
-
-	CFSetRef device_set = IOHIDManagerCopyDevices(mgr);
-
-	CFIndex num_devices = CFSetGetCount(device_set);
-	IOHIDDeviceRef *device_array = calloc(num_devices, sizeof(IOHIDDeviceRef));
-	CFSetGetValues(device_set, (const void **) device_array);
-
-	for (i = 0; i < num_devices; i++) {
-		IOHIDDeviceRef dev = device_array[i];
-		printf("Device: %p\n", dev);
-		printf("  %04hx %04hx\n", get_vendor_id(dev), get_product_id(dev));
-
-		wchar_t serial[256], buf[256];
-		char cbuf[256];
-		get_serial_number(dev, serial, 256);
-
-
-		printf("  Serial: %ls\n", serial);
-		printf("  Loc: %ld\n", get_location_id(dev));
-		get_transport(dev, buf, 256);
-		printf("  Trans: %ls\n", buf);
-		make_path(dev, cbuf, 256);
-		printf("  Path: %s\n", cbuf);
-
-	}
-
-	return 0;
-}
-#endif

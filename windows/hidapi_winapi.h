@@ -4,7 +4,7 @@
 
  libusb/hidapi Team
 
- Copyright 2021, All Rights Reserved.
+ Copyright 2022, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
@@ -19,14 +19,14 @@
 
 /** @file
  * @defgroup API hidapi API
-
- * Since version 0.11.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 11, 0).
+ *
+ * Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
  */
 
-#ifndef HIDAPI_LIBUSB_H__
-#define HIDAPI_LIBUSB_H__
+#ifndef HIDAPI_WINAPI_H__
+#define HIDAPI_WINAPI_H__
 
-#include <stdint.h>
+#include <guiddef.h>
 
 #include "hidapi.h"
 
@@ -34,20 +34,22 @@
 extern "C" {
 #endif
 
-		/** @brief Open a HID device using libusb_wrap_sys_device.
-			See https://libusb.sourceforge.io/api-1.0/group__libusb__dev.html#ga98f783e115ceff4eaf88a60e6439563c,
-			for details on libusb_wrap_sys_device.
+		/** @brief Get the container ID for a HID device.
+
+			Since version 0.12.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+
+			This function returns the `DEVPKEY_Device_ContainerId` property of
+			the given device. This can be used to correlate different
+			interfaces/ports on the same hardware device.
 
 			@ingroup API
-			@param sys_dev Platform-specific file descriptor that can be recognised by libusb.
-			@param interface_num USB interface number of the device to be used as HID interface.
-			Pass -1 to select first HID interface of the device.
+			@param dev A device handle returned from hid_open().
+			@param guid The device's container ID on return.
 
 			@returns
-				This function returns a pointer to a #hid_device object on
-				success or NULL on failure.
+				This function returns 0 on success and -1 on error.
 		*/
-		HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys_dev, int interface_num);
+		int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *container_id);
 
 #ifdef __cplusplus
 }
