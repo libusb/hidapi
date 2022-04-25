@@ -1068,7 +1068,7 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev || !dev->device_info)
+	if (!dev->device_info)
 	{
 		register_string_error(dev, L"NULL device/info");
 		return -1;
@@ -1088,7 +1088,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev || !dev->device_info)
+	if (!dev->device_info)
 	{
 		register_string_error(dev, L"NULL device/info");
 		return -1;
@@ -1109,7 +1109,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev || !dev->device_info)
+	if (!dev->device_info)
 	{
 		register_string_error(dev, L"NULL device/info");
 		return -1;
@@ -1150,27 +1150,42 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	ULONG len;
 
 	if (!container_id)
+	{
+		register_string_error(dev, L"Invalid Container ID");
 		return -1;
+	}
 
 	interface_path = hid_internal_UTF8toUTF16(dev->device_info->path);
 	if (!interface_path)
+	{
+		register_string_error(dev, L"Path conversion failure");
 		goto end;
+	}
 
 	/* Get the device id from interface path */
 	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 	if (!device_id)
+	{
+		register_string_error(dev, L"Failed to get device interface property InstanceId");
 		goto end;
+	}
 
 	/* Open devnode from device id */
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
 	if (cr != CR_SUCCESS)
+	{
+		register_string_error(dev, L"Failed to locate device node");
 		goto end;
+	}
 
 	/* Get the container id from devnode */
 	len = sizeof(*container_id);
 	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_ContainerId, &property_type, (PBYTE)container_id, &len, 0);
 	if (cr == CR_SUCCESS && property_type != DEVPROP_TYPE_GUID)
 		cr = CR_FAILURE;
+
+	if (cr != CR_SUCCESS)
+		register_string_error(dev, L"Failed to read ContainerId property from device node");
 
 end:
 	free(interface_path);
