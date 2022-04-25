@@ -28,6 +28,18 @@
 	#include <unistd.h>
 #endif
 
+// Fallback/example
+#ifndef HID_API_MAKE_VERSION
+#define HID_API_MAKE_VERSION(mj, mn, p) (((mj) << 24) | ((mn) << 8) | (p))
+#endif
+#ifndef HID_API_VERSION
+#define HID_API_VERSION HID_API_MAKE_VERSION(HID_API_VERSION_MAJOR, HID_API_VERSION_MINOR, HID_API_VERSION_PATCH)
+#endif
+
+#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+#include <hidapi_darwin.h>
+#endif
+
 int main(int argc, char* argv[])
 {
 	(void)argc;
@@ -43,7 +55,7 @@ int main(int argc, char* argv[])
 	struct hid_device_info *devs, *cur_dev;
 
 	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
-	if (hid_version()->major == HID_API_VERSION_MAJOR && hid_version()->minor == HID_API_VERSION_MINOR && hid_version()->patch == HID_API_VERSION_PATCH) {
+	if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
 		printf("Compile-time version matches runtime version of hidapi.\n\n");
 	}
 	else {
@@ -52,6 +64,12 @@ int main(int argc, char* argv[])
 
 	if (hid_init())
 		return -1;
+
+#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+	// To work properly needs to be called before hid_open/hid_open_path after hid_init.
+	// Best/recommended option - call it right after hid_init.
+	hid_darwin_set_open_exclusive(0);
+#endif
 
 	devs = hid_enumerate(0x0, 0x0);
 	cur_dev = devs;

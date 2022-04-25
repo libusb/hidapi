@@ -1141,6 +1141,44 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 	return 0;
 }
 
+int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *container_id)
+{
+	wchar_t *interface_path = NULL, *device_id = NULL;
+	CONFIGRET cr = CR_FAILURE;
+	DEVINST dev_node;
+	DEVPROPTYPE property_type;
+	ULONG len;
+
+	if (!container_id)
+		return -1;
+
+	interface_path = hid_internal_UTF8toUTF16(dev->device_info->path);
+	if (!interface_path)
+		goto end;
+
+	/* Get the device id from interface path */
+	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	if (!device_id)
+		goto end;
+
+	/* Open devnode from device id */
+	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
+	if (cr != CR_SUCCESS)
+		goto end;
+
+	/* Get the container id from devnode */
+	len = sizeof(*container_id);
+	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_ContainerId, &property_type, (PBYTE)container_id, &len, 0);
+	if (cr == CR_SUCCESS && property_type != DEVPROP_TYPE_GUID)
+		cr = CR_FAILURE;
+
+end:
+	free(interface_path);
+	free(device_id);
+
+	return cr == CR_SUCCESS ? 0 : -1;
+}
+
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {

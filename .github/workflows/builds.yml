@@ -49,8 +49,10 @@ jobs:
       with:
         files: "install/shared/lib/libhidapi.dylib, \
                 install/shared/include/hidapi/hidapi.h, \
+                install/shared/include/hidapi/hidapi_darwin.h, \
                 install/framework/lib/hidapi.framework/hidapi, \
-                install/framework/lib/hidapi.framework/Headers/hidapi.h"
+                install/framework/lib/hidapi.framework/Headers/hidapi.h, \
+                install/framework/lib/hidapi.framework/Headers/hidapi_darwin.h"
         allow_failure: true
 
   ubuntu-cmake:
@@ -108,7 +110,7 @@ jobs:
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
+        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h, install/include/hidapi/hidapi_winapi.h"
         allow_failure: true
 
   windows-cmake-nmake:
@@ -123,18 +125,18 @@ jobs:
       shell: cmd
       run: |
         RMDIR /Q /S build install
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake -G"NMake Makefiles" -B build -S hidapisrc -DCMAKE_INSTALL_PREFIX=install
     - name: Build CMake
       working-directory: build
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
+        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h, install/include/hidapi/hidapi_winapi.h"
         allow_failure: true
 
   windows-cmake-mingw:
@@ -156,5 +158,5 @@ jobs:
     - name: Check artifacts
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/lib/libhidapi.dll.a, install/bin/libhidapi.dll, install/include/hidapi/hidapi.h"
+        files: "install/lib/libhidapi.dll.a, install/bin/libhidapi.dll, install/include/hidapi/hidapi.h, install/include/hidapi/hidapi_winapi.h"
         allow_failure: true
