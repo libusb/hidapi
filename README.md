@@ -11,7 +11,7 @@ with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
 HIDAPI can be either built as a shared library (`.so`, `.dll` or `.dylib`) or
 can be embedded directly into a target application by adding a _single source_
 file (per platform) and a single header.<br>
-See [remarks](BUILD.md#embedding-source-code-directly) on embedding _directly_ into your application.
+See [remarks](BUILD.md#embedding-hidapi-directly-into-your-source-tree) on embedding _directly_ into your build system.
 
 HIDAPI library was originally developed by Alan Ott ([signal11](https://github.com/signal11)).
 
