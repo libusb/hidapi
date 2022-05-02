@@ -178,8 +178,7 @@ struct hid_device_ {
 		size_t input_report_length;
 		USHORT feature_report_length;
 		unsigned char *feature_buf;
-		void *last_error_str;
-		DWORD last_error_num;
+		wchar_t *last_error_str;
 		BOOL read_pending;
 		char *read_buf;
 		OVERLAPPED ol;
@@ -198,7 +197,6 @@ static hid_device *new_hid_device()
 	dev->feature_report_length = 0;
 	dev->feature_buf = NULL;
 	dev->last_error_str = NULL;
-	dev->last_error_num = 0;
 	dev->read_pending = FALSE;
 	dev->read_buf = NULL;
 	memset(&dev->ol, 0, sizeof(dev->ol));
@@ -215,7 +213,8 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->device_handle);
-	LocalFree(dev->last_error_str);
+	free(dev->last_error_str);
+	dev->last_error_str = NULL;
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
@@ -223,34 +222,92 @@ static void free_hid_device(hid_device *dev)
 	free(dev);
 }
 
-static void register_error(hid_device *dev, const char *op)
+static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR *op)
 {
-	WCHAR *ptr, *msg;
-	(void)op;
-	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER |
-		FORMAT_MESSAGE_FROM_SYSTEM |
-		FORMAT_MESSAGE_IGNORE_INSERTS,
+	if (!error_buffer)
+		return;
+
+	free(*error_buffer);
+	*error_buffer = NULL;
+
+	/* Only clear out error messages if NULL is passed into op */
+	if (!op) {
+		return;
+	}
+
+	WCHAR system_err_buf[1024];
+	DWORD error_code = GetLastError();
+
+	DWORD system_err_len = FormatMessageW(
+		FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
 		NULL,
-		GetLastError(),
+		error_code,
 		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		(LPWSTR)&msg, 0/*sz*/,
+		system_err_buf, ARRAYSIZE(system_err_buf),
 		NULL);
+
+	DWORD op_len = (DWORD)wcslen(op);
+
+	DWORD op_prefix_len =
+		op_len
+		+ 15 /*: (0x00000000) */
+		;
+	DWORD msg_len =
+		+ op_prefix_len
+		+ system_err_len
+		;
+
+	*error_buffer = (WCHAR *)calloc(msg_len + 1, sizeof (WCHAR));
+	WCHAR *msg = *error_buffer;
+
+	if (!msg)
+		return;
+
+	int printf_written = swprintf(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", op_len, op, error_code, system_err_len, system_err_buf);
+
+	if (printf_written < 0)
+	{
+		/* Highly unlikely */
+		msg[0] = L'\0';
+		return;
+	}
 
 	/* Get rid of the CR and LF that FormatMessage() sticks at the
 	   end of the message. Thanks Microsoft! */
-	ptr = msg;
-	while (*ptr) {
-		if (*ptr == L'\r') {
-			*ptr = L'\0';
-			break;
-		}
-		ptr++;
+	while(msg[msg_len-1] == L'\r' || msg[msg_len-1] == L'\n' || msg[msg_len-1] == L' ')
+	{
+		msg[msg_len-1] = L'\0';
+		msg_len--;
 	}
+}
 
-	/* Store the message off in the Device entry so that
-	   the hid_error() function can pick it up. */
-	LocalFree(dev->last_error_str);
-	dev->last_error_str = msg;
+static void register_winapi_error(hid_device *dev, const WCHAR *op)
+{
+	if (!dev)
+		return;
+
+	register_winapi_error_to_buffer(&dev->last_error_str, op);
+}
+
+static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR *string_error)
+{
+	if (!error_buffer)
+		return;
+
+	free(*error_buffer);
+	*error_buffer = NULL;
+
+	if (string_error) {
+		*error_buffer = _wcsdup(string_error);
+	}
+}
+
+static void register_string_error(hid_device *dev, const WCHAR *string_error)
+{
+	if (!dev)
+		return;
+
+	register_string_error_to_buffer(&dev->last_error_str, string_error);
 }
 
 static HANDLE open_device(const wchar_t *path, BOOL open_rw)
@@ -656,6 +713,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 	hid_device *handle = NULL;
 
 	devs = hid_enumerate(vendor_id, product_id);
+	if (!devs) {
+		return NULL;
+	}
+
 	cur_dev = devs;
 	while (cur_dev) {
 		if (cur_dev->vendor_id == vendor_id &&
@@ -759,7 +820,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	unsigned char *buf;
 
 	if (!data || (length==0)) {
-		register_error(dev, "Zero length buffer");
+		register_string_error(dev, L"Zero buffer/length");
 		return function_result;
 	}
 
@@ -786,7 +847,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	if (!res) {
 		if (GetLastError() != ERROR_IO_PENDING) {
 			/* WriteFile() failed. Return error. */
-			register_error(dev, "WriteFile");
+			register_winapi_error(dev, L"WriteFile");
 			goto end_of_function;
 		}
 		overlapped = TRUE;
@@ -798,7 +859,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
 		if (res != WAIT_OBJECT_0) {
 			/* There was a Timeout. */
-			register_error(dev, "WriteFile/WaitForSingleObject Timeout");
+			register_winapi_error(dev, L"hid_write/WaitForSingleObject");
 			goto end_of_function;
 		}
 
@@ -809,7 +870,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		}
 		else {
 			/* The Write operation failed. */
-			register_error(dev, "WriteFile");
+			register_winapi_error(dev, L"hid_write/GetOverlappedResult");
 			goto end_of_function;
 		}
 	}
@@ -840,6 +901,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 			if (GetLastError() != ERROR_IO_PENDING) {
 				/* ReadFile() has failed.
 				   Clean up and return error. */
+				register_winapi_error(dev, L"ReadFile");
 				CancelIo(dev->device_handle);
 				dev->read_pending = FALSE;
 				goto end_of_function;
@@ -886,10 +948,12 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 			memcpy(data, dev->read_buf, copy_len);
 		}
 	}
+	if (!res) {
+		register_winapi_error(dev, L"hid_read_timeout/GetOverlappedResult");
+	}
 
 end_of_function:
 	if (!res) {
-		register_error(dev, "GetOverlappedResult");
 		return -1;
 	}
 
@@ -933,7 +997,7 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 	res = HidD_SetFeature(dev->device_handle, (PVOID)buf, (DWORD) length_to_send);
 
 	if (!res) {
-		register_error(dev, "HidD_SetFeature");
+		register_winapi_error(dev, L"HidD_SetFeature");
 		return -1;
 	}
 
@@ -957,7 +1021,7 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 	if (!res) {
 		if (GetLastError() != ERROR_IO_PENDING) {
 			/* DeviceIoControl() failed. Return error. */
-			register_error(dev, "Get Input/Feature Report DeviceIoControl");
+			register_winapi_error(dev, L"Get Input/Feature Report DeviceIoControl");
 			return -1;
 		}
 	}
@@ -967,7 +1031,7 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 	res = GetOverlappedResult(dev->device_handle, &ol, &bytes_returned, TRUE/*wait*/);
 	if (!res) {
 		/* The operation failed. */
-		register_error(dev, "Get Input/Feature Report GetOverLappedResult");
+		register_winapi_error(dev, L"Get Input/Feature Report GetOverLappedResult");
 		return -1;
 	}
 
@@ -1004,8 +1068,17 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info || !string || !maxlen)
+	if (!dev->device_info)
+	{
+		register_string_error(dev, L"NULL device/info");
 		return -1;
+	}
+
+	if (!string || !maxlen)
+	{
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
 
 	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
 	string[maxlen] = L'\0';
@@ -1015,8 +1088,18 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info || !string || !maxlen)
+	if (!dev->device_info)
+	{
+		register_string_error(dev, L"NULL device/info");
 		return -1;
+	}
+
+	if (!string || !maxlen)
+	{
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
 
 	wcsncpy(string, dev->device_info->product_string, maxlen);
 	string[maxlen] = L'\0';
@@ -1026,8 +1109,18 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info || !string || !maxlen)
+	if (!dev->device_info)
+	{
+		register_string_error(dev, L"NULL device/info");
 		return -1;
+	}
+
+	if (!string || !maxlen)
+	{
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
 
 	wcsncpy(string, dev->device_info->serial_number, maxlen);
 	string[maxlen] = L'\0';
@@ -1041,7 +1134,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 
 	res = HidD_GetIndexedString(dev->device_handle, string_index, string, sizeof(wchar_t) * (DWORD) MIN(maxlen, MAX_STRING_WCHARS));
 	if (!res) {
-		register_error(dev, "HidD_GetIndexedString");
+		register_winapi_error(dev, L"HidD_GetIndexedString");
 		return -1;
 	}
 
@@ -1057,27 +1150,42 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	ULONG len;
 
 	if (!container_id)
+	{
+		register_string_error(dev, L"Invalid Container ID");
 		return -1;
+	}
 
 	interface_path = hid_internal_UTF8toUTF16(dev->device_info->path);
 	if (!interface_path)
+	{
+		register_string_error(dev, L"Path conversion failure");
 		goto end;
+	}
 
 	/* Get the device id from interface path */
 	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 	if (!device_id)
+	{
+		register_string_error(dev, L"Failed to get device interface property InstanceId");
 		goto end;
+	}
 
 	/* Open devnode from device id */
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
 	if (cr != CR_SUCCESS)
+	{
+		register_string_error(dev, L"Failed to locate device node");
 		goto end;
+	}
 
 	/* Get the container id from devnode */
 	len = sizeof(*container_id);
 	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_ContainerId, &property_type, (PBYTE)container_id, &len, 0);
 	if (cr == CR_SUCCESS && property_type != DEVPROP_TYPE_GUID)
 		cr = CR_FAILURE;
+
+	if (cr != CR_SUCCESS)
+		register_string_error(dev, L"Failed to read ContainerId property from device node");
 
 end:
 	free(interface_path);
