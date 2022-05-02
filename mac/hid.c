@@ -790,12 +790,12 @@ static io_registry_entry_t hid_open_service_registry_from_path(const char *path)
 		char *endptr;
 		uint64_t entry_id = strtoull(path + 10, &endptr, 10);
 		if (*endptr == '\0') {
-			return IOServiceGetMatchingService(kIOMasterPortDefault, IORegistryEntryIDMatching(entry_id));
+			return IOServiceGetMatchingService(NULL, IORegistryEntryIDMatching(entry_id));
 		}
 	}
 	else {
 		/* Fallback to older format of the path */
-		return IORegistryEntryFromPath(kIOMasterPortDefault, path);
+		return IORegistryEntryFromPath(NULL, path);
 	}
 
 	return MACH_PORT_NULL;
