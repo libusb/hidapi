@@ -22,3 +22,7 @@ endif
 if OS_DARWIN
 AM_CPPFLAGS += -I$(top_srcdir)/mac/
 endif
+
+if OS_WINDOWS
+AM_CPPFLAGS += -I$(top_srcdir)/windows/
+endif

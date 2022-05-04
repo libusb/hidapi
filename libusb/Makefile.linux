@@ -20,7 +20,7 @@ COBJS = $(COBJS_LIBUSB) ../hidtest/test.o
 OBJS      = $(COBJS)
 LIBS_USB  = `pkg-config libusb-1.0 --libs` -lrt -lpthread
 LIBS      = $(LIBS_USB)
-INCLUDES ?= -I../hidapi `pkg-config libusb-1.0 --cflags`
+INCLUDES ?= -I../hidapi -I. `pkg-config libusb-1.0 --cflags`
 
 
 # Console Test Program
