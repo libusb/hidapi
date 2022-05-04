@@ -95,10 +95,16 @@ set(HIDAPI_NEED_EXPORT_LIBUDEV FALSE)
 set(HIDAPI_NEED_EXPORT_ICONV FALSE)
 
 if(WIN32)
+    target_include_directories(hidapi_include INTERFACE
+        "$<BUILD_INTERFACE:${PROJECT_ROOT}/windows>"
+    )
     add_subdirectory("${PROJECT_ROOT}/windows" windows)
     set(EXPORT_ALIAS winapi)
     list(APPEND EXPORT_COMPONENTS winapi)
 elseif(APPLE)
+    target_include_directories(hidapi_include INTERFACE
+        "$<BUILD_INTERFACE:${PROJECT_ROOT}/mac>"
+    )
     add_subdirectory("${PROJECT_ROOT}/mac" mac)
     set(EXPORT_ALIAS darwin)
     list(APPEND EXPORT_COMPONENTS darwin)

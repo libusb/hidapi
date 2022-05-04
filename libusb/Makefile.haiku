@@ -15,7 +15,7 @@ CFLAGS   ?= -Wall -g -fPIC
 
 COBJS     = hid.o ../hidtest/test.o
 OBJS      = $(COBJS)
-INCLUDES  = -I../hidapi -I/usr/local/include
+INCLUDES  = -I../hidapi -I. -I/usr/local/include
 LDFLAGS   = -L/usr/local/lib
 LIBS      = -lusb -liconv -pthread
 
