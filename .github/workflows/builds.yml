@@ -157,7 +157,6 @@ jobs:
     - name: Check Meson build
       shell: cmd
       run: |
-        refreshenv
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         meson setup build_meson hidapisrc
         cd build_meson

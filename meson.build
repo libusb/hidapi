@@ -1,4 +1,4 @@
-project('hidapi', meson_version: '>=0.57.0', version: files('VERSION'))
+project('hidapi')
 
 cmake = import('cmake')
 
