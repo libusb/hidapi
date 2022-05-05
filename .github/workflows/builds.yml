@@ -136,7 +136,8 @@ jobs:
         path: hidapisrc
     - name: Install dependencies
       run: |
-        choco install meson ninja
+        choco install ninja
+        pip3 install meson
         refreshenv
     - name: Configure CMake
       shell: cmd
