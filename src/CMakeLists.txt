@@ -92,6 +92,7 @@ set(EXPORT_COMPONENTS)
 set(HIDAPI_NEED_EXPORT_THREADS FALSE)
 set(HIDAPI_NEED_EXPORT_LIBUSB FALSE)
 set(HIDAPI_NEED_EXPORT_LIBUDEV FALSE)
+set(HIDAPI_NEED_EXPORT_ICONV FALSE)
 
 if(WIN32)
     add_subdirectory("${PROJECT_ROOT}/windows" windows)
@@ -128,6 +129,9 @@ else()
         target_include_directories(hidapi_include INTERFACE
             "$<BUILD_INTERFACE:${PROJECT_ROOT}/libusb>"
         )
+        if(NOT DEFINED HIDAPI_NO_ICONV)
+            set(HIDAPI_NO_ICONV OFF)
+        endif()
         add_subdirectory("${PROJECT_ROOT}/libusb" libusb)
         list(APPEND EXPORT_COMPONENTS libusb)
         if(NOT EXPORT_ALIAS)
@@ -137,6 +141,9 @@ else()
             set(HIDAPI_NEED_EXPORT_THREADS TRUE)
             if(NOT TARGET usb-1.0)
                 set(HIDAPI_NEED_EXPORT_LIBUSB TRUE)
+            endif()
+            if(NOT HIDAPI_NO_ICONV AND NOT ANDROID AND NOT CMAKE_VERSION VERSION_LESS 3.11)
+                set(HIDAPI_NEED_EXPORT_ICONV TRUE)
             endif()
         endif()
     elseif(NOT TARGET hidapi_hidraw)
@@ -150,7 +157,7 @@ if(HIDAPI_INSTALL_TARGETS)
     include(CMakePackageConfigHelpers)
     set(EXPORT_DENERATED_LOCATION "${CMAKE_BINARY_DIR}/export_generated")
     set(EXPORT_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hidapi")
-    write_basic_package_version_file("${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
+    write_basic_package_version_file("${EXPORT_DENERATED_LOCATION}/libhidapi-version.cmake"
         COMPATIBILITY SameMajorVersion
     )
     configure_package_config_file("cmake/hidapi-config.cmake.in" "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
@@ -161,9 +168,10 @@ if(HIDAPI_INSTALL_TARGETS)
     install(EXPORT hidapi
         DESTINATION "${EXPORT_DESTINATION}"
         NAMESPACE hidapi::
+        FILE "libhidapi.cmake"
     )
     install(FILES
-            "${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
+            "${EXPORT_DENERATED_LOCATION}/libhidapi-version.cmake"
             "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
         DESTINATION "${EXPORT_DESTINATION}"
     )

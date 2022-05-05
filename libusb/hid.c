@@ -5,12 +5,9 @@
  Alan Ott
  Signal 11 Software
 
- 8/22/2009
- Linux Version - 6/2/2010
- Libusb Version - 8/13/2010
- FreeBSD Version - 11/1/2011
+ libusb/hidapi Team
 
- Copyright 2009, All Rights Reserved.
+ Copyright 2022, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
@@ -47,6 +44,9 @@
 #include <libusb.h>
 #if !defined(__ANDROID__) && !defined(NO_ICONV)
 #include <iconv.h>
+#ifndef ICONV_CONST
+#define ICONV_CONST
+#endif
 #endif
 
 #include "hidapi_libusb.h"
@@ -408,7 +408,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 	size_t inbytes;
 	size_t outbytes;
 	size_t res;
-	char *inptr;
+	ICONV_CONST char *inptr;
 	char *outptr;
 #endif
 
@@ -424,7 +424,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 			lang,
 			(unsigned char*)buf,
 			sizeof(buf));
-	if (len < 0)
+	if (len < 2) /* we always skip first 2 bytes */
 		return NULL;
 
 #if defined(__ANDROID__) || defined(NO_ICONV)
@@ -923,7 +923,6 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	if (libusb_kernel_driver_active(dev->device_handle, intf_desc->bInterfaceNumber) == 1) {
 		res = libusb_detach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
 		if (res < 0) {
-			libusb_close(dev->device_handle);
 			LOG("Unable to detach Kernel Driver\n");
 			return 0;
 		}
@@ -1412,6 +1411,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	/* Clean up the Transfer objects allocated in read_thread(). */
 	free(dev->transfer->buffer);
+	dev->transfer->buffer = NULL;
 	libusb_free_transfer(dev->transfer);
 
 	/* release the interface */
