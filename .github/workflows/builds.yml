@@ -73,7 +73,8 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install libudev-dev libusb-1.0-0-dev meson ninja-build
+        sudo apt install libudev-dev libusb-1.0-0-dev python3-pip ninja-build
+        sudo -H pip3 install meson
     - name: Configure CMake
       run: |
         rm -rf build install
