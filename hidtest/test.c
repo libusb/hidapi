@@ -36,9 +36,20 @@
 #define HID_API_VERSION HID_API_MAKE_VERSION(HID_API_VERSION_MAJOR, HID_API_VERSION_MINOR, HID_API_VERSION_PATCH)
 #endif
 
+//
+// Sample using platform-specific headers
 #if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
 #include <hidapi_darwin.h>
 #endif
+
+#if defined(_WIN32) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+#include <hidapi_winapi.h>
+#endif
+
+#if defined(USING_HIDAPI_LIBUSB) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+#include <hidapi_libusb.h>
+#endif
+//
 
 int main(int argc, char* argv[])
 {
@@ -161,7 +172,7 @@ int main(int argc, char* argv[])
 		// Print out the returned buffer.
 		printf("Feature Report\n   ");
 		for (i = 0; i < res; i++)
-			printf("%02hhx ", buf[i]);
+			printf("%02x ", (unsigned int) buf[i]);
 		printf("\n");
 	}
 
@@ -204,7 +215,7 @@ int main(int argc, char* argv[])
 	printf("Data read:\n   ");
 	// Print out the returned buffer.
 	for (i = 0; i < res; i++)
-		printf("%02hhx ", buf[i]);
+		printf("%02x ", (unsigned int) buf[i]);
 	printf("\n");
 
 	hid_close(handle);
