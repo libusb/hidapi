@@ -24,7 +24,7 @@ Pod::Spec.new do |spec|
 
   spec.source_files = "mac/hid.c", "hidapi/hidapi.h", "mac/hidapi_darwin.h"
 
-  spec.public_header_files = "hidapi/hidapi.h"
+  spec.public_header_files = "hidapi/hidapi.h", "mac/hidapi_darwin.h"
 
   spec.frameworks   = "IOKit", "CoreFoundation", "AppKit"
 
