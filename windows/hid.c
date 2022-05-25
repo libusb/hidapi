@@ -1081,7 +1081,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 	}
 
 	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
-	string[maxlen] = L'\0';
+	string[maxlen - 1] = L'\0';
 
 	return 0;
 }
@@ -1102,7 +1102,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 
 
 	wcsncpy(string, dev->device_info->product_string, maxlen);
-	string[maxlen] = L'\0';
+	string[maxlen - 1] = L'\0';
 
 	return 0;
 }
@@ -1123,7 +1123,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 
 
 	wcsncpy(string, dev->device_info->serial_number, maxlen);
-	string[maxlen] = L'\0';
+	string[maxlen - 1] = L'\0';
 
 	return 0;
 }
