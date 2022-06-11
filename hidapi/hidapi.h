@@ -399,6 +399,8 @@ extern "C" {
 			still contain the Report ID, and the report data will
 			start in data[1].
 
+			This function sets the return value of hid_error().
+
 			@ingroup API
 			@param device A device handle returned from hid_open().
 			@param data A buffer to put the read data into, including

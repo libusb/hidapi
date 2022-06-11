@@ -875,6 +875,8 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		}
 	}
 
+	register_string_error(dev, NULL);
+
 end_of_function:
 	return function_result;
 }
@@ -950,6 +952,8 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	}
 	if (!res) {
 		register_winapi_error(dev, L"hid_read_timeout/GetOverlappedResult");
+	} else {
+		register_string_error(dev, NULL);
 	}
 
 end_of_function:
@@ -1001,6 +1005,8 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		return -1;
 	}
 
+	register_string_error(dev, NULL);
+
 	return (int) length;
 }
 
@@ -1041,6 +1047,8 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 	if (data[0] == 0x0) {
 		bytes_returned++;
 	}
+
+	register_string_error(dev, NULL);
 
 	return bytes_returned;
 }
@@ -1083,6 +1091,8 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
 	string[maxlen - 1] = L'\0';
 
+	register_string_error(dev, NULL);
+
 	return 0;
 }
 
@@ -1100,9 +1110,10 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 		return -1;
 	}
 
-
 	wcsncpy(string, dev->device_info->product_string, maxlen);
 	string[maxlen - 1] = L'\0';
+
+	register_string_error(dev, NULL);
 
 	return 0;
 }
@@ -1125,6 +1136,8 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 	wcsncpy(string, dev->device_info->serial_number, maxlen);
 	string[maxlen - 1] = L'\0';
 
+	register_string_error(dev, NULL);
+
 	return 0;
 }
 
@@ -1137,6 +1150,8 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 		register_winapi_error(dev, L"HidD_GetIndexedString");
 		return -1;
 	}
+
+	register_string_error(dev, NULL);
 
 	return 0;
 }
@@ -1186,6 +1201,8 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 
 	if (cr != CR_SUCCESS)
 		register_string_error(dev, L"Failed to read ContainerId property from device node");
+	else
+		register_string_error(dev, NULL);
 
 end:
 	free(interface_path);
