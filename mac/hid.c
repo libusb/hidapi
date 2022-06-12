@@ -34,7 +34,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 
-#include "hidapi.h"
+#include "hidapi_darwin.h"
 
 /* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
 extern const double NSAppKitVersionNumber;
@@ -108,8 +108,21 @@ struct input_report {
 	struct input_report *next;
 };
 
+static struct hid_api_version api_version = {
+	.major = HID_API_VERSION_MAJOR,
+	.minor = HID_API_VERSION_MINOR,
+	.patch = HID_API_VERSION_PATCH
+};
+
+/* - Run context - */
+static	IOHIDManagerRef hid_mgr = 0x0;
+static	int is_macos_10_10_or_greater = 0;
+static	IOOptionBits device_open_options = 0;
+/* --- */
+
 struct hid_device_ {
 	IOHIDDeviceRef device_handle;
+	IOOptionBits open_options;
 	int blocking;
 	int uses_numbered_reports;
 	int disconnected;
@@ -132,6 +145,7 @@ static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
 	dev->device_handle = NULL;
+	dev->open_options = device_open_options;
 	dev->blocking = 1;
 	dev->uses_numbered_reports = 0;
 	dev->disconnected = 0;
@@ -183,23 +197,6 @@ static void free_hid_device(hid_device *dev)
 	/* Free the structure itself. */
 	free(dev);
 }
-
-static struct hid_api_version api_version = {
-	.major = HID_API_VERSION_MAJOR,
-	.minor = HID_API_VERSION_MINOR,
-	.patch = HID_API_VERSION_PATCH
-};
-
-static	IOHIDManagerRef hid_mgr = 0x0;
-static	int is_macos_10_10_or_greater = 0;
-
-
-#if 0
-static void register_error(hid_device *dev, const char *op)
-{
-
-}
-#endif
 
 static CFArrayRef get_array_property(IOHIDDeviceRef device, CFStringRef key)
 {
@@ -345,6 +342,7 @@ int HID_API_EXPORT hid_init(void)
 {
 	if (!hid_mgr) {
 		is_macos_10_10_or_greater = (NSAppKitVersionNumber >= 1343); /* NSAppKitVersionNumber10_10 */
+		hid_darwin_set_open_exclusive(1); /* Backward compatibility */
 		return init_hid_manager();
 	}
 
@@ -792,12 +790,12 @@ static io_registry_entry_t hid_open_service_registry_from_path(const char *path)
 		char *endptr;
 		uint64_t entry_id = strtoull(path + 10, &endptr, 10);
 		if (*endptr == '\0') {
-			return IOServiceGetMatchingService(kIOMasterPortDefault, IORegistryEntryIDMatching(entry_id));
+			return IOServiceGetMatchingService((mach_port_t) 0, IORegistryEntryIDMatching(entry_id));
 		}
 	}
 	else {
 		/* Fallback to older format of the path */
-		return IORegistryEntryFromPath(kIOMasterPortDefault, path);
+		return IORegistryEntryFromPath((mach_port_t) 0, path);
 	}
 
 	return MACH_PORT_NULL;
@@ -830,7 +828,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 
 	/* Open the IOHIDDevice */
-	ret = IOHIDDeviceOpen(dev->device_handle, kIOHIDOptionsTypeSeizeDevice);
+	ret = IOHIDDeviceOpen(dev->device_handle, dev->open_options);
 	if (ret == kIOReturnSuccess) {
 		char str[32];
 
@@ -1147,7 +1145,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	   Not leaking a resource in all tested environments.
 	*/
 	if (is_macos_10_10_or_greater || !dev->disconnected) {
-		IOHIDDeviceClose(dev->device_handle, kIOHIDOptionsTypeSeizeDevice);
+		IOHIDDeviceClose(dev->device_handle, dev->open_options);
 	}
 
 	/* Clear out the queue of received reports. */
@@ -1186,6 +1184,35 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	/* TODO: */
 
 	return 0;
+}
+
+int HID_API_EXPORT_CALL hid_darwin_get_location_id(hid_device *dev, uint32_t *location_id)
+{
+	int res = get_int_property(dev->device_handle, CFSTR(kIOHIDLocationIDKey));
+	if (res != 0) {
+		*location_id = (uint32_t) res;
+		return 0;
+	} else {
+		return -1;
+	}
+}
+
+void HID_API_EXPORT_CALL hid_darwin_set_open_exclusive(int open_exclusive)
+{
+	device_open_options = (open_exclusive == 0) ? kIOHIDOptionsTypeNone : kIOHIDOptionsTypeSeizeDevice;
+}
+
+int HID_API_EXPORT_CALL hid_darwin_get_open_exclusive(void)
+{
+	return (device_open_options == kIOHIDOptionsTypeSeizeDevice) ? 1 : 0;
+}
+
+int HID_API_EXPORT_CALL hid_darwin_is_device_open_exclusive(hid_device *dev)
+{
+	if (!dev)
+		return -1;
+
+	return (dev->open_options == kIOHIDOptionsTypeSeizeDevice) ? 1 : 0;
 }
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)

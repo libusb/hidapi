@@ -44,6 +44,9 @@
 #include <libusb.h>
 #if !defined(__ANDROID__) && !defined(NO_ICONV)
 #include <iconv.h>
+#ifndef ICONV_CONST
+#define ICONV_CONST
+#endif
 #endif
 
 #include "hidapi_libusb.h"
@@ -415,7 +418,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 	size_t inbytes;
 	size_t outbytes;
 	size_t res;
-	char *inptr;
+	ICONV_CONST char *inptr;
 	char *outptr;
 #endif
 
@@ -431,7 +434,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 			lang,
 			(unsigned char*)buf,
 			sizeof(buf));
-	if (len < 0)
+	if (len < 2) /* we always skip first 2 bytes */
 		return NULL;
 
 #if defined(__ANDROID__) || defined(NO_ICONV)
@@ -1415,6 +1418,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	/* Clean up the Transfer objects allocated in read_thread(). */
 	free(dev->transfer->buffer);
+	dev->transfer->buffer = NULL;
 	libusb_free_transfer(dev->transfer);
 
 	/* release the interface */
