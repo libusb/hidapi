@@ -180,7 +180,7 @@ static void register_global_error_format(const char *format, ...)
  * Use register_device_error(dev, NULL) to indicate "no error". */
 static void register_device_error(hid_device *dev, const char *msg)
 {
-	register_error_str(&dev->last_error_str);
+	register_error_str(&dev->last_error_str, msg);
 }
 
 /* Similar to register_device_error, but you can pass a format string into this function. */
