@@ -14,6 +14,10 @@
  which use HIDAPI.
 ********************************************************/
 
+#if defined(__MINGW32__)
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
+
 #include <stdio.h>
 #include <wchar.h>
 #include <string.h>
