@@ -2,6 +2,10 @@ name: GitHub Builds
 
 on: [push, pull_request]
 
+env:
+  NIX_COMPILE_FLAGS: -Wall -Wextra -pedantic -Werror
+  MSVC_COMPILE_FLAGS: /W4 /WX
+
 jobs:
   macos-automake:
 
@@ -36,8 +40,8 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/shared
-        cmake -B build/framework -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/framework -DCMAKE_FRAMEWORK=ON
+        cmake -B build/shared -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/framework -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/framework -DCMAKE_FRAMEWORK=ON -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared
       working-directory: build/shared
       run: make install
@@ -49,8 +53,10 @@ jobs:
       with:
         files: "install/shared/lib/libhidapi.dylib, \
                 install/shared/include/hidapi/hidapi.h, \
+                install/shared/include/hidapi/hidapi_darwin.h, \
                 install/framework/lib/hidapi.framework/hidapi, \
-                install/framework/lib/hidapi.framework/Headers/hidapi.h"
+                install/framework/lib/hidapi.framework/Headers/hidapi.h, \
+                install/framework/lib/hidapi.framework/Headers/hidapi_darwin.h"
         allow_failure: true
 
   ubuntu-cmake:
@@ -68,8 +74,8 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/shared
-        cmake -B build/static -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE
+        cmake -B build/shared -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/static -S hidapisrc -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared
       working-directory: build/shared
       run: make install
@@ -89,7 +95,7 @@ jobs:
                 install/static/include/hidapi/hidapi_libusb.h"
         allow_failure: true
 
-  windows-cmake-msvc:
+  windows-cmake:
 
     runs-on: windows-latest
 
@@ -97,73 +103,100 @@ jobs:
     - uses: actions/checkout@v2
       with:
         path: hidapisrc
-    - name: Configure CMake
+    - name: Configure CMake MSVC
       shell: cmd
       run: |
-        RMDIR /Q /S build install
-        cmake -B build -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install -DCMAKE_SYSTEM_VERSION=10.0.18362.0 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-    - name: Build CMake
-      working-directory: build
+        cmake -B build\msvc -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake MSVC
+      working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
-    - name: Check artifacts
+    - name: Check artifacts MSVC
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
+        files: "install/msvc/lib/hidapi.lib, \
+                install/msvc/bin/hidapi.dll, \
+                install/msvc/include/hidapi/hidapi.h, \
+                install/msvc/include/hidapi/hidapi_winapi.h"
         allow_failure: true
-    - name: Run CTest
-      working-directory: build
+    - name: Run CTest MSVC
+      working-directory: build/msvc
       run: ctest -C RelWithDebInfo --output-on-failure
 
-  windows-cmake-nmake:
-
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        path: hidapisrc
-    - name: Configure CMake
+    - name: Configure CMake NMake
       shell: cmd
       run: |
-        RMDIR /Q /S build install
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cmake -G"NMake Makefiles" -B build -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install
-    - name: Build CMake
-      working-directory: build
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake NMake
+      working-directory: build\nmake
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
-    - name: Check artifacts
+    - name: Check artifacts NMake
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/lib/hidapi.lib, install/bin/hidapi.dll, install/include/hidapi/hidapi.h"
+        files: "install/nmake/lib/hidapi.lib, \
+                install/nmake/bin/hidapi.dll, \
+                install/nmake/include/hidapi/hidapi.h, \
+                install/nmake/include/hidapi/hidapi_winapi.h"
         allow_failure: true
-    - name: Run CTest
-      working-directory: build
+    - name: Run CTest NMake
+      working-directory: build\nmake
       run: ctest --output-on-failure
 
-  windows-cmake-mingw:
+    - name: Configure CMake MinGW
+      shell: cmd
+      run: |
+        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
+    - name: Build CMake MinGW
+      working-directory: build\mingw
+      run: cmake --build . --target install
+    - name: Check artifacts MinGW
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "install/mingw/lib/libhidapi.dll.a, \
+                install/mingw/bin/libhidapi.dll, \
+                install/mingw/include/hidapi/hidapi.h, \
+                install/mingw/include/hidapi/hidapi_winapi.h"
+        allow_failure: true
+    - name: Run CTest MinGW
+      working-directory: build\mingw
+      run: ctest --output-on-failure
+
+  windows-msbuild:
 
     runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v2
-      with:
-        path: hidapisrc
-    - name: Configure CMake
-      shell: cmd
-      run: |
-        RMDIR /Q /S build install
-        cmake -G"MinGW Makefiles" -B build -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install
-    - name: Build CMake
-      working-directory: build
-      run: cmake --build . --target install
-    - name: Check artifacts
+    - uses: microsoft/setup-msbuild@v1.1
+    - name: MSBuild x86
+      run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=Win32
+    - name: Check artifacts x86
       uses: andstor/file-existence-action@v1
       with:
-        files: "install/lib/libhidapi.dll.a, install/bin/libhidapi.dll, install/include/hidapi/hidapi.h"
+        files: "windows/Release/hidapi.dll, windows/Release/hidapi.lib, windows/Release/hidapi.pdb"
         allow_failure: true
-    - name: Run CTest
-      working-directory: build
-      run: ctest --output-on-failure
+    - name: MSBuild x64
+      run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=x64
+    - name: Check artifacts x64
+      uses: andstor/file-existence-action@v1
+      with:
+        files: "windows/x64/Release/hidapi.dll, windows/x64/Release/hidapi.lib, windows/x64/Release/hidapi.pdb"
+        allow_failure: true
+    - name: Gather artifacts
+      run: |
+        md artifacts
+        md artifacts\x86
+        md artifacts\x64
+        md artifacts\include
+        Copy-Item "windows\Release\hidapi.dll","windows\Release\hidapi.lib","windows\Release\hidapi.pdb" -Destination "artifacts\x86"
+        Copy-Item "windows\x64\Release\hidapi.dll","windows\x64\Release\hidapi.lib","windows\x64\Release\hidapi.pdb" -Destination "artifacts\x64"
+        Copy-Item "hidapi\hidapi.h","windows\hidapi_winapi.h" -Destination "artifacts\include"
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: hidapi-win
+        path: artifacts/
+        retention-days: ${{ (github.event_name == 'pull_request' || github.ref_name != 'master') && 7 || 90 }}

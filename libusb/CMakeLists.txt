@@ -19,6 +19,29 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(hidapi_libusb PRIVATE Threads::Threads)
 
+if(HIDAPI_NO_ICONV)
+    target_compile_definitions(hidapi_libusb PRIVATE NO_ICONV)
+else()
+    if(NOT ANDROID AND NOT CMAKE_VERSION VERSION_LESS 3.11)
+        find_package(Iconv REQUIRED)
+        include(CheckCSourceCompiles)
+        target_link_libraries(hidapi_libusb PRIVATE Iconv::Iconv)
+        set(CMAKE_REQUIRED_LIBRARIES "Iconv::Iconv")
+        # check for error: "conflicting types for 'iconv'"
+        check_c_source_compiles("#include<iconv.h>
+            extern size_t iconv (iconv_t cd, const char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);
+            int main() {}"
+        HIDAPI_ICONV_CONST)
+        if(HIDAPI_ICONV_CONST)
+            target_compile_definitions(hidapi_libusb PRIVATE "ICONV_CONST=const")
+        endif()
+    endif()
+    # otherwise there is 3 options:
+    # 1) On Android Iconv is disabled on the code level anyway, so no issue;
+    # 2) iconv is provided by Standard C library and the build will be just fine;
+    # 4) The _user_ has to provide additiona compilation options for this project/target.
+endif()
+
 set_target_properties(hidapi_libusb
     PROPERTIES
         EXPORT_NAME "libusb"

@@ -8,7 +8,7 @@
     * [FreeBSD](#freebsd)
     * [Mac](#mac)
     * [Windows](#windows)
-* [Integrating hidapi directly into your source tree](#integrating-hidapi-directly-into-your-source-tree)
+* [Embedding HIDAPI directly into your source tree](#embedding-hidapi-directly-into-your-source-tree)
 * [Building the manual way on Unix platforms](#building-the-manual-way-on-unix-platforms)
 * [Building on Windows](#building-on-windows)
 
@@ -68,19 +68,30 @@ On Mac make sure you have XCode installed and its Command Line Tools.
 On Windows you just need a compiler. You may use Visual Studio or Cygwin/MinGW,
 depending on which environment is best for your needs.
 
-## Integrating HIDAPI directly into your source tree
+## Embedding HIDAPI directly into your source tree
 
-Instead of using one of the provided build systems, you may want to integrate
-HIDAPI directly into your source tree.
-Generally it is not encouraged to do so, but if you must, all you need to do:
-- add a single source file `hid.c` (for a specific backend);
-- setup include directory to `<HIDAPI repo root>/hidapi`;
-- add link libraries, that are specific for each backend.
+Instead of using one of the provided standalone build systems,
+you may want to integrate HIDAPI directly into your source tree.
+
+---
+If your project uses CMake as a build system, it is safe to add HIDAPI as a [subdirectory](BUILD.cmake.md#hidapi-as-a-subdirectory).
+
+---
+If _the only option_ that works for you is adding HIDAPI sources directly
+to your project's build system, then you need:
+- include a _single source file_ into your project's build system,
+depending on your platform and the backend you want to use:
+    - [`windows\hid.c`](windows/hid.c);
+    - [`linux/hid.c`](linux/hid.c);
+    - [`libusb/hid.c`](libusb/hid.c);
+    - [`mac/hid.c`](mac/hid.c);
+- add a [`hidapi`](hidapi) folder to the include path when building `hid.c`;
+- make the platform/backend specific [dependencies](#prerequisites) available during the compilation/linking, when building `hid.c`;
+
+NOTE: the above doesn't guarantee that having a copy of `<backend>/hid.c` and `hidapi/hidapi.h` is enough to build HIDAPI.
+The only guarantee that `<backend>/hid.c` includes all nesessary sources to compile it as a single file.
 
 Check the manual makefiles for a simple example/reference of what are the dependencies of each specific backend.
-
-NOTE: if your have a CMake-based project, you're likely be able to use
-HIDAPI directly as a subdirectory. Check [BUILD.cmake.md](BUILD.cmake.md) for details.
 
 ## Building the manual way on Unix platforms
 
@@ -106,5 +117,5 @@ To build HIDAPI using MinGW or Cygwin using Autotools, use a general Autotools
 
 Any windows builds (MSVC or MinGW/Cygwin) are also supported by [CMake](BUILD.cmake.md).
 
-If you are looking for information regarding DDK build of HIDAPI
+If you are looking for information regarding DDK build of HIDAPI:
 - the build has been broken for a while and now the support files are obsolete.
