@@ -216,8 +216,11 @@ typedef struct hidp_preparsed_data_ {
 	// MINGW fails with: Flexible array member in union not supported
 	// Solution: https://gcc.gnu.org/onlinedocs/gcc/Zero-Length.html
 	union {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 		hid_pp_cap caps[0];
 		hid_pp_link_collection_node LinkCollectionArray[0];
+#pragma GCC diagnostic pop
 	};
 #else
 	union {
