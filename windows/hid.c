@@ -707,9 +707,9 @@ cont_close:
 
 	if (root == NULL) {
 		if (vendor_id == 0 && product_id == 0) {
-			register_global_error("No HID devices found in the system.");
+			register_global_error(L"No HID devices found in the system.");
 		} else {
-			register_global_error("No HID devices with requested VID/PID found in the system.");
+			register_global_error(L"No HID devices with requested VID/PID found in the system.");
 		}
 	}
 
