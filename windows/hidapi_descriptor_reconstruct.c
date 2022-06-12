@@ -736,7 +736,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			}
 
 			if ((main_item_list->next != NULL) &&
-				(main_item_list->next->MainItemType == rt_idx) &&
+				((int)main_item_list->next->MainItemType == rt_idx) &&
 				(main_item_list->next->TypeOfNode == rd_item_node_cap) &&
 				(pp_data->caps[main_item_list->next->CapsIndex].IsButtonCap) &&
 				(!pp_data->caps[caps_idx].IsRange) && // This node in list is no array
@@ -883,7 +883,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 
 			// Print only local report items for each cap, if ReportCount > 1
 			if ((main_item_list->next != NULL) &&
-				(main_item_list->next->MainItemType == rt_idx) &&
+				((int) main_item_list->next->MainItemType == rt_idx) &&
 				(main_item_list->next->TypeOfNode == rd_item_node_cap) &&
 				(!pp_data->caps[main_item_list->next->CapsIndex].IsButtonCap) &&
 				(!pp_data->caps[caps_idx].IsRange) && // This node in list is no array
