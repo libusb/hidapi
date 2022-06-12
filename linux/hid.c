@@ -1032,7 +1032,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			   indicate a device disconnection. */
 			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL))
 				// We cannot use strerror() here as no -1 was returned from poll().
-				register_device_error(dev, "hid_read_timeout: unexpected poll error (device disconnection)")
+				register_device_error(dev, "hid_read_timeout: unexpected poll error (device disconnection)");
 				return -1;
 		}
 	}
