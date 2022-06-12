@@ -97,9 +97,8 @@ static struct hid_api_version api_version = {
 	.patch = HID_API_VERSION_PATCH
 };
 
-/* Global error message that is not specific to a device, e.g. for
-   hid_open(). It is thread-local like errno. */
-__thread wchar_t *last_global_error_str = NULL;
+static wchar_t *last_global_error_str = NULL;
+
 
 static hid_device *new_hid_device(void)
 {
@@ -124,6 +123,9 @@ static wchar_t *utf8_to_wchar_t(const char *utf8)
 			return wcsdup(L"");
 		}
 		ret = (wchar_t*) calloc(wlen+1, sizeof(wchar_t));
+		if (!ret) {
+			return NULL;
+		}
 		mbstowcs(ret, utf8, wlen+1);
 		ret[wlen] = 0x0000;
 	}
@@ -1093,9 +1095,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	int ret = close(dev->device_handle);
-
-	register_global_error((ret == -1)? strerror(errno): NULL);
+	close(dev->device_handle);
 
 	/* Free the device error message */
 	register_device_error(dev, NULL);
