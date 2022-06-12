@@ -224,9 +224,6 @@ static void free_hid_device(hid_device *dev)
 
 static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR *op)
 {
-	if (!error_buffer)
-		return;
-
 	free(*error_buffer);
 	*error_buffer = NULL;
 
@@ -283,17 +280,11 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 
 static void register_winapi_error(hid_device *dev, const WCHAR *op)
 {
-	if (!dev)
-		return;
-
 	register_winapi_error_to_buffer(&dev->last_error_str, op);
 }
 
 static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR *string_error)
 {
-	if (!error_buffer)
-		return;
-
 	free(*error_buffer);
 	*error_buffer = NULL;
 
@@ -304,9 +295,6 @@ static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 
 static void register_string_error(hid_device *dev, const WCHAR *string_error)
 {
-	if (!dev)
-		return;
-
 	register_string_error_to_buffer(&dev->last_error_str, string_error);
 }
 
@@ -824,6 +812,8 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		return function_result;
 	}
 
+	register_string_error(dev, NULL);
+
 	/* Make sure the right number of bytes are passed to WriteFile. Windows
 	   expects the number of bytes which are in the _longest_ report (plus
 	   one for the report number) bytes even if the data is a report
@@ -875,8 +865,6 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		}
 	}
 
-	register_string_error(dev, NULL);
-
 end_of_function:
 	return function_result;
 }
@@ -888,6 +876,8 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	size_t copy_len = 0;
 	BOOL res = FALSE;
 	BOOL overlapped = FALSE;
+
+	register_string_error(dev, NULL);
 
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
@@ -952,8 +942,6 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	}
 	if (!res) {
 		register_winapi_error(dev, L"hid_read_timeout/GetOverlappedResult");
-	} else {
-		register_string_error(dev, NULL);
 	}
 
 end_of_function:
@@ -981,6 +969,8 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 	unsigned char *buf;
 	size_t length_to_send;
 
+	register_string_error(dev, NULL);
+
 	/* Windows expects at least caps.FeatureReportByteLength bytes passed
 	   to HidD_SetFeature(), even if the report is shorter. Any less sent and
 	   the function fails with error ERROR_INVALID_PARAMETER set. Any more
@@ -1005,8 +995,6 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		return -1;
 	}
 
-	register_string_error(dev, NULL);
-
 	return (int) length;
 }
 
@@ -1017,6 +1005,13 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 
 	OVERLAPPED ol;
 	memset(&ol, 0, sizeof(ol));
+
+	if (!data || !length) {
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_string_error(dev, NULL);
 
 	res = DeviceIoControl(dev->device_handle,
 		report_type,
@@ -1048,8 +1043,6 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 		bytes_returned++;
 	}
 
-	register_string_error(dev, NULL);
-
 	return bytes_returned;
 }
 
@@ -1076,14 +1069,12 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
-	{
-		register_string_error(dev, L"NULL device/info");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
-	if (!string || !maxlen)
-	{
+	if (!string || !maxlen) {
 		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
@@ -1098,14 +1089,12 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
-	{
-		register_string_error(dev, L"NULL device/info");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
-	if (!string || !maxlen)
-	{
+	if (!string || !maxlen) {
 		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
@@ -1120,18 +1109,15 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
-	{
-		register_string_error(dev, L"NULL device/info");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
-	if (!string || !maxlen)
-	{
+	if (!string || !maxlen) {
 		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
-
 
 	wcsncpy(string, dev->device_info->serial_number, maxlen);
 	string[maxlen - 1] = L'\0';
@@ -1164,31 +1150,29 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	DEVPROPTYPE property_type;
 	ULONG len;
 
-	if (!container_id)
-	{
+	if (!container_id) {
 		register_string_error(dev, L"Invalid Container ID");
 		return -1;
 	}
 
+	register_string_error(dev, NULL);
+
 	interface_path = hid_internal_UTF8toUTF16(dev->device_info->path);
-	if (!interface_path)
-	{
+	if (!interface_path) {
 		register_string_error(dev, L"Path conversion failure");
 		goto end;
 	}
 
 	/* Get the device id from interface path */
 	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
-	if (!device_id)
-	{
+	if (!device_id) {
 		register_string_error(dev, L"Failed to get device interface property InstanceId");
 		goto end;
 	}
 
 	/* Open devnode from device id */
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
-	if (cr != CR_SUCCESS)
-	{
+	if (cr != CR_SUCCESS) {
 		register_string_error(dev, L"Failed to locate device node");
 		goto end;
 	}
@@ -1201,8 +1185,6 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 
 	if (cr != CR_SUCCESS)
 		register_string_error(dev, L"Failed to read ContainerId property from device node");
-	else
-		register_string_error(dev, NULL);
 
 end:
 	free(interface_path);
