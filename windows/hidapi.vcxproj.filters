@@ -23,5 +23,13 @@
     <ClInclude Include="..\hidapi\hidapi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="hidapi_winapi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="hidapi.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

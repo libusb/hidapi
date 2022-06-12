@@ -22,9 +22,9 @@ Pod::Spec.new do |spec|
 
   spec.source       = { :git => "https://github.com/libusb/hidapi.git", :tag => "hidapi-#{spec.version}" }
 
-  spec.source_files = "mac/hid.c", "hidapi/hidapi.h"
+  spec.source_files = "mac/hid.c", "hidapi/hidapi.h", "mac/hidapi_darwin.h"
 
-  spec.public_header_files = "hidapi/hidapi.h"
+  spec.public_header_files = "hidapi/hidapi.h", "mac/hidapi_darwin.h"
 
   spec.frameworks   = "IOKit", "CoreFoundation", "AppKit"
 

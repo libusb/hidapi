@@ -1,5 +1,3 @@
-os: Visual Studio 2015
-
 environment:
   matrix:
   - BUILD_ENV: msbuild
@@ -8,26 +6,26 @@ environment:
     arch: Win32
   - BUILD_ENV: cygwin
 
-install:
-  - cmd: if %BUILD_ENV%==cygwin (
-        C:\cygwin64\setup-x86_64.exe --quiet-mode --no-shortcuts --upgrade-also --packages autoconf,automake )
+for:
+  -
+    matrix:
+      only:
+        - BUILD_ENV: msbuild
 
-build_script:
-  - cmd: if %BUILD_ENV%==msbuild (
-        msbuild .\windows\hidapi.sln /p:Configuration=Release /p:Platform=%arch% /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll" )
-  - cmd: if %BUILD_ENV%==cygwin (
-        C:\cygwin64\bin\bash -exlc "cd $APPVEYOR_BUILD_FOLDER; ./bootstrap; ./configure; make" )
+    os: Visual Studio 2015
 
-artifacts:
-  # Win32 artifacts
-  - path: .\windows\Release\hidapi.dll
-  - path: .\windows\Release\hidapi.lib
-  - path: .\windows\Release\hidapi.pdb
-  - path: .\windows\Release\hidtest.exe
-  - path: .\windows\Release\hidtest.pdb
-  # x64 artifacts
-  - path: .\windows\x64\Release\hidapi.dll
-  - path: .\windows\x64\Release\hidapi.lib
-  - path: .\windows\x64\Release\hidapi.pdb
-  - path: .\windows\x64\Release\hidtest.exe
-  - path: .\windows\x64\Release\hidtest.pdb
+    build_script:
+      - cmd: msbuild .\windows\hidapi.sln /p:Configuration=Release /p:Platform=%arch% /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll"
+
+  -
+    matrix:
+      only:
+        - BUILD_ENV: cygwin
+
+    os: Visual Studio 2022
+
+    install:
+      - cmd: C:\cygwin64\setup-x86_64.exe --quiet-mode --no-shortcuts --upgrade-also --packages autoconf,automake
+
+    build_script:
+      - cmd: C:\cygwin64\bin\bash -exlc "cd $APPVEYOR_BUILD_FOLDER; ./bootstrap; ./configure; make"
