@@ -1,0 +1,7 @@
+option('hidraw', type : 'feature',
+  description : 'Build hidraw. Requires udev.',
+)
+
+option('libusb', type : 'feature',
+  description : 'Build hidapi. Requires libusb.',
+)
