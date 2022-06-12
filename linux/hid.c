@@ -503,7 +503,7 @@ static int get_device_string(hid_device *dev, enum device_string_id key, wchar_t
 	char *product_name_utf8 = NULL;
 
 	if (!string || !maxlen) {
-		register_device_error(dev, L"Zero buffer/length");
+		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
