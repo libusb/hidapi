@@ -770,7 +770,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 		/* Open the device */
 		handle = hid_open_path(path_to_open);
 	} else {
-		register_global_error("Device with requested VID/PID/(SerialNumber) not found");
+		register_global_error(L"Device with requested VID/PID/(SerialNumber) not found");
 	}
 
 	hid_free_enumeration(devs);
@@ -941,7 +941,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
-		return function_result;
+		return -1;
 	}
 
 	register_string_error(dev, NULL);
@@ -1038,7 +1038,7 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
-		return function_result;
+		return -1;
 	}
 
 	register_string_error(dev, NULL);
