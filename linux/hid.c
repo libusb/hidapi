@@ -145,16 +145,11 @@ static void register_error_str(wchar_t **error_str, const char *msg)
 	*error_str = utf8_to_wchar_t(msg);
 }
 
-/* Semilar to register_error_str, but allows passing a format string into this function. */
-static void register_error_str_format(wchar_t **error_str, const char *format, ...)
+/* Semilar to register_error_str, but allows passing a format string with va_list args into this function. */
+static void register_error_str_vformat(wchar_t **error_str, const char *format, va_list args)
 {
-	va_list args;
-	va_start(args, format);
-
 	char msg[256];
 	vsnprintf(msg, sizeof(msg), format, args);
-
-	va_end(args);
 
 	register_error_str(error_str, msg);
 }
@@ -169,10 +164,13 @@ static void register_global_error(const char *msg)
 	register_error_str(&last_global_error_str, msg);
 }
 
-/* Semilar to register_global_error, but allows passing a format string into this function. */
+/* Similar to register_global_error, but allows passing a format string into this function. */
 static void register_global_error_format(const char *format, ...)
 {
-	register_error_str_format(&last_global_error_str, msg);
+	va_list args;
+	va_start(args, format);
+	register_error_str_vformat(&last_global_error_str, format, args);
+	va_end(args);
 }
 
 /* Set the last error for a device to be reported by hid_error(dev).
@@ -185,10 +183,13 @@ static void register_device_error(hid_device *dev, const char *msg)
 	register_error_str(&dev->last_error_str);
 }
 
-/* See register_device_error, but you can pass a format string into this function. */
+/* Similar to register_device_error, but you can pass a format string into this function. */
 static void register_device_error_format(hid_device *dev, const char *format, ...)
 {
-	register_error_str_format(&dev->last_error_str, msg);
+	va_list args;
+	va_start(args, format);
+	register_error_str_vformat(&dev->last_error_str, format, args);
+	va_end(args);
 }
 
 /* Get an attribute value from a udev_device and return it as a whar_t
