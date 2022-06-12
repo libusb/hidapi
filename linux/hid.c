@@ -502,6 +502,20 @@ static int get_device_string(hid_device *dev, enum device_string_id key, wchar_t
 	char *serial_number_utf8 = NULL;
 	char *product_name_utf8 = NULL;
 
+	if (!string || !maxlen) {
+		register_device_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_device_error(dev, NULL);
+
+	/* Get the dev_t (major/minor numbers) from the file handle. */
+	ret = fstat(dev->device_handle, &s);
+	if (-1 == ret) {
+		register_device_error(dev, "Failed to stat device handle");
+		return ret;
+	}
+
 	/* Create the udev object */
 	udev = udev_new();
 	if (!udev) {
@@ -509,10 +523,6 @@ static int get_device_string(hid_device *dev, enum device_string_id key, wchar_t
 		return -1;
 	}
 
-	/* Get the dev_t (major/minor numbers) from the file handle. */
-	ret = fstat(dev->device_handle, &s);
-	if (-1 == ret)
-		return ret;
 	/* Open a udev device from the dev_t. 'c' means character device. */
 	udev_dev = udev_device_new_from_devnum(udev, 'c', s.st_rdev);
 	if (udev_dev) {
@@ -1136,10 +1146,12 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
-	(void)dev;
 	(void)string_index;
 	(void)string;
 	(void)maxlen;
+
+	register_device_error(dev, "hid_get_indexed_string: not supported by hidraw");
+
 	return -1;
 }
 
