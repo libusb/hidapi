@@ -49,8 +49,8 @@ else()
             endif()
         else()
             # otherwise there is 2 options:
-            # 1) iconv is provided by Standard C library and the build will be just fine;
-            # 2) The _user_ has to provide additiona compilation options for this project/target.
+            # 1) iconv is provided by Standard C library and the build will be just fine
+            # 2) The _user_ has to provide additiona compilation options for this project/target
         endif()
 
         include(CheckCSourceCompiles)
