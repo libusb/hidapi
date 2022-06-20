@@ -158,6 +158,7 @@ struct hid_device_ {
 	int manufacturer_index;
 	int product_index;
 	int serial_index;
+	struct hid_device_info* device_info;
 
 	/* Whether blocking reads are used */
 	int blocking; /* boolean */
@@ -209,6 +210,8 @@ static void free_hid_device(hid_device *dev)
 	pthread_barrier_destroy(&dev->barrier);
 	pthread_cond_destroy(&dev->condition);
 	pthread_mutex_destroy(&dev->mutex);
+
+	hid_free_enumeration(dev->device_info);
 
 	/* Free the device itself */
 	free(dev);
@@ -548,6 +551,95 @@ int HID_API_EXPORT hid_exit(void)
 	return 0;
 }
 
+
+static void fill_device_info_for_device(libusb_device_handle *handle, struct hid_device_info * cur_dev, struct libusb_device_descriptor *desc)
+{
+	/* VID/PID */
+	cur_dev->vendor_id = desc->idVendor;
+	cur_dev->product_id = desc->idProduct;
+
+	/* Release Number */
+	cur_dev->release_number = desc->bcdDevice;
+
+	if (handle) {
+		/* Serial Number */
+		if (desc->iSerialNumber > 0)
+			cur_dev->serial_number =
+				get_usb_string(handle, desc->iSerialNumber);
+
+		/* Manufacturer and Product strings */
+		if (desc->iManufacturer > 0)
+			cur_dev->manufacturer_string =
+				get_usb_string(handle, desc->iManufacturer);
+		if (desc->iProduct > 0)
+			cur_dev->product_string =
+				get_usb_string(handle, desc->iProduct);
+
+		#ifdef INVASIVE_GET_USAGE
+		{
+			/*
+			This section is removed because it is too
+			invasive on the system. Getting a Usage Page
+			and Usage requires parsing the HID Report
+			descriptor. Getting a HID Report descriptor
+			involves claiming the interface. Claiming the
+			interface involves detaching the kernel driver.
+			Detaching the kernel driver is hard on the system
+			because it will unclaim interfaces (if another
+			app has them claimed) and the re-attachment of
+			the driver will sometimes change /dev entry names.
+			It is for these reasons that this section is
+			#if 0. For composite devices, use the interface
+			field in the hid_device_info struct to distinguish
+			between interfaces. */
+				unsigned char data[256];
+			#ifdef DETACH_KERNEL_DRIVER
+							int detached = 0;
+							/* Usage Page and Usage */
+							res = libusb_kernel_driver_active(handle, interface_num);
+							if (res == 1) {
+								res = libusb_detach_kernel_driver(handle, interface_num);
+								if (res < 0)
+									LOG("Couldn't detach kernel driver, even though a kernel driver was attached.\n");
+								else
+									detached = 1;
+							}
+#endif
+							res = libusb_claim_interface(handle, interface_num);
+							if (res >= 0) {
+								/* Get the HID Report Descriptor. */
+								res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
+								if (res >= 0) {
+									unsigned short page=0, usage=0;
+									/* Parse the usage and usage page
+									   out of the report descriptor. */
+									get_usage(data, res,  &page, &usage);
+									cur_dev->usage_page = page;
+									cur_dev->usage = usage;
+								}
+								else
+									LOG("libusb_control_transfer() for getting the HID report failed with %d\n", res);
+
+								/* Release the interface */
+								res = libusb_release_interface(handle, interface_num);
+								if (res < 0)
+									LOG("Can't release the interface.\n");
+							}
+							else
+								LOG("Can't claim interface %d\n", res);
+#ifdef DETACH_KERNEL_DRIVER
+							/* Re-attach kernel driver if necessary. */
+							if (detached) {
+								res = libusb_attach_kernel_driver(handle, interface_num);
+								if (res < 0)
+									LOG("Couldn't re-attach kernel driver.\n");
+							}
+#endif
+}
+#endif /* INVASIVE_GET_USAGE */
+	}
+}
+
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
 	libusb_device **devs;
@@ -608,102 +700,23 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 						res = libusb_open(dev, &handle);
 
-						if (res >= 0) {
-#ifdef __ANDROID__
-							/* There is (a potential) libusb Android backend, in which
-							   device descriptor is not accurate up until the device is opened.
-							   https://github.com/libusb/libusb/pull/874#discussion_r632801373
-							   A workaround is to re-read the descriptor again.
-							   Even if it is not going to be accepted into libusb master,
-							   having it here won't do any harm, since reading the device descriptor
-							   is as cheap as copy 18 bytes of data. */
-							libusb_get_device_descriptor(dev, &desc);
-#endif
-
-							/* Serial Number */
-							if (desc.iSerialNumber > 0)
-								cur_dev->serial_number =
-									get_usb_string(handle, desc.iSerialNumber);
-
-							/* Manufacturer and Product strings */
-							if (desc.iManufacturer > 0)
-								cur_dev->manufacturer_string =
-									get_usb_string(handle, desc.iManufacturer);
-							if (desc.iProduct > 0)
-								cur_dev->product_string =
-									get_usb_string(handle, desc.iProduct);
-
-#ifdef INVASIVE_GET_USAGE
-{
-						/*
-						This section is removed because it is too
-						invasive on the system. Getting a Usage Page
-						and Usage requires parsing the HID Report
-						descriptor. Getting a HID Report descriptor
-						involves claiming the interface. Claiming the
-						interface involves detaching the kernel driver.
-						Detaching the kernel driver is hard on the system
-						because it will unclaim interfaces (if another
-						app has them claimed) and the re-attachment of
-						the driver will sometimes change /dev entry names.
-						It is for these reasons that this section is
-						#if 0. For composite devices, use the interface
-						field in the hid_device_info struct to distinguish
-						between interfaces. */
-							unsigned char data[256];
-#ifdef DETACH_KERNEL_DRIVER
-							int detached = 0;
-							/* Usage Page and Usage */
-							res = libusb_kernel_driver_active(handle, interface_num);
-							if (res == 1) {
-								res = libusb_detach_kernel_driver(handle, interface_num);
-								if (res < 0)
-									LOG("Couldn't detach kernel driver, even though a kernel driver was attached.\n");
-								else
-									detached = 1;
+						#ifdef __ANDROID__
+							if (handle) {
+								/* There is (a potential) libusb Android backend, in which
+								device descriptor is not accurate up until the device is opened.
+								https://github.com/libusb/libusb/pull/874#discussion_r632801373
+								A workaround is to re-read the descriptor again.
+								Even if it is not going to be accepted into libusb master,
+								having it here won't do any harm, since reading the device descriptor
+								is as cheap as copy 18 bytes of data. */
+								libusb_get_device_descriptor(dev, &desc);
 							}
-#endif
-							res = libusb_claim_interface(handle, interface_num);
-							if (res >= 0) {
-								/* Get the HID Report Descriptor. */
-								res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
-								if (res >= 0) {
-									unsigned short page=0, usage=0;
-									/* Parse the usage and usage page
-									   out of the report descriptor. */
-									get_usage(data, res,  &page, &usage);
-									cur_dev->usage_page = page;
-									cur_dev->usage = usage;
-								}
-								else
-									LOG("libusb_control_transfer() for getting the HID report failed with %d\n", res);
+						#endif
 
-								/* Release the interface */
-								res = libusb_release_interface(handle, interface_num);
-								if (res < 0)
-									LOG("Can't release the interface.\n");
-							}
-							else
-								LOG("Can't claim interface %d\n", res);
-#ifdef DETACH_KERNEL_DRIVER
-							/* Re-attach kernel driver if necessary. */
-							if (detached) {
-								res = libusb_attach_kernel_driver(handle, interface_num);
-								if (res < 0)
-									LOG("Couldn't re-attach kernel driver.\n");
-							}
-#endif
-}
-#endif /* INVASIVE_GET_USAGE */
+						fill_device_info_for_device(handle, cur_dev, &desc);
 
+						if (res >= 0) 
 							libusb_close(handle);
-						}
-						/* VID/PID */
-						cur_dev->vendor_id = dev_vid;
-						cur_dev->product_id = dev_pid;
-
-						/* Release Number */
-						cur_dev->release_number = desc.bcdDevice;
 
 						/* Interface Number */
 						cur_dev->interface_number = interface_num;
@@ -909,12 +922,17 @@ static void *read_thread(void *param)
 }
 
 
-static int hidapi_initialize_device(hid_device *dev, const struct libusb_interface_descriptor *intf_desc)
+static int hidapi_initialize_device(hid_device *dev, char* path, const struct libusb_interface_descriptor *intf_desc)
 {
 	int i =0;
 	int res = 0;
 	struct libusb_device_descriptor desc;
-	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);
+	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);	
+
+	dev->device_info = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
+	dev->device_info->next = NULL;
+	dev->device_info->path = path;
+	fill_device_info_for_device(dev->device_handle, dev->device_info, &desc);
 
 #ifdef DETACH_KERNEL_DRIVER
 	/* Detach the kernel driver, but only if the
@@ -1028,11 +1046,14 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 							free(dev_path);
 							break;
 						}
-						good_open = hidapi_initialize_device(dev, intf_desc);
+						good_open = hidapi_initialize_device(dev, dev_path, intf_desc);
 						if (!good_open)
 							libusb_close(dev->device_handle);
+
+						// dev_path is owned by dev now
+					} else {
+						free(dev_path);
 					}
-					free(dev_path);
 				}
 			}
 		}
@@ -1062,6 +1083,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 	const struct libusb_interface_descriptor *selected_intf_desc = NULL;
 	int res = 0;
 	int j = 0, k = 0;
+	char* path;
 
 	if(hid_init() < 0)
 		return NULL;
@@ -1107,7 +1129,8 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 		goto err;
 	}
 
-	if (!hidapi_initialize_device(dev, selected_intf_desc))
+	path = make_path(libusb_get_device(dev->device_handle), selected_intf_desc->bInterfaceNumber, conf_desc->bConfigurationValue);
+	if (!hidapi_initialize_device(dev, path, selected_intf_desc))
 		goto err;
 
 	return dev;
@@ -1118,6 +1141,7 @@ err:
 	if (dev->device_handle)
 		libusb_close(dev->device_handle);
 	free_hid_device(dev);
+	// If path is set it, ownership was given to hidapi_initialize_device
 #else
 	(void)sys_dev;
 	(void)interface_num;
@@ -1453,6 +1477,16 @@ int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string,
 int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
 	return hid_get_indexed_string(dev, dev->serial_index, string, maxlen);
+}
+
+struct hid_device_info *HID_API_EXPORT_CALL hid_get_device_info(hid_device *dev) {
+	if (!dev->device_info)
+	{
+		// register_device_error(dev, "NULL device/info");
+		return NULL;
+	}
+
+	return dev->device_info;
 }
 
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)

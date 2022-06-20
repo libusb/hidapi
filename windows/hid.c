@@ -1199,6 +1199,16 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 	return 0;
 }
 
+struct hid_device_info *HID_API_EXPORT_CALL hid_get_device_info(hid_device *dev) {
+	if (!dev->device_info)
+	{
+		register_string_error(dev, L"NULL device/info");
+		return NULL;
+	}
+
+	return dev->device_info;
+}
+
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
 	BOOL res;

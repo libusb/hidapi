@@ -51,6 +51,17 @@
 #endif
 //
 
+void print_device(struct hid_device_info *cur_dev) {
+	printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number);
+	printf("\n");
+	printf("  Manufacturer: %ls\n", cur_dev->manufacturer_string);
+	printf("  Product:      %ls\n", cur_dev->product_string);
+	printf("  Release:      %hx\n", cur_dev->release_number);
+	printf("  Interface:    %d\n",  cur_dev->interface_number);
+	printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
+	printf("\n");
+}
+
 int main(int argc, char* argv[])
 {
 	(void)argc;
@@ -85,14 +96,7 @@ int main(int argc, char* argv[])
 	devs = hid_enumerate(0x0, 0x0);
 	cur_dev = devs;
 	while (cur_dev) {
-		printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number);
-		printf("\n");
-		printf("  Manufacturer: %ls\n", cur_dev->manufacturer_string);
-		printf("  Product:      %ls\n", cur_dev->product_string);
-		printf("  Release:      %hx\n", cur_dev->release_number);
-		printf("  Interface:    %d\n",  cur_dev->interface_number);
-		printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
-		printf("\n");
+		print_device(cur_dev);
 		cur_dev = cur_dev->next;
 	}
 	hid_free_enumeration(devs);
@@ -133,6 +137,13 @@ int main(int argc, char* argv[])
 		printf("Unable to read serial number string\n");
 	printf("Serial Number String: (%d) %ls", wstr[0], wstr);
 	printf("\n");
+
+	struct hid_device_info* info = hid_get_device_info(handle);
+	if (info == NULL) {
+		printf("Unable to get device info\n");
+	} else {
+		print_device(info);
+	}
 
 	// Read Indexed String 1
 	wstr[0] = 0x0000;
