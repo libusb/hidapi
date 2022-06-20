@@ -23,28 +23,44 @@ if(HIDAPI_NO_ICONV)
     target_compile_definitions(hidapi_libusb PRIVATE NO_ICONV)
 else()
     if(NOT ANDROID)
+        include(CheckCSourceCompiles)
+
         if(NOT CMAKE_VERSION VERSION_LESS 3.11)
+            message(STATUS "Check for Iconv")
             find_package(Iconv)
-            if(NOT Iconv_FOUND)
+            if(Iconv_FOUND)
+                if(NOT Iconv_IS_BUILT_IN)
+                    target_link_libraries(hidapi_libusb PRIVATE Iconv::Iconv)
+                    set(CMAKE_REQUIRED_LIBRARIES "Iconv::Iconv")
+                    if(NOT BUILD_SHARED_LIBS)
+                        set(HIDAPI_NEED_EXPORT_ICONV TRUE PARENT_SCOPE)
+                    endif()
+                endif()
+            else()
+                message(STATUS "Iconv Explicitly check '-liconv'")
                 # Sometime the build environment is not setup
                 # in a way CMake can find Iconv on its own by default.
-                # But if we simply link against iconv (-liconv), the build succeedes
+                # But if we simply link against iconv (-liconv), the build may succeed
                 # due to other compiler/link flags.
-                # In such case CMake will find Iconv and will detect it as Iconv_IS_BUILT_IN.
                 set(CMAKE_REQUIRED_LIBRARIES "iconv")
-                find_package(Iconv)
-                if(Iconv_FOUND)
+                check_c_source_compiles("
+                    #include <stddef.h>
+                    #include <iconv.h>
+                    int main() {
+                    char *a, *b;
+                    size_t i, j;
+                    iconv_t ic;
+                    ic = iconv_open(\"to\", \"from\");
+                    iconv(ic, &a, &i, &b, &j);
+                    iconv_close(ic);
+                    }
+                    "
+                    Iconv_EXPLICITLY_AT_ENV)
+                if(Iconv_EXPLICITLY_AT_ENV)
+                    message(STATUS "Iconv Explicitly check '-liconv' - Available")
                     target_link_libraries(hidapi_libusb PRIVATE iconv)
-                endif()
-            endif()
-            if(NOT Iconv_FOUND)
-                message(FATAL_ERROR "Iconv is not found, make sure your build environment is right")
-            endif()
-            if(NOT Iconv_IS_BUILT_IN)
-                target_link_libraries(hidapi_libusb PRIVATE Iconv::Iconv)
-                set(CMAKE_REQUIRED_LIBRARIES "Iconv::Iconv")
-                if(NOT BUILD_SHARED_LIBS)
-                    set(HIDAPI_NEED_EXPORT_ICONV TRUE PARENT_SCOPE)
+                else()
+                    message(FATAL_ERROR "Iconv is not found, make sure to provide it in the build environment")
                 endif()
             endif()
         else()
@@ -53,7 +69,6 @@ else()
             # 2) The _user_ has to provide additiona compilation options for this project/target
         endif()
 
-        include(CheckCSourceCompiles)
         # check for error: "conflicting types for 'iconv'"
         check_c_source_compiles("#include<iconv.h>
             extern size_t iconv (iconv_t cd, const char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);
