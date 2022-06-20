@@ -47,12 +47,12 @@ else()
                     #include <stddef.h>
                     #include <iconv.h>
                     int main() {
-                    char *a, *b;
-                    size_t i, j;
-                    iconv_t ic;
-                    ic = iconv_open(\"to\", \"from\");
-                    iconv(ic, &a, &i, &b, &j);
-                    iconv_close(ic);
+                        char *a, *b;
+                        size_t i, j;
+                        iconv_t ic;
+                        ic = iconv_open(\"to\", \"from\");
+                        iconv(ic, &a, &i, &b, &j);
+                        iconv_close(ic);
                     }
                     "
                     Iconv_EXPLICITLY_AT_ENV)
