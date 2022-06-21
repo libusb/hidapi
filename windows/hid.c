@@ -189,6 +189,11 @@ struct hid_device_ {
 static hid_device *new_hid_device()
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
+
+	if (dev == NULL) {
+		return NULL;
+	}
+
 	dev->device_handle = INVALID_HANDLE_VALUE;
 	dev->blocking = TRUE;
 	dev->output_report_length = 0;
@@ -224,9 +229,6 @@ static void free_hid_device(hid_device *dev)
 
 static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR *op)
 {
-	if (!error_buffer)
-		return;
-
 	free(*error_buffer);
 	*error_buffer = NULL;
 
@@ -281,19 +283,8 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	}
 }
 
-static void register_winapi_error(hid_device *dev, const WCHAR *op)
-{
-	if (!dev)
-		return;
-
-	register_winapi_error_to_buffer(&dev->last_error_str, op);
-}
-
 static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR *string_error)
 {
-	if (!error_buffer)
-		return;
-
 	free(*error_buffer);
 	*error_buffer = NULL;
 
@@ -302,12 +293,26 @@ static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	}
 }
 
+static void register_winapi_error(hid_device *dev, const WCHAR *op)
+{
+	register_winapi_error_to_buffer(&dev->last_error_str, op);
+}
+
 static void register_string_error(hid_device *dev, const WCHAR *string_error)
 {
-	if (!dev)
-		return;
-
 	register_string_error_to_buffer(&dev->last_error_str, string_error);
+}
+
+static wchar_t *last_global_error_str = NULL;
+
+static void register_global_winapi_error(const WCHAR *op)
+{
+	register_winapi_error_to_buffer(&last_global_error_str, op);
+}
+
+static void register_global_error(const WCHAR *string_error)
+{
+	register_string_error_to_buffer(&last_global_error_str, string_error);
 }
 
 static HANDLE open_device(const wchar_t *path, BOOL open_rw)
@@ -339,9 +344,11 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str()
 
 int HID_API_EXPORT hid_init(void)
 {
+	register_global_error(NULL);
 #ifndef HIDAPI_USE_DDK
 	if (!hidapi_initialized) {
 		if (lookup_functions() < 0) {
+			register_global_winapi_error(L"resolve DLL functions");
 			return -1;
 		}
 		hidapi_initialized = TRUE;
@@ -356,6 +363,7 @@ int HID_API_EXPORT hid_exit(void)
 	free_library_handles();
 	hidapi_initialized = FALSE;
 #endif
+	register_global_error(NULL);
 	return 0;
 }
 
@@ -523,6 +531,9 @@ static char *hid_internal_UTF16toUTF8(const wchar_t *src)
 	int len = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, NULL, 0, NULL, NULL);
 	if (len) {
 		dst = (char*)calloc(len, sizeof(char));
+		if (dst == NULL) {
+			return NULL;
+		}
 		WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, dst, len, NULL, NULL);
 	}
 
@@ -535,6 +546,9 @@ static wchar_t *hid_internal_UTF8toUTF16(const char *src)
 	int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, NULL, 0);
 	if (len) {
 		dst = (wchar_t*)calloc(len, sizeof(wchar_t));
+		if (dst == NULL) {
+			return NULL;
+		}
 		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, dst, len);
 	}
 
@@ -608,8 +622,10 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	wchar_t* device_interface_list = NULL;
 	DWORD len;
 
-	if (hid_init() < 0)
+	if (hid_init() < 0) {
+		/* register_global_error: global error is reset by hid_init */
 		return NULL;
+	}
 
 	/* Retrieve HID Interface Class GUID
 	   https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
@@ -621,6 +637,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	do {
 		cr = CM_Get_Device_Interface_List_SizeW(&len, &interface_class_guid, NULL, CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
 		if (cr != CR_SUCCESS) {
+			register_global_error(L"Failed to get size of HID device interface list");
 			break;
 		}
 
@@ -630,9 +647,13 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 
 		device_interface_list = (wchar_t*)calloc(len, sizeof(wchar_t));
 		if (device_interface_list == NULL) {
+			register_global_error(L"Failed to allocate memory for HID device interface list");
 			return NULL;
 		}
 		cr = CM_Get_Device_Interface_ListW(&interface_class_guid, NULL, device_interface_list, len, CM_GET_DEVICE_INTERFACE_LIST_PRESENT);
+		if (cr != CR_SUCCESS && cr != CR_BUFFER_SMALL) {
+			register_global_error(L"Failed to get HID device interface list");
+		}
 	} while (cr == CR_BUFFER_SMALL);
 
 	if (cr != CR_SUCCESS) {
@@ -684,6 +705,14 @@ cont_close:
 		CloseHandle(device_handle);
 	}
 
+	if (root == NULL) {
+		if (vendor_id == 0 && product_id == 0) {
+			register_global_error(L"No HID devices found in the system.");
+		} else {
+			register_global_error(L"No HID devices with requested VID/PID found in the system.");
+		}
+	}
+
 end_of_function:
 	free(device_interface_list);
 
@@ -712,8 +741,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 	const char *path_to_open = NULL;
 	hid_device *handle = NULL;
 
+	/* register_global_error: global error is reset by hid_enumerate/hid_init */
 	devs = hid_enumerate(vendor_id, product_id);
 	if (!devs) {
+		/* register_global_error: global error is already set by hid_enumerate */
 		return NULL;
 	}
 
@@ -738,6 +769,8 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 	if (path_to_open) {
 		/* Open the device */
 		handle = hid_open_path(path_to_open);
+	} else {
+		register_global_error(L"Device with requested VID/PID/(SerialNumber) not found");
 	}
 
 	hid_free_enumeration(devs);
@@ -753,12 +786,16 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	HIDP_CAPS caps;
 
-	if (hid_init() < 0)
+	if (hid_init() < 0) {
+		/* register_global_error: global error is reset by hid_init */
 		goto end_of_function;
+	}
 
 	interface_path = hid_internal_UTF8toUTF16(path);
-	if (!interface_path)
+	if (!interface_path) {
+		register_string_error(dev, L"Path conversion failure");
 		goto end_of_function;
+	}
 
 	/* Open a handle to the device */
 	device_handle = open_device(interface_path, TRUE);
@@ -773,22 +810,35 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 		device_handle = open_device(interface_path, FALSE);
 
 		/* Check the validity of the limited device_handle. */
-		if (device_handle == INVALID_HANDLE_VALUE)
+		if (device_handle == INVALID_HANDLE_VALUE) {
+			register_global_winapi_error(L"open_device");
 			goto end_of_function;
+		}
 	}
 
 	/* Set the Input Report buffer size to 64 reports. */
-	if (!HidD_SetNumInputBuffers(device_handle, 64))
+	if (!HidD_SetNumInputBuffers(device_handle, 64)) {
+		register_global_winapi_error(L"set input buffers");
 		goto end_of_function;
+	}
 
 	/* Get the Input Report length for the device. */
-	if (!HidD_GetPreparsedData(device_handle, &pp_data))
+	if (!HidD_GetPreparsedData(device_handle, &pp_data)) {
+		register_global_winapi_error(L"get preparsed data");
 		goto end_of_function;
+	}
 
-	if (HidP_GetCaps(pp_data, &caps) != HIDP_STATUS_SUCCESS)
+	if (HidP_GetCaps(pp_data, &caps) != HIDP_STATUS_SUCCESS) {
+		register_global_error(L"HidP_GetCaps");
 		goto end_of_function;
+	}
 
 	dev = new_hid_device();
+
+	if (dev == NULL) {
+		register_global_error(L"hid_device allocation error");
+		goto end_of_function;
+	}
 
 	dev->device_handle = device_handle;
 	device_handle = INVALID_HANDLE_VALUE;
@@ -819,10 +869,12 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 
 	unsigned char *buf;
 
-	if (!data || (length==0)) {
+	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
 		return function_result;
 	}
+
+	register_string_error(dev, NULL);
 
 	/* Make sure the right number of bytes are passed to WriteFile. Windows
 	   expects the number of bytes which are in the _longest_ report (plus
@@ -886,6 +938,13 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	size_t copy_len = 0;
 	BOOL res = FALSE;
 	BOOL overlapped = FALSE;
+
+	if (!data || !length) {
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_string_error(dev, NULL);
 
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
@@ -977,6 +1036,13 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 	unsigned char *buf;
 	size_t length_to_send;
 
+	if (!data || !length) {
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_string_error(dev, NULL);
+
 	/* Windows expects at least caps.FeatureReportByteLength bytes passed
 	   to HidD_SetFeature(), even if the report is shorter. Any less sent and
 	   the function fails with error ERROR_INVALID_PARAMETER set. Any more
@@ -1011,6 +1077,13 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 
 	OVERLAPPED ol;
 	memset(&ol, 0, sizeof(ol));
+
+	if (!data || !length) {
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_string_error(dev, NULL);
 
 	res = DeviceIoControl(dev->device_handle,
 		report_type,
@@ -1068,14 +1141,12 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
-	{
-		register_string_error(dev, L"NULL device/info");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
-	if (!string || !maxlen)
-	{
+	if (!string || !maxlen) {
 		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
@@ -1083,47 +1154,47 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
 	string[maxlen - 1] = L'\0';
 
+	register_string_error(dev, NULL);
+
 	return 0;
 }
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
-	{
-		register_string_error(dev, L"NULL device/info");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
-	if (!string || !maxlen)
-	{
+	if (!string || !maxlen) {
 		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-
 	wcsncpy(string, dev->device_info->product_string, maxlen);
 	string[maxlen - 1] = L'\0';
+
+	register_string_error(dev, NULL);
 
 	return 0;
 }
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
-	{
-		register_string_error(dev, L"NULL device/info");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
-	if (!string || !maxlen)
-	{
+	if (!string || !maxlen) {
 		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-
 	wcsncpy(string, dev->device_info->serial_number, maxlen);
 	string[maxlen - 1] = L'\0';
+
+	register_string_error(dev, NULL);
 
 	return 0;
 }
@@ -1138,6 +1209,8 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 		return -1;
 	}
 
+	register_string_error(dev, NULL);
+
 	return 0;
 }
 
@@ -1149,31 +1222,29 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	DEVPROPTYPE property_type;
 	ULONG len;
 
-	if (!container_id)
-	{
+	if (!container_id) {
 		register_string_error(dev, L"Invalid Container ID");
 		return -1;
 	}
 
+	register_string_error(dev, NULL);
+
 	interface_path = hid_internal_UTF8toUTF16(dev->device_info->path);
-	if (!interface_path)
-	{
+	if (!interface_path) {
 		register_string_error(dev, L"Path conversion failure");
 		goto end;
 	}
 
 	/* Get the device id from interface path */
 	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
-	if (!device_id)
-	{
+	if (!device_id) {
 		register_string_error(dev, L"Failed to get device interface property InstanceId");
 		goto end;
 	}
 
 	/* Open devnode from device id */
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
-	if (cr != CR_SUCCESS)
-	{
+	if (cr != CR_SUCCESS) {
 		register_string_error(dev, L"Failed to locate device node");
 		goto end;
 	}
@@ -1203,8 +1274,9 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 		return (wchar_t*)dev->last_error_str;
 	}
 
-	/* Global error messages are not (yet) implemented on Windows. */
-	return L"hid_error for global errors is not implemented yet";
+	if (last_global_error_str == NULL)
+		return L"Success";
+	return last_global_error_str;
 }
 
 #ifdef __cplusplus

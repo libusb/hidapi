@@ -97,9 +97,8 @@ static struct hid_api_version api_version = {
 	.patch = HID_API_VERSION_PATCH
 };
 
-/* Global error message that is not specific to a device, e.g. for
-   hid_open(). It is thread-local like errno. */
-__thread wchar_t *last_global_error_str = NULL;
+static wchar_t *last_global_error_str = NULL;
+
 
 static hid_device *new_hid_device(void)
 {
@@ -124,6 +123,10 @@ static wchar_t *utf8_to_wchar_t(const char *utf8)
 			return wcsdup(L"");
 		}
 		ret = (wchar_t*) calloc(wlen+1, sizeof(wchar_t));
+		if (ret == NULL) {
+			/* as much as we can do at this point */
+			return NULL;
+		}
 		mbstowcs(ret, utf8, wlen+1);
 		ret[wlen] = 0x0000;
 	}
@@ -132,6 +135,25 @@ static wchar_t *utf8_to_wchar_t(const char *utf8)
 }
 
 
+/* Makes a copy of the given error message (and decoded according to the
+ * currently locale) into the wide string pointer pointed by error_str.
+ * The last stored error string is freed.
+ * Use register_error_str(NULL) to free the error message completely. */
+static void register_error_str(wchar_t **error_str, const char *msg)
+{
+	free(*error_str);
+	*error_str = utf8_to_wchar_t(msg);
+}
+
+/* Semilar to register_error_str, but allows passing a format string with va_list args into this function. */
+static void register_error_str_vformat(wchar_t **error_str, const char *format, va_list args)
+{
+	char msg[256];
+	vsnprintf(msg, sizeof(msg), format, args);
+
+	register_error_str(error_str, msg);
+}
+
 /* Set the last global error to be reported by hid_error(NULL).
  * The given error message will be copied (and decoded according to the
  * currently locale, so do not pass in string constants).
@@ -139,51 +161,35 @@ static wchar_t *utf8_to_wchar_t(const char *utf8)
  * Use register_global_error(NULL) to indicate "no error". */
 static void register_global_error(const char *msg)
 {
-	if (last_global_error_str)
-		free(last_global_error_str);
-
-	last_global_error_str = utf8_to_wchar_t(msg);
+	register_error_str(&last_global_error_str, msg);
 }
 
-/* See register_global_error, but you can pass a format string into this function. */
+/* Similar to register_global_error, but allows passing a format string into this function. */
 static void register_global_error_format(const char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
-
-	char msg[100];
-	vsnprintf(msg, sizeof(msg), format, args);
-
+	register_error_str_vformat(&last_global_error_str, format, args);
 	va_end(args);
-
-	register_global_error(msg);
 }
 
-/* Set the last error for a device to be reported by hid_error(device).
+/* Set the last error for a device to be reported by hid_error(dev).
  * The given error message will be copied (and decoded according to the
  * currently locale, so do not pass in string constants).
- * The last stored global error message is freed.
- * Use register_device_error(device, NULL) to indicate "no error". */
+ * The last stored device error message is freed.
+ * Use register_device_error(dev, NULL) to indicate "no error". */
 static void register_device_error(hid_device *dev, const char *msg)
 {
-	if (dev->last_error_str)
-		free(dev->last_error_str);
-
-	dev->last_error_str = utf8_to_wchar_t(msg);
+	register_error_str(&dev->last_error_str, msg);
 }
 
-/* See register_device_error, but you can pass a format string into this function. */
+/* Similar to register_device_error, but you can pass a format string into this function. */
 static void register_device_error_format(hid_device *dev, const char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
-
-	char msg[100];
-	vsnprintf(msg, sizeof(msg), format, args);
-
+	register_error_str_vformat(&dev->last_error_str, format, args);
 	va_end(args);
-
-	register_device_error(dev, msg);
 }
 
 /* Get an attribute value from a udev_device and return it as a whar_t
@@ -496,17 +502,27 @@ static int get_device_string(hid_device *dev, enum device_string_id key, wchar_t
 	char *serial_number_utf8 = NULL;
 	char *product_name_utf8 = NULL;
 
-	/* Create the udev object */
-	udev = udev_new();
-	if (!udev) {
-		register_global_error("Couldn't create udev context");
+	if (!string || !maxlen) {
+		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
+	register_device_error(dev, NULL);
+
 	/* Get the dev_t (major/minor numbers) from the file handle. */
 	ret = fstat(dev->device_handle, &s);
-	if (-1 == ret)
+	if (-1 == ret) {
+		register_device_error(dev, "Failed to stat device handle");
 		return ret;
+	}
+
+	/* Create the udev object */
+	udev = udev_new();
+	if (!udev) {
+		register_device_error(dev, "Couldn't create udev context");
+		return -1;
+	}
+
 	/* Open a udev device from the dev_t. 'c' means character device. */
 	udev_dev = udev_device_new_from_devnum(udev, 'c', s.st_rdev);
 	if (udev_dev) {
@@ -614,6 +630,9 @@ int HID_API_EXPORT hid_init(void)
 {
 	const char *locale;
 
+	/* indicate no error */
+	register_global_error(NULL);
+
 	/* Set the locale if it's not set. */
 	locale = setlocale(LC_CTYPE, NULL);
 	if (!locale)
@@ -642,6 +661,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	struct hid_device_info *prev_dev = NULL; /* previous device */
 
 	hid_init();
+	/* register_global_error: global error is reset by hid_init */
 
 	/* Create the udev object */
 	udev = udev_new();
@@ -855,6 +875,14 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	udev_enumerate_unref(enumerate);
 	udev_unref(udev);
 
+	if (root == NULL) {
+		if (vendor_id == 0 && product_id == 0) {
+			register_global_error("No HID devices found in the system.");
+		} else {
+			register_global_error("No HID devices with requested VID/PID found in the system.");
+		}
+	}
+
 	return root;
 }
 
@@ -874,14 +902,17 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 
 hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
 {
-	/* Set global error to none */
-	register_global_error(NULL);
-
 	struct hid_device_info *devs, *cur_dev;
 	const char *path_to_open = NULL;
 	hid_device *handle = NULL;
 
+	/* register_global_error: global error is reset by hid_enumerate/hid_init */
 	devs = hid_enumerate(vendor_id, product_id);
+	if (devs == NULL) {
+		/* register_global_error: global error is already set by hid_enumerate */
+		return NULL;
+	}
+
 	cur_dev = devs;
 	while (cur_dev) {
 		if (cur_dev->vendor_id == vendor_id &&
@@ -904,7 +935,7 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 		/* Open the device */
 		handle = hid_open_path(path_to_open);
 	} else {
-		register_global_error("No such device");
+		register_global_error("Device with requested VID/PID/(SerialNumber) not found");
 	}
 
 	hid_free_enumeration(devs);
@@ -914,23 +945,17 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 
 hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
-	/* Set global error to none */
-	register_global_error(NULL);
-
 	hid_device *dev = NULL;
 
 	hid_init();
+	/* register_global_error: global error is reset by hid_init */
 
 	dev = new_hid_device();
 
-	/* OPEN HERE */
 	dev->device_handle = open(path, O_RDWR);
 
 	/* If we have a good handle, return it. */
 	if (dev->device_handle >= 0) {
-		/* Set device error to none */
-		register_device_error(dev, NULL);
-
 		/* Get the report descriptor */
 		int res, desc_size = 0;
 		struct hidraw_report_descriptor rpt_desc;
@@ -957,9 +982,9 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		return dev;
 	}
 	else {
-		/* Unable to open any devices. */
-		register_global_error(strerror(errno));
+		/* Unable to open a device. */
 		free(dev);
+		register_global_error_format("Failed to open a device with path '%s': %s", path, strerror(errno));
 		return NULL;
 	}
 }
@@ -1016,9 +1041,11 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		else {
 			/* Check for errors on the file descriptor. This will
 			   indicate a device disconnection. */
-			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL))
+			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
 				// We cannot use strerror() here as no -1 was returned from poll().
+				register_device_error(dev, "hid_read_timeout: unexpected poll error (device disconnected)");
 				return -1;
+			}
 		}
 	}
 
@@ -1053,6 +1080,8 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 {
 	int res;
 
+	register_device_error(dev, NULL);
+
 	res = ioctl(dev->device_handle, HIDIOCSFEATURE(length), data);
 	if (res < 0)
 		register_device_error_format(dev, "ioctl (SFEATURE): %s", strerror(errno));
@@ -1064,6 +1093,8 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 {
 	int res;
 
+	register_device_error(dev, NULL);
+
 	res = ioctl(dev->device_handle, HIDIOCGFEATURE(length), data);
 	if (res < 0)
 		register_device_error_format(dev, "ioctl (GFEATURE): %s", strerror(errno));
@@ -1074,6 +1105,8 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
+
+	register_device_error(dev, NULL);
 
 	res = ioctl(dev->device_handle, HIDIOCGINPUT(length), data);
 	if (res < 0)
@@ -1087,9 +1120,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	int ret = close(dev->device_handle);
-
-	register_global_error((ret == -1)? strerror(errno): NULL);
+	close(dev->device_handle);
 
 	/* Free the device error message */
 	register_device_error(dev, NULL);
@@ -1115,10 +1146,12 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
-	(void)dev;
 	(void)string_index;
 	(void)string;
 	(void)maxlen;
+
+	register_device_error(dev, "hid_get_indexed_string: not supported by hidraw");
+
 	return -1;
 }
 
