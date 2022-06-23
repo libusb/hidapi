@@ -700,7 +700,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 						res = libusb_open(dev, &handle);
 
-						#ifdef __ANDROID__
+#ifdef __ANDROID__
 							if (handle) {
 								/* There is (a potential) libusb Android backend, in which
 								device descriptor is not accurate up until the device is opened.
@@ -711,7 +711,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 								is as cheap as copy 18 bytes of data. */
 								libusb_get_device_descriptor(dev, &desc);
 							}
-						#endif
+#endif
 
 						fill_device_info_for_device(handle, cur_dev, &desc);
 
