@@ -788,8 +788,8 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 		sysfs_path = udev_list_entry_get_name(dev_list_entry);
 		raw_dev = udev_device_new_from_syspath(udev, sysfs_path);
 
-		struct hid_device_info * first_dev;
-		struct hid_device_info * last_dev;
+		struct hid_device_info * first_dev = NULL;
+		struct hid_device_info * last_dev = NULL;
 		get_device_info_for_device(raw_dev, vendor_id, product_id, &first_dev, &last_dev);
 		if (first_dev) {
 			if (cur_dev) {
