@@ -480,7 +480,7 @@ extern "C" {
 				for this hid_device, or NULL in the case of failure.
 				This struct is valid until the device is closed with hid_close().
 		*/
-		struct hid_device_info HID_API_EXPORT *HID_API_CALL hid_get_device_info(hid_device *dev);
+		HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev);
 
 		/** @brief Get a string from a HID device, based on its string index.
 

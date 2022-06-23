@@ -1224,7 +1224,7 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 	return 0;
 }
 
-struct hid_device_info *HID_API_EXPORT_CALL hid_get_device_info(hid_device *dev) {
+HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
 	if (!dev->device_info)
 	{
 		// register_string_error(dev, L"NULL device/info");
