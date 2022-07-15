@@ -1217,17 +1217,14 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int
 int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *container_id)
 {
 	wchar_t *interface_path = NULL, *device_id = NULL;
-	CONFIGRET cr = CR_FAILURE;
+	GUID *container_guid = NULL;
+	CONFIGRET cr;
 	DEVINST dev_node;
-	DEVPROPTYPE property_type;
-	ULONG len;
 
 	if (!container_id) {
 		register_string_error(dev, L"Invalid Container ID");
 		return -1;
 	}
-
-	register_string_error(dev, NULL);
 
 	interface_path = hid_internal_UTF8toUTF16(dev->device_info->path);
 	if (!interface_path) {
@@ -1250,19 +1247,22 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	}
 
 	/* Get the container id from devnode */
-	len = sizeof(*container_id);
-	cr = CM_Get_DevNode_PropertyW(dev_node, &DEVPKEY_Device_ContainerId, &property_type, (PBYTE)container_id, &len, 0);
-	if (cr == CR_SUCCESS && property_type != DEVPROP_TYPE_GUID)
-		cr = CR_FAILURE;
-
-	if (cr != CR_SUCCESS)
+	container_guid = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_ContainerId, DEVPROP_TYPE_GUID);
+	if (container_guid == NULL) {
 		register_string_error(dev, L"Failed to read ContainerId property from device node");
+		goto end;
+	}
+
+	memcpy(container_id, container_guid, sizeof(GUID));
+
+	register_string_error(dev, NULL);
 
 end:
 	free(interface_path);
 	free(device_id);
+	free(container_guid);
 
-	return cr == CR_SUCCESS ? 0 : -1;
+	return (dev->last_error_str == NULL) ? 0 : -1;
 }
 
 
