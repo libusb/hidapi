@@ -470,7 +470,7 @@ extern "C" {
 		*/
 		int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen);
 
-		/** @brief Get The stuct #hid_device_info from a HID device.
+		/** @brief Get The struct #hid_device_info from a HID device.
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().

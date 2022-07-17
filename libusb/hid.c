@@ -922,7 +922,7 @@ static void *read_thread(void *param)
 }
 
 
-static int hidapi_initialize_device(hid_device *dev, char* path, const struct libusb_interface_descriptor *intf_desc)
+static int hidapi_initialize_device(hid_device *dev, const struct libusb_interface_descriptor *intf_desc)
 {
 	int i =0;
 	int res = 0;
@@ -931,7 +931,7 @@ static int hidapi_initialize_device(hid_device *dev, char* path, const struct li
 
 	dev->device_info = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
 	dev->device_info->next = NULL;
-	dev->device_info->path = path;
+	// dev->device_info->path is set by the caller
 	fill_device_info_for_device(dev->device_handle, dev->device_info, &desc);
 
 #ifdef DETACH_KERNEL_DRIVER
@@ -1046,14 +1046,17 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 							free(dev_path);
 							break;
 						}
-						good_open = hidapi_initialize_device(dev, dev_path, intf_desc);
+						good_open = hidapi_initialize_device(dev, intf_desc);
 						if (!good_open)
 							libusb_close(dev->device_handle);
 
-						// dev_path is owned by dev now
-					} else {
-						free(dev_path);
+						if (dev->device_info) {
+							dev->device_info->path = dev_path;
+							dev_path = NULL;
+						}
+
 					}
+					free(dev_path);
 				}
 			}
 		}
@@ -1083,7 +1086,6 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 	const struct libusb_interface_descriptor *selected_intf_desc = NULL;
 	int res = 0;
 	int j = 0, k = 0;
-	char* path;
 
 	if(hid_init() < 0)
 		return NULL;
@@ -1129,9 +1131,12 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 		goto err;
 	}
 
-	path = make_path(libusb_get_device(dev->device_handle), selected_intf_desc->bInterfaceNumber, conf_desc->bConfigurationValue);
-	if (!hidapi_initialize_device(dev, path, selected_intf_desc))
+	if (!hidapi_initialize_device(dev,  selected_intf_desc))
 		goto err;
+
+	if (dev->device_info) {
+		dev->device_info->path = make_path(libusb_get_device(dev->device_handle), selected_intf_desc->bInterfaceNumber, conf_desc->bConfigurationValue);
+	}
 
 	return dev;
 
@@ -1141,7 +1146,6 @@ err:
 	if (dev->device_handle)
 		libusb_close(dev->device_handle);
 	free_hid_device(dev);
-	// If path is set it, ownership was given to hidapi_initialize_device
 #else
 	(void)sys_dev;
 	(void)interface_num;
