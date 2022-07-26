@@ -888,8 +888,6 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	/* If we have a good handle, return it. */
 	if (dev->device_handle >= 0) {
-		dev->device_info = get_device_info_for_hid_device(dev);
-
 		/* Get the report descriptor */
 		int res, desc_size = 0;
 		struct hidraw_report_descriptor rpt_desc;
@@ -1067,9 +1065,10 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
+	struct hid_device_info *info = hid_get_device_info(dev);
+	if (!info)
 	{
-		register_device_error(dev, "NULL device/info");
+		// hid_get_device_info will have set an error already
 		return -1;
 	}
 
@@ -1079,7 +1078,7 @@ int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *st
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
+	wcsncpy(string, info->manufacturer_string, maxlen);
 	string[maxlen - 1] = L'\0';
 
 	return 0;
@@ -1087,9 +1086,10 @@ int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *st
 
 int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
+	struct hid_device_info *info = hid_get_device_info(dev);
+	if (!info)
 	{
-		register_device_error(dev, "NULL device/info");
+		// hid_get_device_info will have set an error already
 		return -1;
 	}
 
@@ -1099,7 +1099,7 @@ int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string,
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->product_string, maxlen);
+	wcsncpy(string, info->product_string, maxlen);
 	string[maxlen - 1] = L'\0';
 
 	return 0;
@@ -1107,9 +1107,10 @@ int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string,
 
 int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info)
+	struct hid_device_info *info = hid_get_device_info(dev);
+	if (!info)
 	{
-		register_device_error(dev, "NULL device/info");
+		// hid_get_device_info will have set an error already
 		return -1;
 	}
 
@@ -1119,7 +1120,7 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->serial_number, maxlen);
+	wcsncpy(string, info->serial_number, maxlen);
 	string[maxlen - 1] = L'\0';
 
 	return 0;
@@ -1129,10 +1130,11 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
 	if (!dev->device_info)
 	{
-		register_device_error(dev, "NULL device/info");
-		return NULL;
+		// Lazy initialize device_info
+		dev->device_info = get_device_info_for_hid_device(dev);
 	}
 
+	// get_device_info_for_hid_device will set an error if needed
 	return dev->device_info;
 }
 
