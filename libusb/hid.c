@@ -612,7 +612,7 @@ static void fill_device_info_for_device(libusb_device_handle *handle, struct hid
 				if (res >= 0) {
 					unsigned short page=0, usage=0;
 					/* Parse the usage and usage page
-						out of the report descriptor. */
+					   out of the report descriptor. */
 					get_usage(data, res,  &page, &usage);
 					cur_dev->usage_page = page;
 					cur_dev->usage = usage;
