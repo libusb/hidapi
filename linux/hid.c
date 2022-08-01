@@ -495,7 +495,7 @@ next_line:
 }
 
 
-static void get_device_info_for_device(struct udev_device *raw_dev, unsigned short vendor_id, unsigned short product_id, struct hid_device_info ** first_dev, struct hid_device_info ** last_dev)
+static void create_device_info_for_device(struct udev_device *raw_dev, unsigned short vendor_id, unsigned short product_id, struct hid_device_info ** first_dev, struct hid_device_info ** last_dev)
 {
 	struct hid_device_info *cur_dev = NULL;
 	struct hid_device_info *prev_dev = NULL; /* previous device */
@@ -684,7 +684,7 @@ static void get_device_info_for_device(struct udev_device *raw_dev, unsigned sho
 	*last_dev = cur_dev;
 }
 
-struct hid_device_info* get_device_info_for_hid_device(hid_device *dev) {
+struct hid_device_info* create_device_info_for_hid_device(hid_device *dev) {
 	struct udev *udev;
 	struct udev_device *udev_dev;
 	struct stat s;
@@ -711,7 +711,7 @@ struct hid_device_info* get_device_info_for_hid_device(hid_device *dev) {
 	udev_dev = udev_device_new_from_devnum(udev, 'c', s.st_rdev);
 	if (udev_dev) {
 		struct hid_device_info * tmp;
-		get_device_info_for_device(udev_dev, 0, 0, &root, &tmp);
+		create_device_info_for_device(udev_dev, 0, 0, &root, &tmp);
 	}
 
 	udev_device_unref(udev_dev);
@@ -790,7 +790,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 		struct hid_device_info * first_dev = NULL;
 		struct hid_device_info * last_dev = NULL;
-		get_device_info_for_device(raw_dev, vendor_id, product_id, &first_dev, &last_dev);
+		create_device_info_for_device(raw_dev, vendor_id, product_id, &first_dev, &last_dev);
 		if (first_dev) {
 			if (cur_dev) {
 				cur_dev->next = first_dev;
@@ -1131,10 +1131,10 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 	if (!dev->device_info)
 	{
 		// Lazy initialize device_info
-		dev->device_info = get_device_info_for_hid_device(dev);
+		dev->device_info = create_device_info_for_hid_device(dev);
 	}
 
-	// get_device_info_for_hid_device will set an error if needed
+	// create_device_info_for_hid_device will set an error if needed
 	return dev->device_info;
 }
 
