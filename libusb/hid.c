@@ -927,7 +927,7 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	int i =0;
 	int res = 0;
 	struct libusb_device_descriptor desc;
-	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);	
+	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);
 
 	dev->device_info = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
 	dev->device_info->next = NULL;
