@@ -478,6 +478,7 @@ extern "C" {
 			@returns
 				This function returns a pointer to the struct #hid_device_info
 				for this hid_device, or NULL in the case of failure.
+				Call hid_error(dev) to get the failure reason.
 				This struct is valid until the device is closed with hid_close().
 		*/
 		HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev);
