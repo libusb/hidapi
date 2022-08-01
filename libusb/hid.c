@@ -552,8 +552,10 @@ int HID_API_EXPORT hid_exit(void)
 }
 
 
-static void fill_device_info_for_device(libusb_device_handle *handle, struct hid_device_info * cur_dev, struct libusb_device_descriptor *desc)
+static struct hid_device_info* create_device_info_for_device(libusb_device_handle *handle, struct libusb_device_descriptor *desc)
 {
+	struct hid_device_info* cur_dev = calloc(1, sizeof(struct hid_device_info));
+
 	/* VID/PID */
 	cur_dev->vendor_id = desc->idVendor;
 	cur_dev->product_id = desc->idProduct;
@@ -638,6 +640,8 @@ static void fill_device_info_for_device(libusb_device_handle *handle, struct hid
 }
 #endif /* INVASIVE_GET_USAGE */
 	}
+
+	return cur_dev;
 }
 
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
@@ -682,22 +686,8 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 					intf_desc = &intf->altsetting[k];
 					if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID) {
 						int interface_num = intf_desc->bInterfaceNumber;
-						struct hid_device_info *tmp;
 
 						/* VID/PID match. Create the record. */
-						tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
-						if (cur_dev) {
-							cur_dev->next = tmp;
-						}
-						else {
-							root = tmp;
-						}
-						cur_dev = tmp;
-
-						/* Fill out the record */
-						cur_dev->next = NULL;
-						cur_dev->path = make_path(dev, interface_num, conf_desc->bConfigurationValue);
-
 						res = libusb_open(dev, &handle);
 
 #ifdef __ANDROID__
@@ -713,7 +703,18 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 						}
 #endif
 
-						fill_device_info_for_device(handle, cur_dev, &desc);
+						struct hid_device_info *tmp = create_device_info_for_device(handle, &desc);
+						if (cur_dev) {
+							cur_dev->next = tmp;
+						}
+						else {
+							root = tmp;
+						}
+						cur_dev = tmp;
+
+						/* Fill out the record */
+						cur_dev->next = NULL;
+						cur_dev->path = make_path(dev, interface_num, conf_desc->bConfigurationValue);
 
 						if (res >= 0) 
 							libusb_close(handle);
@@ -929,10 +930,9 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	struct libusb_device_descriptor desc;
 	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);
 
-	dev->device_info = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
-	dev->device_info->next = NULL;
+	dev->device_info = create_device_info_for_device(dev->device_handle, &desc);
 	// dev->device_info->path is set by the caller
-	fill_device_info_for_device(dev->device_handle, dev->device_info, &desc);
+	dev->device_info->next = NULL;
 
 #ifdef DETACH_KERNEL_DRIVER
 	/* Detach the kernel driver, but only if the
