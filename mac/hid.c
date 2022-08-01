@@ -155,8 +155,8 @@ static hid_device *new_hid_device(void)
 	dev->source = NULL;
 	dev->input_report_buf = NULL;
 	dev->input_reports = NULL;
-	dev->shutdown_thread = 0;
 	dev->device_info = NULL;
+	dev->shutdown_thread = 0;
 
 	/* Thread objects */
 	pthread_mutex_init(&dev->mutex, NULL);
