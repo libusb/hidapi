@@ -703,12 +703,12 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 #ifdef __ANDROID__
 						if (handle) {
 							/* There is (a potential) libusb Android backend, in which
-							device descriptor is not accurate up until the device is opened.
-							https://github.com/libusb/libusb/pull/874#discussion_r632801373
-							A workaround is to re-read the descriptor again.
-							Even if it is not going to be accepted into libusb master,
-							having it here won't do any harm, since reading the device descriptor
-							is as cheap as copy 18 bytes of data. */
+							   device descriptor is not accurate up until the device is opened.
+							   https://github.com/libusb/libusb/pull/874#discussion_r632801373
+							   A workaround is to re-read the descriptor again.
+							   Even if it is not going to be accepted into libusb master,
+							   having it here won't do any harm, since reading the device descriptor
+							   is as cheap as copy 18 bytes of data. */
 							libusb_get_device_descriptor(dev, &desc);
 						}
 #endif

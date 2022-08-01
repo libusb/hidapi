@@ -1164,16 +1164,16 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
+	if (!string || !maxlen)
+	{
+		// register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	struct hid_device_info *info = hid_get_device_info(dev);
 	if (!info)
 	{
 		// hid_get_device_info will have set an error already
-		return -1;
-	}
-
-	if (!string || !maxlen)
-	{
-		// register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
@@ -1185,16 +1185,16 @@ int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *st
 
 int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
+	if (!string || !maxlen)
+	{
+		// register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	struct hid_device_info *info = hid_get_device_info(dev);
 	if (!info)
 	{
 		// hid_get_device_info will have set an error already
-		return -1;
-	}
-
-	if (!string || !maxlen)
-	{
-		// register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
@@ -1206,16 +1206,16 @@ int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string,
 
 int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
+	if (!string || !maxlen)
+	{
+		// register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	struct hid_device_info *info = hid_get_device_info(dev);
 	if (!info)
 	{
 		// hid_get_device_info will have set an error already
-		return -1;
-	}
-
-	if (!string || !maxlen)
-	{
-		// register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
