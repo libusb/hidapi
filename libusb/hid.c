@@ -1131,7 +1131,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 		goto err;
 	}
 
-	if (!hidapi_initialize_device(dev,  selected_intf_desc))
+	if (!hidapi_initialize_device(dev, selected_intf_desc))
 		goto err;
 
 	if (dev->device_info) {
