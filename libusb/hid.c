@@ -617,7 +617,7 @@ static struct hid_device_info * create_device_info_for_device(libusb_device_hand
 #ifdef DETACH_KERNEL_DRIVER
 		int detached = 0;
 		/* Usage Page and Usage */
-		res = libusb_kernel_driver_active(handle, interface_num);
+		int res = libusb_kernel_driver_active(handle, interface_num);
 		if (res == 1) {
 			res = libusb_detach_kernel_driver(handle, interface_num);
 			if (res < 0)
