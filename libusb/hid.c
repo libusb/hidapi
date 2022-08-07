@@ -604,7 +604,7 @@ static void invasive_fill_device_info_usage(struct hid_device_info * cur_dev, li
 
 	res = libusb_claim_interface(handle, interface_num);
 	if (res >= 0) {
-		fill_device_info_usage(cur_dev, handle, interface_num)
+		fill_device_info_usage(cur_dev, handle, interface_num);
 
 		/* Release the interface */
 		res = libusb_release_interface(handle, interface_num);
