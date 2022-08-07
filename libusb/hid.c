@@ -567,7 +567,7 @@ int HID_API_EXPORT hid_exit(void)
  */
 static void fill_device_info_usage(struct hid_device_info * cur_dev, libusb_device_handle *handle, int interface_num)
 {
-	unsigned char data[256];
+	unsigned char data[4096];
 	unsigned short page = 0, usage = 0;
 
 	/* Get the HID Report Descriptor. */
