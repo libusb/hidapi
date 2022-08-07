@@ -565,7 +565,7 @@ int HID_API_EXPORT hid_exit(void)
 /**
  * Requires an opened device with *claimed interface*.
  */
-static void fill_device_info_usage(struct hid_device_info * cur_dev, libusb_device_handle *handle, int interface_num)
+static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num)
 {
 	unsigned char data[4096];
 	unsigned short page = 0, usage = 0;
@@ -585,7 +585,7 @@ static void fill_device_info_usage(struct hid_device_info * cur_dev, libusb_devi
 }
 
 #ifdef INVASIVE_GET_USAGE
-static void invasive_fill_device_info_usage(struct hid_device_info * cur_dev, libusb_device_handle *handle, int interface_num)
+static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num)
 {
 	int res = 0;
 
