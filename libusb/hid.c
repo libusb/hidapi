@@ -227,7 +227,6 @@ static void register_error(hid_device *dev, const char *op)
 }
 #endif
 
-#ifdef INVASIVE_GET_USAGE
 /* Get bytes from a HID Report Descriptor.
    Only call with a num_bytes of 0, 1, 2, or 4. */
 static uint32_t get_bytes(uint8_t *rpt, size_t len, size_t num_bytes, size_t cur)
@@ -327,7 +326,6 @@ static int get_usage(uint8_t *report_descriptor, size_t size,
 
 	return -1; /* failure */
 }
-#endif /* INVASIVE_GET_USAGE */
 
 #if defined(__FreeBSD__) && __FreeBSD__ < 10
 /* The libusb version included in FreeBSD < 10 doesn't have this function. In
@@ -564,7 +562,73 @@ int HID_API_EXPORT hid_exit(void)
 	return 0;
 }
 
+/**
+ * Requires an opened device with *claimed interface*.
+ */
+static void fill_device_info_usage(struct hid_device_info * cur_dev, libusb_device_handle *handle, int interface_num)
+{
+	unsigned char data[256];
+	unsigned short page = 0, usage = 0;
 
+	/* Get the HID Report Descriptor. */
+	res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
+	if (res >= 0) {
+		/* Parse the usage and usage page
+		   out of the report descriptor. */
+		get_usage(data, res,  &page, &usage);
+	}
+	else
+		LOG("libusb_control_transfer() for getting the HID descriptor failed with %d: %s\n", res, libusb_error_name(res));
+
+	cur_dev->usage_page = page;
+	cur_dev->usage = usage;
+}
+
+#ifdef INVASIVE_GET_USAGE
+static void invasive_fill_device_info_usage(struct hid_device_info * cur_dev, libusb_device_handle *handle, int interface_num)
+{
+	int res = 0;
+
+#ifdef DETACH_KERNEL_DRIVER
+	int detached = 0;
+	/* Usage Page and Usage */
+	res = libusb_kernel_driver_active(handle, interface_num);
+	if (res == 1) {
+		res = libusb_detach_kernel_driver(handle, interface_num);
+		if (res < 0)
+			LOG("Couldn't detach kernel driver, even though a kernel driver was attached.\n");
+		else
+			detached = 1;
+	}
+#endif
+
+	res = libusb_claim_interface(handle, interface_num);
+	if (res >= 0) {
+		fill_device_info_usage(cur_dev, handle, interface_num)
+
+		/* Release the interface */
+		res = libusb_release_interface(handle, interface_num);
+		if (res < 0)
+			LOG("Can't release the interface.\n");
+	}
+	else
+		LOG("Can't claim interface %d\n", res);
+
+#ifdef DETACH_KERNEL_DRIVER
+	/* Re-attach kernel driver if necessary. */
+	if (detached) {
+		res = libusb_attach_kernel_driver(handle, interface_num);
+		if (res < 0)
+			LOG("Couldn't re-attach kernel driver.\n");
+	}
+#endif
+}
+#endif /* INVASIVE_GET_USAGE */
+
+/**
+ * Create and fill up most of hid_device_info fields.
+ * usage_page/usage is not filled up.
+ */
 static struct hid_device_info * create_device_info_for_device(libusb_device_handle *handle, struct libusb_device_descriptor *desc, int config_number, int interface_num)
 {
 	struct hid_device_info *cur_dev = calloc(1, sizeof(struct hid_device_info));
@@ -594,70 +658,6 @@ static struct hid_device_info * create_device_info_for_device(libusb_device_hand
 		cur_dev->manufacturer_string = get_usb_string(handle, desc->iManufacturer);
 	if (desc->iProduct > 0)
 		cur_dev->product_string = get_usb_string(handle, desc->iProduct);
-
-#ifdef INVASIVE_GET_USAGE
-	{
-		/*
-		This section is removed because it is too
-		invasive on the system. Getting a Usage Page
-		and Usage requires parsing the HID Report
-		descriptor. Getting a HID Report descriptor
-		involves claiming the interface. Claiming the
-		interface involves detaching the kernel driver.
-		Detaching the kernel driver is hard on the system
-		because it will unclaim interfaces (if another
-		app has them claimed) and the re-attachment of
-		the driver will sometimes change /dev entry names.
-		It is for these reasons that this section is
-		#if 0. For composite devices, use the interface
-		field in the hid_device_info struct to distinguish
-		between interfaces. */
-
-		unsigned char data[256];
-#ifdef DETACH_KERNEL_DRIVER
-		int detached = 0;
-		/* Usage Page and Usage */
-		int res = libusb_kernel_driver_active(handle, interface_num);
-		if (res == 1) {
-			res = libusb_detach_kernel_driver(handle, interface_num);
-			if (res < 0)
-				LOG("Couldn't detach kernel driver, even though a kernel driver was attached.\n");
-			else
-				detached = 1;
-		}
-#endif
-		res = libusb_claim_interface(handle, interface_num);
-		if (res >= 0) {
-			/* Get the HID Report Descriptor. */
-			res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
-			if (res >= 0) {
-				unsigned short page=0, usage=0;
-				/* Parse the usage and usage page
-				   out of the report descriptor. */
-				get_usage(data, res,  &page, &usage);
-				cur_dev->usage_page = page;
-				cur_dev->usage = usage;
-			}
-			else
-				LOG("libusb_control_transfer() for getting the HID report failed with %d\n", res);
-
-			/* Release the interface */
-			res = libusb_release_interface(handle, interface_num);
-			if (res < 0)
-				LOG("Can't release the interface.\n");
-		}
-		else
-			LOG("Can't claim interface %d\n", res);
-#ifdef DETACH_KERNEL_DRIVER
-		/* Re-attach kernel driver if necessary. */
-		if (detached) {
-			res = libusb_attach_kernel_driver(handle, interface_num);
-			if (res < 0)
-				LOG("Couldn't re-attach kernel driver.\n");
-		}
-#endif
-	}
-#endif /* INVASIVE_GET_USAGE */
 
 	return cur_dev;
 }
@@ -721,15 +721,38 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 #endif
 
 						tmp = create_device_info_for_device(handle, &desc, conf_desc->bConfigurationValue, intf_desc->bInterfaceNumber);
-						if (cur_dev) {
-							cur_dev->next = tmp;
-						}
-						else {
-							root = tmp;
-						}
-						cur_dev = tmp;
+						if (tmp) {
+#ifdef INVASIVE_GET_USAGE
+							/* TODO: have a runtime check for this section. */
 
-						if (res >= 0) 
+							/*
+							This section is removed because it is too
+							invasive on the system. Getting a Usage Page
+							and Usage requires parsing the HID Report
+							descriptor. Getting a HID Report descriptor
+							involves claiming the interface. Claiming the
+							interface involves detaching the kernel driver.
+							Detaching the kernel driver is hard on the system
+							because it will unclaim interfaces (if another
+							app has them claimed) and the re-attachment of
+							the driver will sometimes change /dev entry names.
+							It is for these reasons that this section is
+							optional. For composite devices, use the interface
+							field in the hid_device_info struct to distinguish
+							between interfaces. */
+							invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber);
+#endif /* INVASIVE_GET_USAGE */
+
+							if (cur_dev) {
+								cur_dev->next = tmp;
+							}
+							else {
+								root = tmp;
+							}
+							cur_dev = tmp;
+						}
+
+						if (res >= 0)
 							libusb_close(handle);
 					}
 				} /* altsettings */
@@ -1486,6 +1509,10 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 
 		dev->device_info = create_device_info_for_device(dev->device_handle, &desc, dev->config_number, dev->interface);
 		// device error already set by create_device_info_for_device, if any
+
+		if (dev->device_info) {
+			fill_device_info_usage(dev->device_info, dev->device_handle, dev->interface);
+		}
 	}
 
 	return dev->device_info;
