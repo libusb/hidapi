@@ -578,7 +578,7 @@ static void fill_device_info_usage(struct hid_device_info * cur_dev, libusb_devi
 		get_usage(data, res,  &page, &usage);
 	}
 	else
-		LOG("libusb_control_transfer() for getting the HID descriptor failed with %d: %s\n", res, libusb_error_name(res));
+		LOG("libusb_control_transfer() for getting the HID report descriptor failed with %d: %s\n", res, libusb_error_name(res));
 
 	cur_dev->usage_page = page;
 	cur_dev->usage = usage;
