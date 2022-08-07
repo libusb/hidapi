@@ -62,6 +62,13 @@ void print_device(struct hid_device_info *cur_dev) {
 	printf("\n");
 }
 
+void print_devices(struct hid_device_info *cur_dev) {
+	while (cur_dev) {
+		print_device(cur_dev);
+		cur_dev = cur_dev->next;
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	(void)argc;
@@ -74,7 +81,7 @@ int main(int argc, char* argv[])
 	hid_device *handle;
 	int i;
 
-	struct hid_device_info *devs, *cur_dev;
+	struct hid_device_info *devs;
 
 	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
 	if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
@@ -94,11 +101,7 @@ int main(int argc, char* argv[])
 #endif
 
 	devs = hid_enumerate(0x0, 0x0);
-	cur_dev = devs;
-	while (cur_dev) {
-		print_device(cur_dev);
-		cur_dev = cur_dev->next;
-	}
+	print_devices(devs);
 	hid_free_enumeration(devs);
 
 	// Set up the command buffer.
@@ -142,7 +145,7 @@ int main(int argc, char* argv[])
 	if (info == NULL) {
 		printf("Unable to get device info\n");
 	} else {
-		print_device(info);
+		print_devices(info);
 	}
 
 	// Read Indexed String 1
