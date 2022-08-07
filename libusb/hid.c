@@ -740,7 +740,9 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							optional. For composite devices, use the interface
 							field in the hid_device_info struct to distinguish
 							between interfaces. */
-							invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber);
+							if (handle) {
+								invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber);
+							}
 #endif /* INVASIVE_GET_USAGE */
 
 							if (cur_dev) {
