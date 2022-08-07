@@ -571,7 +571,7 @@ static void fill_device_info_usage(struct hid_device_info * cur_dev, libusb_devi
 	unsigned short page = 0, usage = 0;
 
 	/* Get the HID Report Descriptor. */
-	res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
+	int res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
 	if (res >= 0) {
 		/* Parse the usage and usage page
 		   out of the report descriptor. */
