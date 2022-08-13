@@ -48,7 +48,7 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 12
+#define HID_API_VERSION_MINOR 13
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
@@ -472,6 +472,8 @@ extern "C" {
 
 		/** @brief Get The struct #hid_device_info from a HID device.
 
+			Since version 0.13.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 13, 0)
+
 			@ingroup API
 			@param dev A device handle returned from hid_open().
 
@@ -483,7 +485,7 @@ extern "C" {
 
 			@note The returned object is owned by the @p dev, and SHOULD NOT be freed by the user.
 		*/
-		HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev);
+		struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_get_device_info(hid_device *dev);
 
 		/** @brief Get a string from a HID device, based on its string index.
 
