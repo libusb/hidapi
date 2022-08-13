@@ -1,12 +1,13 @@
 /*******************************************************
- Windows HID simplification
+ HIDAPI - Multi-Platform library for
+ communication with HID devices.
 
  Alan Ott
  Signal 11 Software
 
- 8/22/2009
+ libusb/hidapi Team
 
- Copyright 2009
+ Copyright 2022.
 
  This contents of this file may be used by anyone
  for any reason without any conditions and may be
@@ -179,8 +180,7 @@ int main(int argc, char* argv[])
 	buf[0] = 0x2;
 	res = hid_get_feature_report(handle, buf, sizeof(buf));
 	if (res < 0) {
-		printf("Unable to get a feature report.\n");
-		printf("%ls", hid_error(handle));
+		printf("Unable to get a feature report: %ls\n", hid_error(handle));
 	}
 	else {
 		// Print out the returned buffer.
@@ -197,8 +197,7 @@ int main(int argc, char* argv[])
 	buf[1] = 0x80;
 	res = hid_write(handle, buf, 17);
 	if (res < 0) {
-		printf("Unable to write()\n");
-		printf("Error: %ls\n", hid_error(handle));
+		printf("Unable to write(): %ls\n", hid_error(handle));
 	}
 
 
@@ -206,31 +205,45 @@ int main(int argc, char* argv[])
 	buf[0] = 0x1;
 	buf[1] = 0x81;
 	hid_write(handle, buf, 17);
-	if (res < 0)
-		printf("Unable to write() (2)\n");
+	if (res < 0) {
+		printf("Unable to write()/2: %ls\n", hid_error(handle));
+	}
 
 	// Read requested state. hid_read() has been set to be
 	// non-blocking by the call to hid_set_nonblocking() above.
 	// This loop demonstrates the non-blocking nature of hid_read().
 	res = 0;
+	i = 0;
 	while (res == 0) {
 		res = hid_read(handle, buf, sizeof(buf));
-		if (res == 0)
+		if (res == 0) {
 			printf("waiting...\n");
-		if (res < 0)
-			printf("Unable to read()\n");
-		#ifdef _WIN32
+		}
+		if (res < 0) {
+			printf("Unable to read(): %ls\n", hid_error(handle));
+			break;
+		}
+
+		i++;
+		if (i >= 10) { /* 10 tries by 500 ms - 5 seconds of waiting*/
+			printf("read() timeout\n");
+			break;
+		}
+
+#ifdef _WIN32
 		Sleep(500);
-		#else
+#else
 		usleep(500*1000);
-		#endif
+#endif
 	}
 
-	printf("Data read:\n   ");
-	// Print out the returned buffer.
-	for (i = 0; i < res; i++)
-		printf("%02x ", (unsigned int) buf[i]);
-	printf("\n");
+	if (res > 0) {
+		printf("Data read:\n   ");
+		// Print out the returned buffer.
+		for (i = 0; i < res; i++)
+			printf("%02x ", (unsigned int) buf[i]);
+		printf("\n");
+	}
 
 	hid_close(handle);
 
