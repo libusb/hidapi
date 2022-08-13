@@ -629,7 +629,7 @@ static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, lib
  * Create and fill up most of hid_device_info fields.
  * usage_page/usage is not filled up.
  */
-static struct hid_device_info * create_device_info_for_device(libusb_device_handle *handle, struct libusb_device_descriptor *desc, int config_number, int interface_num)
+static struct hid_device_info * create_device_info_for_device(libusb_device *device, libusb_device_handle *handle, struct libusb_device_descriptor *desc, int config_number, int interface_num)
 {
 	struct hid_device_info *cur_dev = calloc(1, sizeof(struct hid_device_info));
 	if (cur_dev == NULL) {
@@ -644,11 +644,11 @@ static struct hid_device_info * create_device_info_for_device(libusb_device_hand
 
 	cur_dev->interface_number = interface_num;
 
+	cur_dev->path = make_path(device, config_number, interface_num);
+
 	if (!handle) {
 		return cur_dev;
 	}
-
-	cur_dev->path = make_path(libusb_get_device(handle), config_number, interface_num);
 
 	if (desc->iSerialNumber > 0)
 		cur_dev->serial_number = get_usb_string(handle, desc->iSerialNumber);
@@ -720,7 +720,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 						}
 #endif
 
-						tmp = create_device_info_for_device(handle, &desc, conf_desc->bConfigurationValue, intf_desc->bInterfaceNumber);
+						tmp = create_device_info_for_device(dev, handle, &desc, conf_desc->bConfigurationValue, intf_desc->bInterfaceNumber);
 						if (tmp) {
 #ifdef INVASIVE_GET_USAGE
 							/* TODO: have a runtime check for this section. */
@@ -1507,9 +1507,10 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
 	if (!dev->device_info) {
 		struct libusb_device_descriptor desc;
-		libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);
+		libusb_device *usb_device = libusb_get_device(dev->device_handle);
+		libusb_get_device_descriptor(usb_device, &desc);
 
-		dev->device_info = create_device_info_for_device(dev->device_handle, &desc, dev->config_number, dev->interface);
+		dev->device_info = create_device_info_for_device(usb_device, dev->device_handle, &desc, dev->config_number, dev->interface);
 		// device error already set by create_device_info_for_device, if any
 
 		if (dev->device_info) {
