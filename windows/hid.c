@@ -1141,13 +1141,13 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info) {
-		register_string_error(dev, L"NULL device info");
+	if (!string || !maxlen) {
+		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-	if (!string || !maxlen) {
-		register_string_error(dev, L"Zero buffer/length");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
@@ -1161,13 +1161,13 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info) {
-		register_string_error(dev, L"NULL device info");
+	if (!string || !maxlen) {
+		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-	if (!string || !maxlen) {
-		register_string_error(dev, L"Zero buffer/length");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
@@ -1181,13 +1181,13 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	if (!dev->device_info) {
-		register_string_error(dev, L"NULL device info");
+	if (!string || !maxlen) {
+		register_string_error(dev, L"Zero buffer/length");
 		return -1;
 	}
 
-	if (!string || !maxlen) {
-		register_string_error(dev, L"Zero buffer/length");
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
@@ -1197,6 +1197,16 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 	register_string_error(dev, NULL);
 
 	return 0;
+}
+
+HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev) {
+	if (!dev->device_info)
+	{
+		register_string_error(dev, L"NULL device info");
+		return NULL;
+	}
+
+	return dev->device_info;
 }
 
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
