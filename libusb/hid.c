@@ -151,6 +151,8 @@ struct hid_device_ {
 	/* The interface number of the HID */
 	int interface;
 
+	uint16_t report_descriptor_size;
+
 	/* Endpoint information */
 	int input_endpoint;
 	int output_endpoint;
@@ -565,13 +567,18 @@ int HID_API_EXPORT hid_exit(void)
 /**
  * Requires an opened device with *claimed interface*.
  */
-static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num)
+static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num, uint16_t report_descriptor_size)
 {
 	unsigned char data[4096];
 	unsigned short page = 0, usage = 0;
 
-	/* Get the HID Report Descriptor. */
-	int res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8)|interface_num, 0, data, sizeof(data), 5000);
+	if (report_descriptor_size > 4096)
+		report_descriptor_size = 4096;
+
+	/* Get the HID Report Descriptor.
+	   See USB HID Specificatin, sectin 7.1.1
+	*/
+	int res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8), interface_num, data, report_descriptor_size, 5000);
 	if (res >= 0) {
 		/* Parse the usage and usage page
 		   out of the report descriptor. */
@@ -585,7 +592,7 @@ static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_devic
 }
 
 #ifdef INVASIVE_GET_USAGE
-static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num)
+static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num, uint16_t report_descriptor_size)
 {
 	int res = 0;
 
@@ -604,7 +611,7 @@ static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, lib
 
 	res = libusb_claim_interface(handle, interface_num);
 	if (res >= 0) {
-		fill_device_info_usage(cur_dev, handle, interface_num);
+		fill_device_info_usage(cur_dev, handle, interface_num, report_descriptor_size);
 
 		/* Release the interface */
 		res = libusb_release_interface(handle, interface_num);
@@ -660,6 +667,35 @@ static struct hid_device_info * create_device_info_for_device(libusb_device *dev
 		cur_dev->product_string = get_usb_string(handle, desc->iProduct);
 
 	return cur_dev;
+}
+
+static uint16_t get_report_descriptor_size_from_interface_descriptors(const struct libusb_interface_descriptor *intf_desc)
+{
+	int i = 0;
+	uint16_t result = 4096;
+
+	/*
+	 "extra" contains a HID descriptor
+	 See section 6.2.1 of HID 1.1 specification.
+	*/
+
+	if (intf_desc->extra_length >= 7) {
+		/* TODO: it actually may contain several descriptors. Iterate and find the HID one. */
+		if (intf_desc->extra[1] == LIBUSB_DT_HID) { /* bDescriptorType */
+			for (i = 0; i < intf_desc->extra[5]; i++) { /* bNumDescriptors */
+				if (intf_desc->extra_length < (6 + 3 * (i + 1))) {
+					break; /* looks like a broken descriptor */
+				}
+
+				if (intf_desc->extra[6 + 3 * i] == LIBUSB_DT_REPORT) {
+					result = (uint16_t)intf_desc->extra[6 + 3 * i + 2] << 8 | intf_desc->extra[6 + 3 * i + 1];
+					break;
+				}
+			}
+		}
+	}
+
+	return result;
 }
 
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
@@ -741,7 +777,9 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							field in the hid_device_info struct to distinguish
 							between interfaces. */
 							if (handle) {
-								invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber);
+								uint16_t report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
+
+								invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber, report_descriptor_size);
 							}
 #endif /* INVASIVE_GET_USAGE */
 
@@ -1003,6 +1041,8 @@ static int hidapi_initialize_device(hid_device *dev, int config_number, const st
 	/* Store off the USB information */
 	dev->config_number = config_number;
 	dev->interface = intf_desc->bInterfaceNumber;
+
+	dev->report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
 
 	dev->input_endpoint = 0;
 	dev->input_ep_max_packet_size = 0;
@@ -1522,7 +1562,7 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 		// device error already set by create_device_info_for_device, if any
 
 		if (dev->device_info) {
-			fill_device_info_usage(dev->device_info, dev->device_handle, dev->interface);
+			fill_device_info_usage(dev->device_info, dev->device_handle, dev->interface, dev->report_descriptor_size);
 		}
 	}
 
