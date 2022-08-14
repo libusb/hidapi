@@ -984,6 +984,14 @@ static int hidapi_initialize_device(hid_device *dev, int config_number, const st
 	res = libusb_claim_interface(dev->device_handle, intf_desc->bInterfaceNumber);
 	if (res < 0) {
 		LOG("can't claim interface %d: %d\n", intf_desc->bInterfaceNumber, res);
+
+#ifdef DETACH_KERNEL_DRIVER
+		if (dev->is_driver_detached) {
+			res = libusb_attach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
+			if (res < 0)
+				LOG("Failed to reattach the driver to kernel.\n");
+		}
+#endif
 		return 0;
 	}
 
