@@ -672,27 +672,51 @@ static struct hid_device_info * create_device_info_for_device(libusb_device *dev
 static uint16_t get_report_descriptor_size_from_interface_descriptors(const struct libusb_interface_descriptor *intf_desc)
 {
 	int i = 0;
+	int found_hid_report_descriptor = 0;
 	uint16_t result = 4096;
+	const unsigned char *extra = intf_desc->extra;
+	int extra_length = intf_desc->extra_length;
 
 	/*
 	 "extra" contains a HID descriptor
 	 See section 6.2.1 of HID 1.1 specification.
 	*/
 
-	if (intf_desc->extra_length >= 7) {
-		/* TODO: it actually may contain several descriptors. Iterate and find the HID one. */
-		if (intf_desc->extra[1] == LIBUSB_DT_HID) { /* bDescriptorType */
-			for (i = 0; i < intf_desc->extra[5]; i++) { /* bNumDescriptors */
-				if (intf_desc->extra_length < (6 + 3 * (i + 1))) {
-					break; /* looks like a broken descriptor */
-				}
-
-				if (intf_desc->extra[6 + 3 * i] == LIBUSB_DT_REPORT) {
-					result = (uint16_t)intf_desc->extra[6 + 3 * i + 2] << 8 | intf_desc->extra[6 + 3 * i + 1];
+	while (extra_length >= 2) { /* Descriptor header: bLength/bDescriptorType */
+		if (extra[1] == LIBUSB_DT_HID) { /* bDescriptorType */
+			if (extra_length < 6) {
+				LOG("Broken HID descriptor: not enough data\n");
+				break;
+			}
+			unsigned char bNumDescriptors = extra[5];
+			if (extra_length < (6 + 3 * bNumDescriptors)) {
+				LOG("Broken HID descriptor: not enough data for Report metadata\n");
+				break;
+			}
+			for (i = 0; i < bNumDescriptors; i++) {
+				if (extra[6 + 3 * i] == LIBUSB_DT_REPORT) {
+					result = (uint16_t)extra[6 + 3 * i + 2] << 8 | extra[6 + 3 * i + 1];
+					found_hid_report_descriptor = 1;
 					break;
 				}
 			}
+
+			if (!found_hid_report_descriptor) {
+				/* We expect to find exactly 1 HID descriptor (LIBUSB_DT_HID)
+				   which should contain exactly one HID Report Descriptor metadata (LIBUSB_DT_REPORT). */
+				LOG("Broken HID descriptor: missing Report descriptor\n");
+			}
+			break;
 		}
+
+		if (extra[0] == 0) { /* bLength */
+			LOG("Broken HID Interface descriptors: zero-sized descriptor\n");
+			break;
+		}
+
+		/* Iterate over to the next Descriptor */
+		extra_length -= extra[0];
+		extra += extra[0];
 	}
 
 	return result;
