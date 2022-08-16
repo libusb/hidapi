@@ -407,7 +407,7 @@ extern "C" {
 			start in data[1].
 
 			@ingroup API
-			@param device A device handle returned from hid_open().
+			@param dev A device handle returned from hid_open().
 			@param data A buffer to put the read data into, including
 				the Report ID. Set the first byte of @p data[] to the
 				Report ID of the report to be read, or set it to zero
