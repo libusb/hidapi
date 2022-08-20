@@ -384,7 +384,7 @@ static int get_hid_report_descriptor(const char *rpt_path, struct hidraw_report_
 	int rpt_handle;
 	ssize_t res;
 
-	rpt_handle = open(rpt_path, O_RDONLY);
+	rpt_handle = open(rpt_path, O_RDONLY | O_CLOEXEC);
 	if (rpt_handle < 0) {
 		register_global_error_format("open failed (%s): %s", rpt_path, strerror(errno));
 		return -1;
@@ -473,7 +473,7 @@ static int parse_hid_vid_pid_from_uevent_path(const char *uevent_path, unsigned 
 	int handle;
 	ssize_t res;
 
-	handle = open(uevent_path, O_RDONLY);
+	handle = open(uevent_path, O_RDONLY | O_CLOEXEC);
 	if (handle < 0) {
 		register_global_error_format("open failed (%s): %s", uevent_path, strerror(errno));
 		return 0;
@@ -981,7 +981,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	dev = new_hid_device();
 
-	dev->device_handle = open(path, O_RDWR);
+	dev->device_handle = open(path, O_RDWR | O_CLOEXEC);
 
 	/* If we have a good handle, return it. */
 	if (dev->device_handle >= 0) {
