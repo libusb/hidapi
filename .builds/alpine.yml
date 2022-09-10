@@ -6,18 +6,29 @@ packages:
 - eudev-dev
 - libusb-dev
 - linux-headers
+- cmake
+- ninja
 sources:
 - https://github.com/libusb/hidapi
 tasks:
-- setup: |
+- configure: |
     cd hidapi
+    echo Configure Autotools build
     ./bootstrap
     ./configure
-- build: |
+    echo Configure CMake build
+    mkdir -p build install_cmake
+    cmake -GNinja -B build -S . -DCMAKE_INSTALL_PREFIX=install_cmake
+- build-autotools: |
     cd hidapi
     make
     make DESTDIR=$PWD/root install
     make clean
+- build-cmake: |
+    cd hidapi/build
+    ninja
+    ninja install
+    ninja clean
 - build-manual: |
     cd hidapi/linux
     make -f Makefile-manual
