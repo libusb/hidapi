@@ -1,12 +1,13 @@
 /*******************************************************
- Windows HID simplification
+ HIDAPI - Multi-Platform library for
+ communication with HID devices.
 
  Alan Ott
  Signal 11 Software
 
- 8/22/2009
+ libusb/hidapi Team
 
- Copyright 2009
+ Copyright 2022.
 
  This contents of this file may be used by anyone
  for any reason without any conditions and may be
@@ -51,6 +52,24 @@
 #endif
 //
 
+void print_device(struct hid_device_info *cur_dev) {
+	printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number);
+	printf("\n");
+	printf("  Manufacturer: %ls\n", cur_dev->manufacturer_string);
+	printf("  Product:      %ls\n", cur_dev->product_string);
+	printf("  Release:      %hx\n", cur_dev->release_number);
+	printf("  Interface:    %d\n",  cur_dev->interface_number);
+	printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
+	printf("\n");
+}
+
+void print_devices(struct hid_device_info *cur_dev) {
+	while (cur_dev) {
+		print_device(cur_dev);
+		cur_dev = cur_dev->next;
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	(void)argc;
@@ -63,7 +82,7 @@ int main(int argc, char* argv[])
 	hid_device *handle;
 	int i;
 
-	struct hid_device_info *devs, *cur_dev;
+	struct hid_device_info *devs;
 
 	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
 	if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
@@ -83,18 +102,7 @@ int main(int argc, char* argv[])
 #endif
 
 	devs = hid_enumerate(0x0, 0x0);
-	cur_dev = devs;
-	while (cur_dev) {
-		printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number);
-		printf("\n");
-		printf("  Manufacturer: %ls\n", cur_dev->manufacturer_string);
-		printf("  Product:      %ls\n", cur_dev->product_string);
-		printf("  Release:      %hx\n", cur_dev->release_number);
-		printf("  Interface:    %d\n",  cur_dev->interface_number);
-		printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
-		printf("\n");
-		cur_dev = cur_dev->next;
-	}
+	print_devices(devs);
 	hid_free_enumeration(devs);
 
 	// Set up the command buffer.
@@ -134,6 +142,13 @@ int main(int argc, char* argv[])
 	printf("Serial Number String: (%d) %ls", wstr[0], wstr);
 	printf("\n");
 
+	struct hid_device_info* info = hid_get_device_info(handle);
+	if (info == NULL) {
+		printf("Unable to get device info\n");
+	} else {
+		print_devices(info);
+	}
+
 	// Read Indexed String 1
 	wstr[0] = 0x0000;
 	res = hid_get_indexed_string(handle, 1, wstr, MAX_STR);
@@ -165,8 +180,7 @@ int main(int argc, char* argv[])
 	buf[0] = 0x2;
 	res = hid_get_feature_report(handle, buf, sizeof(buf));
 	if (res < 0) {
-		printf("Unable to get a feature report.\n");
-		printf("%ls", hid_error(handle));
+		printf("Unable to get a feature report: %ls\n", hid_error(handle));
 	}
 	else {
 		// Print out the returned buffer.
@@ -183,8 +197,7 @@ int main(int argc, char* argv[])
 	buf[1] = 0x80;
 	res = hid_write(handle, buf, 17);
 	if (res < 0) {
-		printf("Unable to write()\n");
-		printf("Error: %ls\n", hid_error(handle));
+		printf("Unable to write(): %ls\n", hid_error(handle));
 	}
 
 
@@ -192,31 +205,45 @@ int main(int argc, char* argv[])
 	buf[0] = 0x1;
 	buf[1] = 0x81;
 	hid_write(handle, buf, 17);
-	if (res < 0)
-		printf("Unable to write() (2)\n");
+	if (res < 0) {
+		printf("Unable to write()/2: %ls\n", hid_error(handle));
+	}
 
 	// Read requested state. hid_read() has been set to be
 	// non-blocking by the call to hid_set_nonblocking() above.
 	// This loop demonstrates the non-blocking nature of hid_read().
 	res = 0;
+	i = 0;
 	while (res == 0) {
 		res = hid_read(handle, buf, sizeof(buf));
-		if (res == 0)
+		if (res == 0) {
 			printf("waiting...\n");
-		if (res < 0)
-			printf("Unable to read()\n");
-		#ifdef _WIN32
+		}
+		if (res < 0) {
+			printf("Unable to read(): %ls\n", hid_error(handle));
+			break;
+		}
+
+		i++;
+		if (i >= 10) { /* 10 tries by 500 ms - 5 seconds of waiting*/
+			printf("read() timeout\n");
+			break;
+		}
+
+#ifdef _WIN32
 		Sleep(500);
-		#else
+#else
 		usleep(500*1000);
-		#endif
+#endif
 	}
 
-	printf("Data read:\n   ");
-	// Print out the returned buffer.
-	for (i = 0; i < res; i++)
-		printf("%02x ", (unsigned int) buf[i]);
-	printf("\n");
+	if (res > 0) {
+		printf("Data read:\n   ");
+		// Print out the returned buffer.
+		for (i = 0; i < res; i++)
+			printf("%02x ", (unsigned int) buf[i]);
+		printf("\n");
+	}
 
 	hid_close(handle);
 
