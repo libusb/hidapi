@@ -48,7 +48,7 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 12
+#define HID_API_VERSION_MINOR 13
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
@@ -163,11 +163,14 @@ extern "C" {
 				* Valid on the Mac implementation if and only if the device
 				  is a USB HID device. */
 			int interface_number;
-			/** Underlying bus type */
-			hid_bus_type bus_type;
 
 			/** Pointer to the next device */
 			struct hid_device_info *next;
+
+			/** Underlying bus type
+			    Since version 0.13.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 13, 0)
+			*/
+			hid_bus_type bus_type;
 		};
 
 
@@ -440,7 +443,7 @@ extern "C" {
 			start in data[1].
 
 			@ingroup API
-			@param device A device handle returned from hid_open().
+			@param dev A device handle returned from hid_open().
 			@param data A buffer to put the read data into, including
 				the Report ID. Set the first byte of @p data[] to the
 				Report ID of the report to be read, or set it to zero
@@ -502,6 +505,23 @@ extern "C" {
 				Call hid_error(dev) to get the failure reason.
 		*/
 		int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen);
+
+		/** @brief Get The struct #hid_device_info from a HID device.
+
+			Since version 0.13.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 13, 0)
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				This function returns a pointer to the struct #hid_device_info
+				for this hid_device, or NULL in the case of failure.
+				Call hid_error(dev) to get the failure reason.
+				This struct is valid until the device is closed with hid_close().
+
+			@note The returned object is owned by the @p dev, and SHOULD NOT be freed by the user.
+		*/
+		struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_get_device_info(hid_device *dev);
 
 		/** @brief Get a string from a HID device, based on its string index.
 
