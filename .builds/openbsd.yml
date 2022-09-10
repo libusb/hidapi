@@ -2,7 +2,7 @@ image: openbsd/latest
 packages:
 - cmake
 - pkgconf
-- libusb1
+- libusb1--
 - libiconv
 - ninja
 sources:
