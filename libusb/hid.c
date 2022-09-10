@@ -818,18 +818,8 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							cur_dev = tmp;
 						}
 
-<<<<<<< HEAD
-						/* Release Number */
-						cur_dev->release_number = desc.bcdDevice;
-
-						/* Interface Number */
-						cur_dev->interface_number = interface_num;
-						
-						
-=======
 						if (res >= 0)
 							libusb_close(handle);
->>>>>>> origin/master
 					}
 				} /* altsettings */
 			} /* interfaces */
