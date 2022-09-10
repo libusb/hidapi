@@ -132,6 +132,7 @@ struct hid_device_ {
 	uint8_t *input_report_buf;
 	CFIndex max_input_report_len;
 	struct input_report *input_reports;
+	struct hid_device_info* device_info;
 
 	pthread_t thread;
 	pthread_mutex_t mutex; /* Protects input_reports */
@@ -154,6 +155,7 @@ static hid_device *new_hid_device(void)
 	dev->source = NULL;
 	dev->input_report_buf = NULL;
 	dev->input_reports = NULL;
+	dev->device_info = NULL;
 	dev->shutdown_thread = 0;
 
 	/* Thread objects */
@@ -187,6 +189,7 @@ static void free_hid_device(hid_device *dev)
 	if (dev->source)
 		CFRelease(dev->source);
 	free(dev->input_report_buf);
+	hid_free_enumeration(dev->device_info);
 
 	/* Clean up the thread objects */
 	pthread_barrier_destroy(&dev->shutdown_barrier);
@@ -375,6 +378,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	unsigned short dev_pid;
 	int BUF_LEN = 256;
 	wchar_t buf[BUF_LEN];
+	CFTypeRef transport_prop;
 
 	struct hid_device_info *cur_dev;
 	io_object_t iokit_dev;
@@ -451,6 +455,22 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		cur_dev->interface_number = get_int_property(dev, CFSTR(kUSBInterfaceNumber));
 	} else {
 		cur_dev->interface_number = -1;
+	}
+
+	/* Bus Type */
+	transport_prop = IOHIDDeviceGetProperty(dev, CFSTR(kIOHIDTransportKey));
+
+	if (transport_prop != NULL && CFGetTypeID(transport_prop) == CFStringGetTypeID()) {
+		if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportUSBValue), 0) == kCFCompareEqualTo) {
+			cur_dev->bus_type = HID_API_BUS_USB;
+		/* Match "Bluetooth", "BluetoothLowEnergy" and "Bluetooth Low Energy" strings */
+		} else if (CFStringHasPrefix((CFStringRef)transport_prop, CFSTR(kIOHIDTransportBluetoothValue))) {
+			cur_dev->bus_type = HID_API_BUS_BLUETOOTH;
+		} else if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportI2CValue), 0) == kCFCompareEqualTo) {
+			cur_dev->bus_type = HID_API_BUS_I2C;
+		} else  if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportSPIValue), 0) == kCFCompareEqualTo) {
+			cur_dev->bus_type = HID_API_BUS_SPI;
+		}
 	}
 
 	return cur_dev;
@@ -1161,17 +1181,74 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	return get_manufacturer_string(dev->device_handle, string, maxlen);
+	if (!string || !maxlen)
+	{
+		// register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
+	struct hid_device_info *info = hid_get_device_info(dev);
+	if (!info)
+	{
+		// hid_get_device_info will have set an error already
+		return -1;
+	}
+
+	wcsncpy(string, info->manufacturer_string, maxlen);
+	string[maxlen - 1] = L'\0';
+
+	return 0;
 }
 
 int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	return get_product_string(dev->device_handle, string, maxlen);
+	if (!string || !maxlen)
+	{
+		// register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
+	struct hid_device_info *info = hid_get_device_info(dev);
+	if (!info)
+	{
+		// hid_get_device_info will have set an error already
+		return -1;
+	}
+
+	wcsncpy(string, info->product_string, maxlen);
+	string[maxlen - 1] = L'\0';
+
+	return 0;
 }
 
 int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
-	return get_serial_number(dev->device_handle, string, maxlen);
+	if (!string || !maxlen)
+	{
+		// register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
+	struct hid_device_info *info = hid_get_device_info(dev);
+	if (!info)
+	{
+		// hid_get_device_info will have set an error already
+		return -1;
+	}
+
+	wcsncpy(string, info->serial_number, maxlen);
+	string[maxlen - 1] = L'\0';
+
+	return 0;
+}
+
+HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
+	if (!dev->device_info)
+	{
+		dev->device_info = create_device_info(dev->device_handle);
+	}
+
+	return dev->device_info;
 }
 
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)

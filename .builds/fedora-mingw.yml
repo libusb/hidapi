@@ -5,18 +5,29 @@ packages:
 - libtool
 - mingw64-gcc
 - mingw64-gcc-c++
+- cmake
+- ninja-build
 sources:
 - https://github.com/libusb/hidapi
 tasks:
-- setup: |
+- configure: |
     cd hidapi
+    echo Configure Autotools build
     ./bootstrap
     mingw64-configure
-- build: |
+    echo Configure CMake build
+    mkdir -p build install_cmake
+    mingw64-cmake -GNinja -B build -S . -DCMAKE_INSTALL_PREFIX=install_cmake
+- build-autotools: |
     cd hidapi
     make
     make DESTDIR=$PWD/root install
     make clean
+- build-cmake: |
+    cd hidapi/build
+    ninja
+    DESTDIR=$PWD/../install_cmake ninja install
+    ninja clean
 - build-manual: |
     cd hidapi/windows
     make -f Makefile-manual OS=MINGW CC=x86_64-w64-mingw32-gcc
