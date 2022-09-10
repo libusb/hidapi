@@ -510,12 +510,43 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 		/* Normalize to upper case */
 		for (wchar_t* p = compatible_id; *p; ++p) *p = towupper(*p);
 
+		/* USB devices
+		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support
+		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
+		if (wcsstr(compatible_id, L"USB") != NULL) {
+			dev->bus_type = HID_API_BUS_USB;
+			break;
+		}
+
+		/* Bluetooth devices
+		   https://docs.microsoft.com/windows-hardware/drivers/bluetooth/installing-a-bluetooth-device */
+		if (wcsstr(compatible_id, L"BTHENUM") != NULL) {
+			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			break;
+		}
+
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
 			/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
 			   Request this info via dev node properties instead.
 			   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html */
 			hid_internal_get_ble_info(dev, dev_node);
+
+			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			break;
+		}
+
+		/* I2C devices
+		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support-and-power-management */
+		if (wcsstr(compatible_id, L"PNP0C50") != NULL) {
+			dev->bus_type = HID_API_BUS_I2C;
+			break;
+		}
+
+		/* SPI devices
+		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-for-spi */
+		if (wcsstr(compatible_id, L"PNP0C51") != NULL) {
+			dev->bus_type = HID_API_BUS_SPI;
 			break;
 		}
 	}

@@ -651,6 +651,8 @@ static struct hid_device_info * create_device_info_for_device(libusb_device *dev
 
 	cur_dev->interface_number = interface_num;
 
+	cur_dev->bus_type = HID_API_BUS_USB;
+
 	cur_dev->path = make_path(device, config_number, interface_num);
 
 	if (!handle) {

@@ -378,6 +378,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	unsigned short dev_pid;
 	int BUF_LEN = 256;
 	wchar_t buf[BUF_LEN];
+	CFTypeRef transport_prop;
 
 	struct hid_device_info *cur_dev;
 	io_object_t iokit_dev;
@@ -454,6 +455,22 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		cur_dev->interface_number = get_int_property(dev, CFSTR(kUSBInterfaceNumber));
 	} else {
 		cur_dev->interface_number = -1;
+	}
+
+	/* Bus Type */
+	transport_prop = IOHIDDeviceGetProperty(dev, CFSTR(kIOHIDTransportKey));
+
+	if (transport_prop != NULL && CFGetTypeID(transport_prop) == CFStringGetTypeID()) {
+		if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportUSBValue), 0) == kCFCompareEqualTo) {
+			cur_dev->bus_type = HID_API_BUS_USB;
+		/* Match "Bluetooth", "BluetoothLowEnergy" and "Bluetooth Low Energy" strings */
+		} else if (CFStringHasPrefix((CFStringRef)transport_prop, CFSTR(kIOHIDTransportBluetoothValue))) {
+			cur_dev->bus_type = HID_API_BUS_BLUETOOTH;
+		} else if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportI2CValue), 0) == kCFCompareEqualTo) {
+			cur_dev->bus_type = HID_API_BUS_I2C;
+		} else  if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportSPIValue), 0) == kCFCompareEqualTo) {
+			cur_dev->bus_type = HID_API_BUS_SPI;
+		}
 	}
 
 	return cur_dev;
