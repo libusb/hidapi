@@ -19,7 +19,8 @@ For various reasons you may need to build HIDAPI on your own.
 It can be done in several different ways:
 - using [CMake](BUILD.cmake.md);
 - using [Autotools](BUILD.autotools.md) (deprecated);
-- using [manual makefiles](#building-the-manual-way-on-unix-platforms).
+- using [manual makefiles](#building-the-manual-way-on-unix-platforms);
+- using `Meson` (requires CMake);
 
 **Autotools** build system is historically first mature build system for
 HIDAPI. Most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).<br/>
@@ -29,6 +30,11 @@ HIDAPI Team recommends using CMake build for HIDAPI.
 **CMake** build system is de facto an industry standard for many open-source and proprietary projects and solutions.
 HIDAPI is one of the projects which uses the power of CMake for its advantage.
 More documentation is available in its separate README: [BUILD.cmake.md](BUILD.cmake.md).
+
+**Meson** build system for HIDAPI is designed as a [wrapper](https://mesonbuild.com/CMake-module.html) over CMake build script.
+It is present for the convenience of Meson users who need to use HIDAPI and need to be sure HIDAPI is built in accordance with officially supported build scripts.<br>
+In the Meson script of your project you need a `hidapi = subproject('hidapi')` subproject, and `hidapi.get_variable('hidapi_dep')` as your dependency.
+There are also backend/platform-specific dependencies available: `hidapi_winapi`, `hidapi_darwin`, `hidapi_hidraw`, `hidapi_libusb`.
 
 If you don't know where to start to build HIDAPI, we recommend starting with [CMake](BUILD.cmake.md) build.
 
