@@ -66,6 +66,7 @@ void print_device(struct hid_device_info *cur_dev) {
 
 void print_hid_report_descriptor_from_device(hid_device *device) {
 	unsigned char descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+	int res = 0;
 
 	printf("  Report Descriptor: ");
 	res = hid_get_report_descriptor(device, descriptor, sizeof(descriptor));
