@@ -88,6 +88,14 @@
 */
 #define HID_API_VERSION_STR HID_API_TO_VERSION_STR(HID_API_VERSION_MAJOR, HID_API_VERSION_MINOR, HID_API_VERSION_PATCH)
 
+/** @brief Maximum expected HID Report descriptor size in bytes.
+
+	Since version 0.13.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 13, 0)
+
+	@ingroup API
+*/
+#define HID_API_MAX_REPORT_DESCRIPTOR_SIZE 4096
+
 #ifdef __cplusplus
 extern "C" {
 #endif
