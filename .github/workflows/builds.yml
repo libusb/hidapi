@@ -37,6 +37,8 @@ jobs:
     - uses: actions/checkout@v2
       with:
         path: hidapisrc
+    - name: Install dependencies
+      run: brew install meson ninja
     - name: Configure CMake
       run: |
         rm -rf build install
@@ -58,6 +60,11 @@ jobs:
                 install/framework/lib/hidapi.framework/Headers/hidapi.h, \
                 install/framework/lib/hidapi.framework/Headers/hidapi_darwin.h"
         allow_failure: true
+    - name: Check Meson build
+      run: |
+        meson setup build_meson hidapisrc
+        cd build_meson
+        ninja
 
   ubuntu-cmake:
 
@@ -70,7 +77,8 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install libudev-dev libusb-1.0-0-dev
+        sudo apt install libudev-dev libusb-1.0-0-dev python3-pip ninja-build
+        sudo -H pip3 install meson
     - name: Configure CMake
       run: |
         rm -rf build install
@@ -94,6 +102,11 @@ jobs:
                 install/static/include/hidapi/hidapi.h, \
                 install/static/include/hidapi/hidapi_libusb.h"
         allow_failure: true
+    - name: Check Meson build
+      run: |
+        meson setup build_meson hidapisrc
+        cd build_meson
+        ninja
 
   windows-cmake:
 
@@ -103,6 +116,11 @@ jobs:
     - uses: actions/checkout@v2
       with:
         path: hidapisrc
+    - name: Install dependencies
+      run: |
+        choco install ninja
+        pip3 install meson
+        refreshenv
     - name: Configure CMake MSVC
       shell: cmd
       run: |
@@ -154,6 +172,14 @@ jobs:
                 install/mingw/include/hidapi/hidapi.h, \
                 install/mingw/include/hidapi/hidapi_winapi.h"
         allow_failure: true
+
+    - name: Check Meson build
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        meson setup build_meson hidapisrc
+        cd build_meson
+        ninja
 
   windows-msbuild:
 
