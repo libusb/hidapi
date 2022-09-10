@@ -6,7 +6,7 @@ packages:
 - mingw64-gcc
 - mingw64-gcc-c++
 - cmake
-- ninja
+- ninja-build
 sources:
 - https://github.com/libusb/hidapi
 tasks:
