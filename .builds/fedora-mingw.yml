@@ -26,7 +26,7 @@ tasks:
 - build-cmake: |
     cd hidapi/build
     ninja
-    ninja install
+    DESTDIR=$PWD/../install_cmake ninja install
     ninja clean
 - build-manual: |
     cd hidapi/windows
