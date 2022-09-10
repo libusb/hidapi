@@ -10,7 +10,7 @@ packages:
 sources:
 - https://github.com/libusb/hidapi
 tasks:
-- setup: |
+- configure: |
     cd hidapi
     echo Configure Autotools build
     ./bootstrap
