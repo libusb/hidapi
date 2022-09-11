@@ -19,33 +19,26 @@
 #include "hidapi_descriptor_reconstruct.h"
 
 /**
- * @brief List element of the encoded report descriptor.
+ * @brief References to report descriptor buffer.
+ * 
  */
-struct rd_item_byte {
-	unsigned char byte;
-	struct rd_item_byte *next;
+struct rd_buffer {
+	unsigned char* buf; /* Pointer to the array which stores the reconstructed descriptor */
+	size_t buf_size; /* Size of the buffer in bytes */
+    size_t byte_idx; /* Index of the next report byte to write to buf array */
 };
 
 /**
- * @brief Function that appends a byte to encoded report descriptor list.
+ * @brief Function that appends a byte to encoded report descriptor buffer.
  *
- * @param[in]  byte  Single byte to append.
- * @param      list  Pointer to the list.
+ * @param[in]  byte     Single byte to append.
+ * @param      rpt_desc Pointer to report descriptor buffer struct.
  */
-static void rd_append_byte(unsigned char byte, struct rd_item_byte **list) {
-	struct rd_item_byte *new_list_element;
-	
-	/* Determine last list position */
-	while (*list != NULL)
-	{
-		list = &(*list)->next;
+static void rd_append_byte(unsigned char byte, struct rd_buffer* rpt_desc) {
+	if (rpt_desc->byte_idx < rpt_desc->buf_size) {
+		rpt_desc->buf[rpt_desc->byte_idx] = byte;
+		rpt_desc->byte_idx++;
 	}
-
-	new_list_element = malloc(sizeof(*new_list_element)); // Create new list entry
-	new_list_element->byte = byte;
-	new_list_element->next = NULL; // Marks last element of list
-
-	*list = new_list_element;
 }
 
 /**
@@ -57,7 +50,7 @@ static void rd_append_byte(unsigned char byte, struct rd_item_byte **list) {
  *
  * @return Returns 0 if successful, -1 for error.
  */
-static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byte **list) {
+static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_buffer* rpt_desc) {
 	if (rd_item & 0x03) {
 		// Invalid input data, last to bits are reserved for data size
 		return -1;
@@ -66,7 +59,7 @@ static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byt
 	if (rd_item == rd_main_collection_end) {
 		// Item without data (1Byte prefix only)
 		unsigned char oneBytePrefix = (unsigned char) rd_item + 0x00;
-		rd_append_byte(oneBytePrefix, list);
+		rd_append_byte(oneBytePrefix, rpt_desc);
 	}
 	else if ((rd_item == rd_global_logical_minimum) ||
 		(rd_item == rd_global_logical_maximum) ||
@@ -77,26 +70,26 @@ static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byt
 			// 1Byte prefix + 1Byte data
 			unsigned char oneBytePrefix = (unsigned char) rd_item + 0x01;
 			char localData = (char)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
+			rd_append_byte(oneBytePrefix, rpt_desc);
+			rd_append_byte(localData & 0xFF, rpt_desc);
 		}
 		else if ((data >= -32768) && (data <= 32767)) {
 			// 1Byte prefix + 2Byte data
 			unsigned char oneBytePrefix = (unsigned char) rd_item + 0x02;
 			INT16 localData = (INT16)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
+			rd_append_byte(oneBytePrefix, rpt_desc);
+			rd_append_byte(localData & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 8 & 0xFF, rpt_desc);
 		}
 		else if ((data >= -2147483648LL) && (data <= 2147483647)) {
 			// 1Byte prefix + 4Byte data
 			unsigned char oneBytePrefix = (unsigned char) rd_item + 0x03;
 			INT32 localData = (INT32)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
-			rd_append_byte(localData >> 16 & 0xFF, list);
-			rd_append_byte(localData >> 24 & 0xFF, list);
+			rd_append_byte(oneBytePrefix, rpt_desc);
+			rd_append_byte(localData & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 8 & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 16 & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 24 & 0xFF, rpt_desc);
 		}
 		else {
 			// Data out of 32 bit signed integer range
@@ -109,26 +102,26 @@ static int rd_write_short_item(rd_items rd_item, LONG64 data, struct rd_item_byt
 			// 1Byte prefix + 1Byte data
 			unsigned char oneBytePrefix = (unsigned char) rd_item + 0x01;
 			unsigned char localData = (unsigned char)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
+			rd_append_byte(oneBytePrefix, rpt_desc);
+			rd_append_byte(localData & 0xFF, rpt_desc);
 		}
 		else if ((data >= 0) && (data <= 0xFFFF)) {
 			// 1Byte prefix + 2Byte data
 			unsigned char oneBytePrefix = (unsigned char) rd_item + 0x02;
 			UINT16 localData = (UINT16)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
+			rd_append_byte(oneBytePrefix, rpt_desc);
+			rd_append_byte(localData & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 8 & 0xFF, rpt_desc);
 		}
 		else if ((data >= 0) && (data <= 0xFFFFFFFF)) {
 			// 1Byte prefix + 4Byte data
 			unsigned char oneBytePrefix = (unsigned char) rd_item + 0x03;
 			UINT32 localData = (UINT32)data;
-			rd_append_byte(oneBytePrefix, list);
-			rd_append_byte(localData & 0xFF, list);
-			rd_append_byte(localData >> 8 & 0xFF, list);
-			rd_append_byte(localData >> 16 & 0xFF, list);
-			rd_append_byte(localData >> 24 & 0xFF, list);
+			rd_append_byte(oneBytePrefix, rpt_desc);
+			rd_append_byte(localData & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 8 & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 16 & 0xFF, rpt_desc);
+			rd_append_byte(localData >> 24 & 0xFF, rpt_desc);
 		}
 		else {
 			// Data out of 32 bit unsigned integer range
@@ -194,7 +187,11 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		return -1;
 	}
 
-	struct rd_item_byte *byte_list = NULL;
+	struct rd_buffer rpt_desc = {
+		.buf = buf,
+	    .buf_size = buf_size,
+		.byte_idx = 0
+	};
 
 	// Set pointer to the first node of link_collection_nodes
 	phid_pp_link_collection_node link_collection_nodes = (phid_pp_link_collection_node)(((unsigned char*)&pp_data->caps[0]) + pp_data->FirstByteOfLinkCollectionArray);
@@ -590,7 +587,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		if (main_item_list->MainItemType == rd_collection) {
 			if (last_usage_page != link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage) {
 				// Write "Usage Page" at the begin of a collection - except it refers the same table as wrote last 
-				rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &byte_list);
+				rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &rpt_desc);
 				last_usage_page = link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage;
 			}
 			if (inhibit_write_of_usage) {
@@ -599,52 +596,52 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			}
 			else {
 				// Write "Usage" of collection
-				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
+				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &rpt_desc);
 			}
 			// Write begin of "Collection" 
-			rd_write_short_item(rd_main_collection, link_collection_nodes[main_item_list->CollectionIndex].CollectionType, &byte_list);
+			rd_write_short_item(rd_main_collection, link_collection_nodes[main_item_list->CollectionIndex].CollectionType, &rpt_desc);
 		}
 		else if (main_item_list->MainItemType == rd_collection_end) {
 			// Write "End Collection"
-			rd_write_short_item(rd_main_collection_end, 0, &byte_list);
+			rd_write_short_item(rd_main_collection_end, 0, &rpt_desc);
 		}
 		else if (main_item_list->MainItemType == rd_delimiter_open) {
 			if (main_item_list->CollectionIndex != -1) {
 				// Write "Usage Page" inside of a collection delmiter section
 				if (last_usage_page != link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage) {
-					rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &byte_list);
+					rd_write_short_item(rd_global_usage_page, link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage, &rpt_desc);
 					last_usage_page = link_collection_nodes[main_item_list->CollectionIndex].LinkUsagePage;
 				}
 			}
 			else if (main_item_list->CapsIndex != 0) {
 				// Write "Usage Page" inside of a main item delmiter section
 				if (pp_data->caps[caps_idx].UsagePage != last_usage_page) {
-					rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &byte_list);
+					rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &rpt_desc);
 					last_usage_page = pp_data->caps[caps_idx].UsagePage;
 				}
 			}
 			// Write "Delimiter Open"
-			rd_write_short_item(rd_local_delimiter, 1, &byte_list); // 1 = open set of aliased usages
+			rd_write_short_item(rd_local_delimiter, 1, &rpt_desc); // 1 = open set of aliased usages
 		}
 		else if (main_item_list->MainItemType == rd_delimiter_usage) {
 			if (main_item_list->CollectionIndex != -1) {
 				// Write aliased collection "Usage"
-				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &byte_list);
+				rd_write_short_item(rd_local_usage, link_collection_nodes[main_item_list->CollectionIndex].LinkUsage, &rpt_desc);
 			}  if (main_item_list->CapsIndex != 0) {
 				// Write aliased main item range from "Usage Minimum" to "Usage Maximum"
 				if (pp_data->caps[caps_idx].IsRange) {
-					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &byte_list);
-					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &byte_list);
+					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &rpt_desc);
+					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &rpt_desc);
 				}
 				else {
 					// Write single aliased main item "Usage"
-					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &byte_list);
+					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &rpt_desc);
 				}
 			}
 		}
 		else if (main_item_list->MainItemType == rd_delimiter_close) {
 			// Write "Delimiter Close"
-			rd_write_short_item(rd_local_delimiter, 0, &byte_list); // 0 = close set of aliased usages
+			rd_write_short_item(rd_local_delimiter, 0, &rpt_desc); // 0 = close set of aliased usages
 			// Inhibit next usage write
 			inhibit_write_of_usage = TRUE;
 		}
@@ -654,22 +651,22 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			// in the reports are filled with the same style of constant padding. 
 
 			// Write "Report Size" with number of padding bits
-			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit), &byte_list);
+			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit), &rpt_desc);
 
 			// Write "Report Count" for padding always as 1
-			rd_write_short_item(rd_global_report_count, 1, &byte_list);
+			rd_write_short_item(rd_global_report_count, 1, &rpt_desc);
 
 			if (rt_idx == HidP_Input) {
 				// Write "Input" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
-				rd_write_short_item(rd_main_input, 0x03, &byte_list); // Const / Abs
+				rd_write_short_item(rd_main_input, 0x03, &rpt_desc); // Const / Abs
 			}
 			else if (rt_idx == HidP_Output) {
 				// Write "Output" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
-				rd_write_short_item(rd_main_output, 0x03, &byte_list); // Const / Abs
+				rd_write_short_item(rd_main_output, 0x03, &rpt_desc); // Const / Abs
 			}
 			else if (rt_idx == HidP_Feature) {
 				// Write "Feature" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
-				rd_write_short_item(rd_main_feature, 0x03, &byte_list); // Const / Abs
+				rd_write_short_item(rd_main_feature, 0x03, &rpt_desc); // Const / Abs
 			}
 			report_count = 0;
 		}
@@ -679,13 +676,13 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 
 			if (last_report_id != pp_data->caps[caps_idx].ReportID) {
 				// Write "Report ID" if changed
-				rd_write_short_item(rd_global_report_id, pp_data->caps[caps_idx].ReportID, &byte_list);
+				rd_write_short_item(rd_global_report_id, pp_data->caps[caps_idx].ReportID, &rpt_desc);
 				last_report_id = pp_data->caps[caps_idx].ReportID;
 			}
 
 			// Write "Usage Page" when changed
 			if (pp_data->caps[caps_idx].UsagePage != last_usage_page) {
-				rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &byte_list);
+				rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &rpt_desc);
 				last_usage_page = pp_data->caps[caps_idx].UsagePage;
 			}
 
@@ -701,38 +698,38 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			else {
 				if (pp_data->caps[caps_idx].IsRange) {
 					// Write range from "Usage Minimum" to "Usage Maximum"
-					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &byte_list);
-					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &byte_list);
+					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &rpt_desc);
+					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &rpt_desc);
 				}
 				else {
 					// Write single "Usage"
-					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &byte_list);
+					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &rpt_desc);
 				}
 			}
 
 			if (pp_data->caps[caps_idx].IsDesignatorRange) {
 				// Write physical descriptor indices range from "Designator Minimum" to "Designator Maximum"
-				rd_write_short_item(rd_local_designator_minimum, pp_data->caps[caps_idx].Range.DesignatorMin, &byte_list);
-				rd_write_short_item(rd_local_designator_maximum, pp_data->caps[caps_idx].Range.DesignatorMax, &byte_list);
+				rd_write_short_item(rd_local_designator_minimum, pp_data->caps[caps_idx].Range.DesignatorMin, &rpt_desc);
+				rd_write_short_item(rd_local_designator_maximum, pp_data->caps[caps_idx].Range.DesignatorMax, &rpt_desc);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.DesignatorIndex != 0) {
 				// Designator set 0 is a special descriptor set (of the HID Physical Descriptor),
 				// that specifies the number of additional descriptor sets.
 				// Therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
 				// Write single "Designator Index"
-				rd_write_short_item(rd_local_designator_index, pp_data->caps[caps_idx].NotRange.DesignatorIndex, &byte_list);
+				rd_write_short_item(rd_local_designator_index, pp_data->caps[caps_idx].NotRange.DesignatorIndex, &rpt_desc);
 			}
 
 			if (pp_data->caps[caps_idx].IsStringRange) {
 				// Write range of indices of the USB string descriptor, from "String Minimum" to "String Maximum"
-				rd_write_short_item(rd_local_string_minimum, pp_data->caps[caps_idx].Range.StringMin, &byte_list);
-				rd_write_short_item(rd_local_string_maximum, pp_data->caps[caps_idx].Range.StringMax, &byte_list);
+				rd_write_short_item(rd_local_string_minimum, pp_data->caps[caps_idx].Range.StringMin, &rpt_desc);
+				rd_write_short_item(rd_local_string_maximum, pp_data->caps[caps_idx].Range.StringMax, &rpt_desc);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.StringIndex != 0) {
 				// String Index 0 is a special entry of the USB string descriptor, that contains a list of supported languages,
 				// therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
 				// Write single "String Index"
-				rd_write_short_item(rd_local_string, pp_data->caps[caps_idx].NotRange.StringIndex, &byte_list);
+				rd_write_short_item(rd_local_string, pp_data->caps[caps_idx].NotRange.StringIndex, &rpt_desc);
 			}
 
 			if ((main_item_list->next != NULL) &&
@@ -759,27 +756,27 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 					// While a HID report descriptor must always contain LogicalMinimum and LogicalMaximum,
 					// the preparsed data contain both fields set to zero, for the case of simple buttons
 					// Write "Logical Minimum" set to 0 and "Logical Maximum" set to 1
-					rd_write_short_item(rd_global_logical_minimum, 0, &byte_list);
-					rd_write_short_item(rd_global_logical_maximum, 1, &byte_list);
+					rd_write_short_item(rd_global_logical_minimum, 0, &rpt_desc);
+					rd_write_short_item(rd_global_logical_maximum, 1, &rpt_desc);
 				}
 				else {
 					// Write logical range from "Logical Minimum" to "Logical Maximum"
-					rd_write_short_item(rd_global_logical_minimum, pp_data->caps[caps_idx].Button.LogicalMin, &byte_list);
-					rd_write_short_item(rd_global_logical_maximum, pp_data->caps[caps_idx].Button.LogicalMax, &byte_list);
+					rd_write_short_item(rd_global_logical_minimum, pp_data->caps[caps_idx].Button.LogicalMin, &rpt_desc);
+					rd_write_short_item(rd_global_logical_maximum, pp_data->caps[caps_idx].Button.LogicalMax, &rpt_desc);
 				}
 
 				// Write "Report Size"
-				rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &byte_list);
+				rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &rpt_desc);
 
 				// Write "Report Count"
 				if (!pp_data->caps[caps_idx].IsRange) {
 					// Variable bit field with one bit per button
 					// In case of multiple usages with the same items, only "Usage" is written per cap, and "Report Count" is incremented
-					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &byte_list);
+					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &rpt_desc);
 				}
 				else {
 					// Button array of "Report Size" x "Report Count
-					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount, &byte_list);
+					rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount, &rpt_desc);
 				}
 
 
@@ -787,35 +784,35 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				if (last_physical_min != 0) {
 					// Write "Physical Minimum", but only if changed
 					last_physical_min = 0;
-					rd_write_short_item(rd_global_physical_minimum, last_physical_min, &byte_list);
+					rd_write_short_item(rd_global_physical_minimum, last_physical_min, &rpt_desc);
 				}
 				if (last_physical_max != 0) {
 					// Write "Physical Maximum", but only if changed
 					last_physical_max = 0;
-					rd_write_short_item(rd_global_physical_maximum, last_physical_max, &byte_list);
+					rd_write_short_item(rd_global_physical_maximum, last_physical_max, &rpt_desc);
 				}
 				if (last_unit_exponent != 0) {
 					// Write "Unit Exponent", but only if changed
 					last_unit_exponent = 0;
-					rd_write_short_item(rd_global_unit_exponent, last_unit_exponent, &byte_list);
+					rd_write_short_item(rd_global_unit_exponent, last_unit_exponent, &rpt_desc);
 				}
 				if (last_unit != 0) {
 					// Write "Unit",but only if changed
 					last_unit = 0;
-					rd_write_short_item(rd_global_unit, last_unit, &byte_list);
+					rd_write_short_item(rd_global_unit, last_unit, &rpt_desc);
 				}
 
 				// Write "Input" main item
 				if (rt_idx == HidP_Input) {
-					rd_write_short_item(rd_main_input, pp_data->caps[caps_idx].BitField, &byte_list);
+					rd_write_short_item(rd_main_input, pp_data->caps[caps_idx].BitField, &rpt_desc);
 				}
 				// Write "Output" main item
 				else if (rt_idx == HidP_Output) {
-					rd_write_short_item(rd_main_output, pp_data->caps[caps_idx].BitField, &byte_list);
+					rd_write_short_item(rd_main_output, pp_data->caps[caps_idx].BitField, &rpt_desc);
 				}
 				// Write "Feature" main item
 				else if (rt_idx == HidP_Feature) {
-					rd_write_short_item(rd_main_feature, pp_data->caps[caps_idx].BitField, &byte_list);
+					rd_write_short_item(rd_main_feature, pp_data->caps[caps_idx].BitField, &rpt_desc);
 				}
 				report_count = 0;
 			}
@@ -824,13 +821,13 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 
 			if (last_report_id != pp_data->caps[caps_idx].ReportID) {
 				// Write "Report ID" if changed
-				rd_write_short_item(rd_global_report_id, pp_data->caps[caps_idx].ReportID, &byte_list);
+				rd_write_short_item(rd_global_report_id, pp_data->caps[caps_idx].ReportID, &rpt_desc);
 				last_report_id = pp_data->caps[caps_idx].ReportID;
 			}
 
 			// Write "Usage Page" if changed
 			if (pp_data->caps[caps_idx].UsagePage != last_usage_page) {
-				rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &byte_list);
+				rd_write_short_item(rd_global_usage_page, pp_data->caps[caps_idx].UsagePage, &rpt_desc);
 				last_usage_page = pp_data->caps[caps_idx].UsagePage;
 			}
 
@@ -841,38 +838,38 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			else {
 				if (pp_data->caps[caps_idx].IsRange) {
 					// Write usage range from "Usage Minimum" to "Usage Maximum"
-					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &byte_list);
-					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &byte_list);
+					rd_write_short_item(rd_local_usage_minimum, pp_data->caps[caps_idx].Range.UsageMin, &rpt_desc);
+					rd_write_short_item(rd_local_usage_maximum, pp_data->caps[caps_idx].Range.UsageMax, &rpt_desc);
 				}
 				else {
 					// Write single "Usage"
-					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &byte_list);
+					rd_write_short_item(rd_local_usage, pp_data->caps[caps_idx].NotRange.Usage, &rpt_desc);
 				}
 			}
 
 			if (pp_data->caps[caps_idx].IsDesignatorRange) {
 				// Write physical descriptor indices range from "Designator Minimum" to "Designator Maximum"
-				rd_write_short_item(rd_local_designator_minimum, pp_data->caps[caps_idx].Range.DesignatorMin, &byte_list);
-				rd_write_short_item(rd_local_designator_maximum, pp_data->caps[caps_idx].Range.DesignatorMax, &byte_list);
+				rd_write_short_item(rd_local_designator_minimum, pp_data->caps[caps_idx].Range.DesignatorMin, &rpt_desc);
+				rd_write_short_item(rd_local_designator_maximum, pp_data->caps[caps_idx].Range.DesignatorMax, &rpt_desc);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.DesignatorIndex != 0) {
 				// Designator set 0 is a special descriptor set (of the HID Physical Descriptor),
 				// that specifies the number of additional descriptor sets.
 				// Therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
 				// Write single "Designator Index"
-				rd_write_short_item(rd_local_designator_index, pp_data->caps[caps_idx].NotRange.DesignatorIndex, &byte_list);
+				rd_write_short_item(rd_local_designator_index, pp_data->caps[caps_idx].NotRange.DesignatorIndex, &rpt_desc);
 			}
 
 			if (pp_data->caps[caps_idx].IsStringRange) {
 				// Write range of indices of the USB string descriptor, from "String Minimum" to "String Maximum"
-				rd_write_short_item(rd_local_string_minimum, pp_data->caps[caps_idx].Range.StringMin, &byte_list);
-				rd_write_short_item(rd_local_string_maximum, pp_data->caps[caps_idx].Range.StringMax, &byte_list);
+				rd_write_short_item(rd_local_string_minimum, pp_data->caps[caps_idx].Range.StringMin, &rpt_desc);
+				rd_write_short_item(rd_local_string_maximum, pp_data->caps[caps_idx].Range.StringMax, &rpt_desc);
 			}
 			else if (pp_data->caps[caps_idx].NotRange.StringIndex != 0) {
 				// String Index 0 is a special entry of the USB string descriptor, that contains a list of supported languages,
 				// therefore Designator Index 0 can never be a useful reference for a control and we can inhibit it.
 				// Write single "String Index"
-				rd_write_short_item(rd_local_string, pp_data->caps[caps_idx].NotRange.StringIndex, &byte_list);
+				rd_write_short_item(rd_local_string, pp_data->caps[caps_idx].NotRange.StringIndex, &rpt_desc);
 			}
 
 			if ((pp_data->caps[caps_idx].BitField & 0x02) != 0x02) {
@@ -908,48 +905,48 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				// Value
 
 				// Write logical range from "Logical Minimum" to "Logical Maximum"
-				rd_write_short_item(rd_global_logical_minimum, pp_data->caps[caps_idx].NotButton.LogicalMin, &byte_list);
-				rd_write_short_item(rd_global_logical_maximum, pp_data->caps[caps_idx].NotButton.LogicalMax, &byte_list);
+				rd_write_short_item(rd_global_logical_minimum, pp_data->caps[caps_idx].NotButton.LogicalMin, &rpt_desc);
+				rd_write_short_item(rd_global_logical_maximum, pp_data->caps[caps_idx].NotButton.LogicalMax, &rpt_desc);
 
 				if ((last_physical_min != pp_data->caps[caps_idx].NotButton.PhysicalMin) ||
 					(last_physical_max != pp_data->caps[caps_idx].NotButton.PhysicalMax)) {
 					// Write range from "Physical Minimum" to " Physical Maximum", but only if one of them changed
-					rd_write_short_item(rd_global_physical_minimum, pp_data->caps[caps_idx].NotButton.PhysicalMin, &byte_list);
+					rd_write_short_item(rd_global_physical_minimum, pp_data->caps[caps_idx].NotButton.PhysicalMin, &rpt_desc);
 					last_physical_min = pp_data->caps[caps_idx].NotButton.PhysicalMin;
-					rd_write_short_item(rd_global_physical_maximum, pp_data->caps[caps_idx].NotButton.PhysicalMax, &byte_list);
+					rd_write_short_item(rd_global_physical_maximum, pp_data->caps[caps_idx].NotButton.PhysicalMax, &rpt_desc);
 					last_physical_max = pp_data->caps[caps_idx].NotButton.PhysicalMax;
 				}
 
 
 				if (last_unit_exponent != pp_data->caps[caps_idx].UnitsExp) {
 					// Write "Unit Exponent", but only if changed
-					rd_write_short_item(rd_global_unit_exponent, pp_data->caps[caps_idx].UnitsExp, &byte_list);
+					rd_write_short_item(rd_global_unit_exponent, pp_data->caps[caps_idx].UnitsExp, &rpt_desc);
 					last_unit_exponent = pp_data->caps[caps_idx].UnitsExp;
 				}
 
 				if (last_unit != pp_data->caps[caps_idx].Units) {
 					// Write physical "Unit", but only if changed
-					rd_write_short_item(rd_global_unit, pp_data->caps[caps_idx].Units, &byte_list);
+					rd_write_short_item(rd_global_unit, pp_data->caps[caps_idx].Units, &rpt_desc);
 					last_unit = pp_data->caps[caps_idx].Units;
 				}
 
 				// Write "Report Size"
-				rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &byte_list);
+				rd_write_short_item(rd_global_report_size, pp_data->caps[caps_idx].ReportSize, &rpt_desc);
 
 				// Write "Report Count"
-				rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &byte_list);
+				rd_write_short_item(rd_global_report_count, pp_data->caps[caps_idx].ReportCount + report_count, &rpt_desc);
 
 				if (rt_idx == HidP_Input) {
 					// Write "Input" main item
-					rd_write_short_item(rd_main_input, pp_data->caps[caps_idx].BitField, &byte_list);
+					rd_write_short_item(rd_main_input, pp_data->caps[caps_idx].BitField, &rpt_desc);
 				}
 				else if (rt_idx == HidP_Output) {
 					// Write "Output" main item
-					rd_write_short_item(rd_main_output, pp_data->caps[caps_idx].BitField, &byte_list);
+					rd_write_short_item(rd_main_output, pp_data->caps[caps_idx].BitField, &rpt_desc);
 				}
 				else if (rt_idx == HidP_Feature) {
 					// Write "Feature" main item
-					rd_write_short_item(rd_main_feature, pp_data->caps[caps_idx].BitField, &byte_list);
+					rd_write_short_item(rd_main_feature, pp_data->caps[caps_idx].BitField, &rpt_desc);
 				}
 				report_count = 0;
 			}
@@ -982,20 +979,5 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	free(coll_levels);
 	free(coll_number_of_direct_childs);
 
-	// Copy report temporary descriptor list into buf array and free list
-	unsigned int result_len = 0;
-	while ((byte_list != NULL))
-	{
-		if (result_len < buf_size) {
-			// In case of too small buf size, just inhibt write to buffer,
-			// to ensure proper free of list memory
-			*(buf + result_len) = (unsigned char)byte_list->byte;
-			result_len++;
-		}
-		struct rd_item_byte *byte_list_prev = byte_list;
-		byte_list = byte_list->next;
-		free(byte_list_prev);
-	}
-
-	return (int) result_len;
+	return (int) rpt_desc.byte_idx;
 }
