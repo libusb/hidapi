@@ -592,14 +592,14 @@ static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int in
  */
 static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size)
 {
-	unsigned char hid_report[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+	unsigned char hid_report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
 	unsigned short page = 0, usage = 0;
 
-	int res = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, hid_report, sizeof(hid_report));
+	int res = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, hid_report_descriptor, sizeof(hid_report_descriptor));
 	if (res >= 0) {
 		/* Parse the usage and usage page
 		   out of the report descriptor. */
-		get_usage(hid_report, res,  &page, &usage);
+		get_usage(hid_report_descriptor, res,  &page, &usage);
 	}
 
 	cur_dev->usage_page = page;
