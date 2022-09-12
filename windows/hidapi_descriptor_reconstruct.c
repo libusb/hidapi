@@ -25,7 +25,7 @@
 struct rd_buffer {
 	unsigned char* buf; /* Pointer to the array which stores the reconstructed descriptor */
 	size_t buf_size; /* Size of the buffer in bytes */
-    size_t byte_idx; /* Index of the next report byte to write to buf array */
+	size_t byte_idx; /* Index of the next report byte to write to buf array */
 };
 
 /**
@@ -189,7 +189,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 
 	struct rd_buffer rpt_desc = {
 		.buf = buf,
-	    .buf_size = buf_size,
+		.buf_size = buf_size,
 		.byte_idx = 0
 	};
 
