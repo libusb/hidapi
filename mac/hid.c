@@ -124,7 +124,6 @@ struct hid_device_ {
 	IOHIDDeviceRef device_handle;
 	IOOptionBits open_options;
 	int blocking;
-	int uses_numbered_reports;
 	int disconnected;
 	CFStringRef run_loop_mode;
 	CFRunLoopRef run_loop;
@@ -148,7 +147,6 @@ static hid_device *new_hid_device(void)
 	dev->device_handle = NULL;
 	dev->open_options = device_open_options;
 	dev->blocking = 1;
-	dev->uses_numbered_reports = 0;
 	dev->disconnected = 0;
 	dev->run_loop_mode = NULL;
 	dev->run_loop = NULL;
