@@ -6,6 +6,7 @@ ar-lib
 autom4te.cache/
 config.*
 configure
+configure~
 compile
 depcomp
 install-sh
