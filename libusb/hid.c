@@ -564,28 +564,43 @@ int HID_API_EXPORT hid_exit(void)
 	return 0;
 }
 
-/**
- * Requires an opened device with *claimed interface*.
- */
-static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num, uint16_t report_descriptor_size)
+static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size, unsigned char *buf, size_t buf_size)
 {
-	unsigned char data[4096];
-	unsigned short page = 0, usage = 0;
+	unsigned char tmp[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
 
-	if (report_descriptor_size > 4096)
-		report_descriptor_size = 4096;
+	if (expected_report_descriptor_size > HID_API_MAX_REPORT_DESCRIPTOR_SIZE)
+		expected_report_descriptor_size = HID_API_MAX_REPORT_DESCRIPTOR_SIZE;
 
 	/* Get the HID Report Descriptor.
 	   See USB HID Specificatin, sectin 7.1.1
 	*/
-	int res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8), interface_num, data, report_descriptor_size, 5000);
+	int res = libusb_control_transfer(handle, LIBUSB_ENDPOINT_IN|LIBUSB_RECIPIENT_INTERFACE, LIBUSB_REQUEST_GET_DESCRIPTOR, (LIBUSB_DT_REPORT << 8), interface_num, tmp, expected_report_descriptor_size, 5000);
+	if (res < 0) {
+		LOG("libusb_control_transfer() for getting the HID Report descriptor failed with %d: %s\n", res, libusb_error_name(res));
+		return -1;
+	}
+
+	if (res > (int)buf_size)
+		res = (int)buf_size;
+
+	memcpy(buf, tmp, (size_t)res);
+	return res;
+}
+
+/**
+ * Requires an opened device with *claimed interface*.
+ */
+static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size)
+{
+	unsigned char hid_report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+	unsigned short page = 0, usage = 0;
+
+	int res = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, hid_report_descriptor, sizeof(hid_report_descriptor));
 	if (res >= 0) {
 		/* Parse the usage and usage page
 		   out of the report descriptor. */
-		get_usage(data, res,  &page, &usage);
+		get_usage(hid_report_descriptor, res,  &page, &usage);
 	}
-	else
-		LOG("libusb_control_transfer() for getting the HID report descriptor failed with %d: %s\n", res, libusb_error_name(res));
 
 	cur_dev->usage_page = page;
 	cur_dev->usage = usage;
@@ -619,7 +634,7 @@ static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, lib
 			LOG("Can't release the interface.\n");
 	}
 	else
-		LOG("Can't claim interface %d\n", res);
+		LOG("Can't claim interface: (%d) %s\n", res, libusb_error_name(res));
 
 #ifdef DETACH_KERNEL_DRIVER
 	/* Re-attach kernel driver if necessary. */
@@ -675,7 +690,7 @@ static uint16_t get_report_descriptor_size_from_interface_descriptors(const stru
 {
 	int i = 0;
 	int found_hid_report_descriptor = 0;
-	uint16_t result = 4096;
+	uint16_t result = HID_API_MAX_REPORT_DESCRIPTOR_SIZE;
 	const unsigned char *extra = intf_desc->extra;
 	int extra_length = intf_desc->extra_length;
 
@@ -943,7 +958,7 @@ static void read_callback(struct libusb_transfer *transfer)
 	/* Re-submit the transfer object. */
 	res = libusb_submit_transfer(transfer);
 	if (res != 0) {
-		LOG("Unable to submit URB. libusb error code: %d\n", res);
+		LOG("Unable to submit URB: (%d) %s\n", res, libusb_error_name(res));
 		dev->shutdown_thread = 1;
 		dev->transfer_loop_finished = 1;
 	}
@@ -981,7 +996,7 @@ static void *read_thread(void *param)
 		res = libusb_handle_events(usb_context);
 		if (res < 0) {
 			/* There was an error. */
-			LOG("read_thread(): libusb reports error # %d\n", res);
+			LOG("read_thread(): (%d) %s\n", res, libusb_error_name(res));
 
 			/* Break out of this loop only on fatal error.*/
 			if (res != LIBUSB_ERROR_BUSY &&
@@ -1036,7 +1051,7 @@ static int hidapi_initialize_device(hid_device *dev, int config_number, const st
 	if (libusb_kernel_driver_active(dev->device_handle, intf_desc->bInterfaceNumber) == 1) {
 		res = libusb_detach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
 		if (res < 0) {
-			LOG("Unable to detach Kernel Driver\n");
+			LOG("Unable to detach Kernel Driver: (%d) %s\n", res, libusb_error_name(res));
 			return 0;
 		}
 		else {
@@ -1047,13 +1062,13 @@ static int hidapi_initialize_device(hid_device *dev, int config_number, const st
 #endif
 	res = libusb_claim_interface(dev->device_handle, intf_desc->bInterfaceNumber);
 	if (res < 0) {
-		LOG("can't claim interface %d: %d\n", intf_desc->bInterfaceNumber, res);
+		LOG("can't claim interface %d: (%d) %s\n", intf_desc->bInterfaceNumber, res, libusb_error_name(res));
 
 #ifdef DETACH_KERNEL_DRIVER
 		if (dev->is_driver_detached) {
 			res = libusb_attach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
 			if (res < 0)
-				LOG("Failed to reattach the driver to kernel.\n");
+				LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
 		}
 #endif
 		return 0;

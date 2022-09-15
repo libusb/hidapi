@@ -71,7 +71,6 @@
 struct hid_device_ {
 	int device_handle;
 	int blocking;
-	int uses_numbered_reports;
 	wchar_t *last_error_str;
 	struct hid_device_info* device_info;
 };
@@ -88,9 +87,12 @@ static wchar_t *last_global_error_str = NULL;
 static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
+	if (dev == NULL) {
+		return NULL;
+	}
+
 	dev->device_handle = -1;
 	dev->blocking = 1;
-	dev->uses_numbered_reports = 0;
 	dev->last_error_str = NULL;
 	dev->device_info = NULL;
 
@@ -239,34 +241,6 @@ static int get_hid_item_size(__u8 *report_descriptor, unsigned int pos, __u32 si
 	};
 
 	/* malformed report */
-	return 0;
-}
-
-/* uses_numbered_reports() returns 1 if report_descriptor describes a device
-   which contains numbered reports. */
-static int uses_numbered_reports(__u8 *report_descriptor, __u32 size) {
-	unsigned int i = 0;
-	int data_len, key_size;
-
-	while (i < size) {
-		int key = report_descriptor[i];
-
-		/* Check for the Report ID key */
-		if (key == 0x85/*Report ID*/) {
-			/* This device has a Report ID, which means it uses
-			   numbered reports. */
-			return 1;
-		}
-
-		/* Determine data_len and key_size */
-		if (!get_hid_item_size(report_descriptor, i, size, &data_len, &key_size))
-			return 0; /* malformed report */
-
-		/* Skip over this key and its associated data */
-		i += data_len + key_size;
-	}
-
-	/* Didn't find a Report ID key. Device doesn't use numbered reports. */
 	return 0;
 }
 
@@ -988,32 +962,22 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	/* register_global_error: global error is reset by hid_init */
 
 	dev = new_hid_device();
+	if (!dev) {
+		register_global_error("Couldn't allocate memory");
+		return NULL;
+	}
 
 	dev->device_handle = open(path, O_RDWR | O_CLOEXEC);
 
-	/* If we have a good handle, return it. */
 	if (dev->device_handle >= 0) {
-		/* Get the report descriptor */
 		int res, desc_size = 0;
-		struct hidraw_report_descriptor rpt_desc;
 
-		memset(&rpt_desc, 0x0, sizeof(rpt_desc));
-
-		/* Get Report Descriptor Size */
+		/* Make sure this is a HIDRAW device - responds to HIDIOCGRDESCSIZE */
 		res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
-		if (res < 0)
-			register_device_error_format(dev, "ioctl (GRDESCSIZE): %s", strerror(errno));
-
-		/* Get Report Descriptor */
-		rpt_desc.size = desc_size;
-		res = ioctl(dev->device_handle, HIDIOCGRDESC, &rpt_desc);
 		if (res < 0) {
-			register_device_error_format(dev, "ioctl (GRDESC): %s", strerror(errno));
-		} else {
-			/* Determine if this device uses numbered reports. */
-			dev->uses_numbered_reports =
-				uses_numbered_reports(rpt_desc.value,
-				                      rpt_desc.size);
+			hid_close(dev);
+			register_device_error_format(dev, "ioctl(GRDESCSIZE) error for '%s', not a HIDRAW device?: %s", path, strerror(errno));
+			return NULL;
 		}
 
 		return dev;
