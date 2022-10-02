@@ -8,7 +8,7 @@
     * [FreeBSD](#freebsd)
     * [Mac](#mac)
     * [Windows](#windows)
-* [Integrating hidapi directly into your source tree](#integrating-hidapi-directly-into-your-source-tree)
+* [Embedding HIDAPI directly into your source tree](#embedding-hidapi-directly-into-your-source-tree)
 * [Building the manual way on Unix platforms](#building-the-manual-way-on-unix-platforms)
 * [Building on Windows](#building-on-windows)
 
@@ -17,16 +17,24 @@
 For various reasons you may need to build HIDAPI on your own.
 
 It can be done in several different ways:
-- using [Autotools](BUILD.autotools.md);
 - using [CMake](BUILD.cmake.md);
-- using [manual makefiles](#building-the-manual-way-on-unix-platforms).
+- using [Autotools](BUILD.autotools.md) (deprecated);
+- using [manual makefiles](#building-the-manual-way-on-unix-platforms);
+- using `Meson` (requires CMake);
 
 **Autotools** build system is historically first mature build system for
-HIDAPI. Most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).
+HIDAPI. Most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).<br/>
+NOTE: for all intentions and purposes the Autotools build scripts for HIDAPI are _deprecated_ and going to be obsolete in the future.
+HIDAPI Team recommends using CMake build for HIDAPI.
 
 **CMake** build system is de facto an industry standard for many open-source and proprietary projects and solutions.
 HIDAPI is one of the projects which uses the power of CMake for its advantage.
 More documentation is available in its separate README: [BUILD.cmake.md](BUILD.cmake.md).
+
+**Meson** build system for HIDAPI is designed as a [wrapper](https://mesonbuild.com/CMake-module.html) over CMake build script.
+It is present for the convenience of Meson users who need to use HIDAPI and need to be sure HIDAPI is built in accordance with officially supported build scripts.<br>
+In the Meson script of your project you need a `hidapi = subproject('hidapi')` subproject, and `hidapi.get_variable('hidapi_dep')` as your dependency.
+There are also backend/platform-specific dependencies available: `hidapi_winapi`, `hidapi_darwin`, `hidapi_hidraw`, `hidapi_libusb`.
 
 If you don't know where to start to build HIDAPI, we recommend starting with [CMake](BUILD.cmake.md) build.
 
@@ -66,19 +74,30 @@ On Mac make sure you have XCode installed and its Command Line Tools.
 On Windows you just need a compiler. You may use Visual Studio or Cygwin/MinGW,
 depending on which environment is best for your needs.
 
-## Integrating HIDAPI directly into your source tree
+## Embedding HIDAPI directly into your source tree
 
-Instead of using one of the provided build systems, you may want to integrate
-HIDAPI directly into your source tree.
-Generally it is not encouraged to do so, but if you must, all you need to do:
-- add a single source file `hid.c` (for a specific backend);
-- setup include directory to `<HIDAPI repo root>/hidapi`;
-- add link libraries, that are specific for each backend.
+Instead of using one of the provided standalone build systems,
+you may want to integrate HIDAPI directly into your source tree.
+
+---
+If your project uses CMake as a build system, it is safe to add HIDAPI as a [subdirectory](BUILD.cmake.md#hidapi-as-a-subdirectory).
+
+---
+If _the only option_ that works for you is adding HIDAPI sources directly
+to your project's build system, then you need:
+- include a _single source file_ into your project's build system,
+depending on your platform and the backend you want to use:
+    - [`windows\hid.c`](windows/hid.c);
+    - [`linux/hid.c`](linux/hid.c);
+    - [`libusb/hid.c`](libusb/hid.c);
+    - [`mac/hid.c`](mac/hid.c);
+- add a [`hidapi`](hidapi) folder to the include path when building `hid.c`;
+- make the platform/backend specific [dependencies](#prerequisites) available during the compilation/linking, when building `hid.c`;
+
+NOTE: the above doesn't guarantee that having a copy of `<backend>/hid.c` and `hidapi/hidapi.h` is enough to build HIDAPI.
+The only guarantee that `<backend>/hid.c` includes all nesessary sources to compile it as a single file.
 
 Check the manual makefiles for a simple example/reference of what are the dependencies of each specific backend.
-
-NOTE: if your have a CMake-based project, you're likely be able to use
-HIDAPI directly as a subdirectory. Check [BUILD.cmake.md](BUILD.cmake.md) for details.
 
 ## Building the manual way on Unix platforms
 
@@ -104,19 +123,5 @@ To build HIDAPI using MinGW or Cygwin using Autotools, use a general Autotools
 
 Any windows builds (MSVC or MinGW/Cygwin) are also supported by [CMake](BUILD.cmake.md).
 
-HIDAPI can also be built using the Windows DDK (now also called the Windows
-Driver Kit or WDK). This method was originally required for the HIDAPI build
-but not anymore. However, some users still prefer this method. It is not as
-well supported anymore but should still work. Patches are welcome if it does
-not. To build using the DDK:
-
-   1. Install the Windows Driver Kit (WDK) from Microsoft.
-   2. From the Start menu, in the Windows Driver Kits folder, select Build
-      Environments, then your operating system, then the x86 Free Build
-      Environment (or one that is appropriate for your system).
-   3. From the console, change directory to the `windows/ddk_build/` directory,
-      which is part of the HIDAPI distribution.
-   4. Type build.
-   5. You can find the output files (DLL and LIB) in a subdirectory created
-      by the build system which is appropriate for your environment. On
-      Windows XP, this directory is `objfre_wxp_x86/i386`.
+If you are looking for information regarding DDK build of HIDAPI:
+- the build has been broken for a while and now the support files are obsolete.

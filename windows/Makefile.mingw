@@ -11,9 +11,9 @@ all: hidtest libhidapi.dll
 CC=gcc
 COBJS=hid.o ../hidtest/test.o
 OBJS=$(COBJS)
-CFLAGS=-I../hidapi -g -c
-LIBS= -lsetupapi
-DLL_LDFLAGS = -mwindows -lsetupapi
+CFLAGS=-I../hidapi -I. -g -c
+LIBS=
+DLL_LDFLAGS = -mwindows
 
 hidtest: $(OBJS)
 	$(CC) -g $^ $(LIBS) -o hidtest

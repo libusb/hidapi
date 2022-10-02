@@ -7,7 +7,7 @@
 # those of your device.
 
 # HIDAPI/libusb
-SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
 # If you are using the hidraw implementation (linux/hid.c), then do something
 # like the following, substituting the VID and PID with your device.
@@ -16,8 +16,11 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uacce
 KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uaccess"
 
 # Once done, optionally rename this file for your application, and drop it into
-# /etc/udev/rules.d. Note that these rules must have priorty before 70-uaccess.rules
-# for example, name the file /etc/udev/rules.d/69-my-application-hid.rules.
+# /etc/udev/rules.d/.
+# NOTE: these rules must have priorty before 73-seat-late.rules.
+# (Small discussion/explanation in systemd repo:
+#  https://github.com/systemd/systemd/issues/4288#issuecomment-348166161)
+# for example, name the file /etc/udev/rules.d/70-my-application-hid.rules.
 # Then, replug your device or run:
 # sudo udevadm control --reload-rules && sudo udevadm trigger
 
@@ -25,8 +28,8 @@ KERNEL=="hidraw*", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="003f", TAG+="uacc
 # must be lower case.
 
 # TAG+="uaccess" only gives permission to physically present users, which
-# is appropriate in most scenarios. If you require remote access to the
-# device, add
+# is appropriate in most scenarios. If you require access to the device
+# from a remote session (e.g. over SSH), add
 # GROUP="plugdev", MODE="660"
 # to the end of the udev rule lines, add your user to the plugdev group with:
 # usermod -aG plugdev USERNAME

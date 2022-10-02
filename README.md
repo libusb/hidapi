@@ -9,8 +9,9 @@
 HIDAPI is a multi-platform library which allows an application to interface
 with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
 HIDAPI can be either built as a shared library (`.so`, `.dll` or `.dylib`) or
-can be embedded directly into a target application by adding a single source
-file (per platform) and a single header.
+can be embedded directly into a target application by adding a _single source_
+file (per platform) and a single header.<br>
+See [remarks](BUILD.md#embedding-hidapi-directly-into-your-source-tree) on embedding _directly_ into your build system.
 
 HIDAPI library was originally developed by Alan Ott ([signal11](https://github.com/signal11)).
 
@@ -20,6 +21,7 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 
 * [About](#about)
     * [Test GUI](#test-gui)
+    * [Console Test App](#console-test-app)
 * [What Does the API Look Like?](#what-does-the-api-look-like)
 * [License](#license)
 * [Installing HIDAPI](#installing-hidapi)
@@ -28,7 +30,7 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 
 ## About
 
-HIDAPI has four back-ends:
+### HIDAPI has four back-ends:
 * Windows (using `hid.dll`)
 * Linux/hidraw (using the Kernel's hidraw driver)
 * libusb (using libusb-1.0 - Linux/BSD/other UNIX-like systems)
@@ -45,7 +47,7 @@ for unprivileged users to be able to access HID devices with hidapi. Refer
 to the [69-hid.rules](udev/69-hid.rules) file in the `udev` directory
 for an example.
 
-__Linux/hidraw__ (`linux/hid.c`):
+#### __Linux/hidraw__ (`linux/hid.c`):
 
 This back-end uses the hidraw interface in the Linux kernel, and supports
 both USB and Bluetooth HID devices. It requires kernel version at least 2.6.39
@@ -55,7 +57,7 @@ Keyboards, mice, and some other devices which are blacklisted from having
 hidraw nodes will not work. Fortunately, for nearly all the uses of hidraw,
 this is not a problem.
 
-__Linux/FreeBSD/libusb__ (`libusb/hid.c`):
+#### __Linux/FreeBSD/libusb__ (`libusb/hid.c`):
 
 This back-end uses libusb-1.0 to communicate directly to a USB device. This
 back-end will of course not work with Bluetooth devices.
@@ -65,7 +67,7 @@ back-end will of course not work with Bluetooth devices.
 HIDAPI also comes with a Test GUI. The Test GUI is cross-platform and uses
 Fox Toolkit <http://www.fox-toolkit.org>.  It will build on every platform
 which HIDAPI supports.  Since it relies on a 3rd party library, building it
-is optional but recommended because it is so useful when debugging hardware.
+is optional but it is useful when debugging hardware.
 
 NOTE: Test GUI based on Fox Toolkit is not actively developed nor supported
 by HIDAPI team. It is kept as a historical artifact. It may even work sometime
@@ -73,6 +75,14 @@ or on some platforms, but it is not going to get any new features or bugfixes.
 
 Instructions for installing Fox-Toolkit on each platform is not provided.
 Make sure to use Fox-Toolkit v1.6 if you choose to use it.
+
+### Console Test App
+
+If you want to play around with your HID device before starting
+any development with HIDAPI and using a GUI app is not an option for you, you may try [`hidapitester`](https://github.com/todbot/hidapitester).
+
+This app has a console interface for most of the features supported
+by HIDAPI library.
 
 ## What Does the API Look Like?
 
@@ -83,15 +93,13 @@ Generic HID sample looks like this (with error checking removed for
 simplicity):
 
 **Warning: Only run the code you understand, and only when it conforms to the
-device spec. Writing data at random to your HID devices can break them.**
+device spec. Writing data (`hid_write`) at random to your HID devices can break them.**
 
 ```c
-#ifdef WIN32
-#include <windows.h>
-#endif
-#include <stdio.h>
-#include <stdlib.h>
-#include "hidapi.h"
+#include <stdio.h> // printf
+#include <wchar.h> // wprintf
+
+#include <hidapi.h>
 
 #define MAX_STR 255
 
