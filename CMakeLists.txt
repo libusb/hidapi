@@ -54,12 +54,16 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(IS_DEBUG_BUILD ON)
 endif()
 
+option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentation" ON)
+
+if(HIDAPI_ENABLE_ASAN)
+    add_compile_options(-fsanitize=address)
+endif()
+
 if(WIN32)
     # so far only Windows has tests
-    set(EnableAsanDump ${IS_DEBUG_BUILD})
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
-else()    
-    set(EnableAsanDump OFF)
+else()
     set(HIDAPI_WITH_TESTS OFF)
 endif()
 

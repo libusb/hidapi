@@ -10,9 +10,9 @@ set(SOURCES
     hidapi_hidsdi.h
 )
 
-if(EnableAsanDump)
+if(HIDAPI_ENABLE_ASAN)
     # Option /MTd needed to embedd ASAN library
-    add_compile_options(-fsanitize=address /MTd)
+    add_compile_options(/MTd)
 endif()
 
 if(BUILD_SHARED_LIBS)

@@ -55,7 +55,7 @@ foreach(TEST_CASE ${HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES})
           COMMAND hid_report_reconstructor_test "${TEST_PP_DATA}" "${TEST_EXPECTED_DESCRIPTOR}"
           WORKING_DIRECTORY "$<TARGET_FILE_DIR:hidapi_winapi>"
      )
-     if(EnableAsanDump)
+     if(HIDAPI_ENABLE_ASAN)
           set_property(TEST "WinHidReportReconstructTest_${TEST_CASE}" PROPERTY ENVIRONMENT "ASAN_SAVE_DUMPS=AsanDump_${TEST_CASE}.dmp")
      endif()
 endforeach()
