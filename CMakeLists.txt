@@ -56,8 +56,10 @@ endif()
 
 if(WIN32)
     # so far only Windows has tests
+    set(EnableAsanDump ${IS_DEBUG_BUILD})
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
-else()
+else()    
+    set(EnableAsanDump OFF)
     set(HIDAPI_WITH_TESTS OFF)
 endif()
 
