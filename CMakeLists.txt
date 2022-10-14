@@ -54,7 +54,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(IS_DEBUG_BUILD ON)
 endif()
 
-option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentation" ON)
+option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentation" OFF)
 
 if(HIDAPI_ENABLE_ASAN)
     add_compile_options(-fsanitize=address)

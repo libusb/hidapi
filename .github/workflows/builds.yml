@@ -124,7 +124,7 @@ jobs:
     - name: Configure CMake MSVC
       shell: cmd
       run: |
-        cmake -B build\msvc -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cmake -B build\msvc -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake MSVC
       working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
@@ -144,7 +144,7 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake NMake
       working-directory: build\nmake
       shell: cmd
@@ -166,7 +166,7 @@ jobs:
     - name: Configure CMake MinGW
       shell: cmd
       run: |
-        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
+        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DHIDAPI_WITH_TESTS=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
     - name: Build CMake MinGW
       working-directory: build\mingw
       run: cmake --build . --target install
