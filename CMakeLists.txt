@@ -56,7 +56,7 @@ endif()
 
 option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentation" OFF)
 
-if(HIDAPI_ENABLE_ASAN)
+if((HIDAPI_ENABLE_ASAN) AND (${IS_DEBUG_BUILD}))
     add_compile_options(-fsanitize=address)
 endif()
 

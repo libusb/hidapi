@@ -10,7 +10,7 @@ set(SOURCES
     hidapi_hidsdi.h
 )
 
-if(HIDAPI_ENABLE_ASAN)
+if((HIDAPI_ENABLE_ASAN) AND (${IS_DEBUG_BUILD}))
     # Option /MTd needed to embedd ASAN library
     add_compile_options(/MTd)
 endif()
