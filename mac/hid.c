@@ -1440,6 +1440,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		size_t copy_len = (size_t) descriptor_buf_len;
 
 		if (descriptor_buf == NULL || descriptor_buf_len < 0) {
+			register_device_error(dev, "Zero buffer/length");
 			return -1;
 		}
 
@@ -1451,6 +1452,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		return copy_len;
 	}
 	else {
+		register_device_error(dev, "Failed to get kIOHIDReportDescriptorKey property");
 		return -1;
 	}
 }
