@@ -409,6 +409,132 @@ static void* hid_internal_get_device_interface_property(const wchar_t* interface
 	return property_value;
 }
 
+static void hid_internal_towupper(wchar_t* string)
+{
+	for (wchar_t* p = string; *p; ++p) *p = towupper(*p);
+}
+
+static int hid_internal_extract_int_token_value(wchar_t* string, const wchar_t* token)
+{
+	int token_value;
+	wchar_t* startptr, * endptr;
+
+	startptr = wcsstr(string, token);
+	if (!startptr)
+		return -1;
+
+	startptr += wcslen(token);
+	token_value = wcstol(startptr, &endptr, 16);
+	if (endptr == startptr)
+		return -1;
+
+	return token_value;
+}
+
+static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_node)
+{
+	wchar_t *device_id = NULL, *hardware_ids = NULL;
+
+	device_id = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	if (!device_id)
+		goto end;
+
+	/* Normalize to upper case */
+	hid_internal_towupper(device_id);
+
+	/* Check for Xbox Common Controller class (XUSB) device.
+	   https://docs.microsoft.com/windows/win32/xinput/directinput-and-xusb-devices
+	   https://docs.microsoft.com/windows/win32/xinput/xinput-and-directinput
+	*/
+	if (hid_internal_extract_int_token_value(device_id, L"IG_") != -1) {
+		/* Get devnode parent to reach out USB device. */
+		if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
+			goto end;
+	}
+
+	/* Get the hardware ids from devnode */
+	hardware_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
+	if (!hardware_ids)
+		goto end;
+
+	/* Get additional information from USB device's Hardware ID
+	   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
+	   https://docs.microsoft.com/windows-hardware/drivers/usbcon/enumeration-of-interfaces-not-grouped-in-collections
+	*/
+	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
+		/* Normalize to upper case */
+		hid_internal_towupper(hardware_id);
+
+		if (dev->release_number == 0) {
+			/* USB_DEVICE_DESCRIPTOR.bcdDevice value. */
+			int release_number = hid_internal_extract_int_token_value(hardware_id, L"REV_");
+			if (release_number != -1) {
+				dev->release_number = (unsigned short)release_number;
+			}
+		}
+
+		if (dev->interface_number == -1) {
+			/* USB_INTERFACE_DESCRIPTOR.bInterfaceNumber value. */
+			int interface_number = hid_internal_extract_int_token_value(hardware_id, L"MI_");
+			if (interface_number != -1) {
+				dev->interface_number = interface_number;
+			}
+		}
+	}
+
+	/* Try to get USB device manufacturer string if not provided by HidD_GetManufacturerString. */
+	if (wcslen(dev->manufacturer_string) == 0) {
+		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_Manufacturer, DEVPROP_TYPE_STRING);
+		if (manufacturer_string) {
+			free(dev->manufacturer_string);
+			dev->manufacturer_string = manufacturer_string;
+		}
+	}
+
+	/* Try to get USB device serial number if not provided by HidD_GetSerialNumberString. */
+	if (wcslen(dev->serial_number) == 0) {
+		DEVINST usb_dev_node = dev_node;
+		if (dev->interface_number != -1) {
+			/* Get devnode parent to reach out composite parent USB device.
+			   https://docs.microsoft.com/windows-hardware/drivers/usbcon/enumeration-of-the-composite-parent-device
+			*/
+			if (CM_Get_Parent(&usb_dev_node, dev_node, 0) != CR_SUCCESS)
+				goto end;
+		}
+
+		/* Get the device id of the USB device. */
+		free(device_id);
+		device_id = hid_internal_get_devnode_property(usb_dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+		if (!device_id)
+			goto end;
+
+		/* Extract substring after last '\\' of Instance ID.
+		   For USB devices it may contain device's serial number.
+		   https://docs.microsoft.com/windows-hardware/drivers/install/instance-ids
+		*/
+		for (wchar_t *ptr = device_id + wcslen(device_id); ptr > device_id; --ptr) {
+			/* Instance ID is unique only within the scope of the bus.
+			   For USB devices it means that serial number is not available. Skip. */
+			if (*ptr == L'&')
+				break;
+
+			if (*ptr == L'\\') {
+				free(dev->serial_number);
+				dev->serial_number = _wcsdup(ptr + 1);
+				break;
+			}
+		}
+	}
+
+	/* If we can't get the interface number, it means that there is only one interface. */
+	if (dev->interface_number == -1)
+		dev->interface_number = 0;
+
+end:
+	free(device_id);
+	free(hardware_ids);
+}
+
 /* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
    Request this info via dev node properties instead.
    https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html
@@ -452,34 +578,9 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 }
 
-/* USB Device Interface Number.
-   It can be parsed out of the Hardware ID if a USB device is has multiple interfaces (composite device).
-   See https://docs.microsoft.com/windows-hardware/drivers/hid/hidclass-hardware-ids-for-top-level-collections
-   and https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
-
-   hardware_id is always expected to be uppercase.
-*/
-static int hid_internal_get_interface_number(const wchar_t* hardware_id)
-{
-	int interface_number;
-	wchar_t *startptr, *endptr;
-	const wchar_t *interface_token = L"&MI_";
-
-	startptr = wcsstr(hardware_id, interface_token);
-	if (!startptr)
-		return -1;
-
-	startptr += wcslen(interface_token);
-	interface_number = wcstol(startptr, &endptr, 16);
-	if (endptr == startptr)
-		return -1;
-
-	return interface_number;
-}
-
 static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
-	wchar_t *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
+	wchar_t *device_id = NULL, *compatible_ids = NULL;
 	CONFIGRET cr;
 	DEVINST dev_node;
 
@@ -492,22 +593,6 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
 	if (cr != CR_SUCCESS)
 		goto end;
-
-	/* Get the hardware ids from devnode */
-	hardware_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
-	if (!hardware_ids)
-		goto end;
-
-	/* Search for interface number in hardware ids */
-	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
-		/* Normalize to upper case */
-		for (wchar_t* p = hardware_id; *p; ++p) *p = towupper(*p);
-
-		dev->interface_number = hid_internal_get_interface_number(hardware_id);
-
-		if (dev->interface_number != -1)
-			break;
-	}
 
 	/* Get devnode parent */
 	cr = CM_Get_Parent(&dev_node, dev_node, 0);
@@ -522,13 +607,14 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	/* Now we can parse parent's compatible IDs to find out the device bus type */
 	for (wchar_t* compatible_id = compatible_ids; *compatible_id; compatible_id += wcslen(compatible_id) + 1) {
 		/* Normalize to upper case */
-		for (wchar_t* p = compatible_id; *p; ++p) *p = towupper(*p);
+		hid_internal_towupper(compatible_id);
 
 		/* USB devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support
 		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
 		if (wcsstr(compatible_id, L"USB") != NULL) {
 			dev->bus_type = HID_API_BUS_USB;
+			hid_internal_get_usb_info(dev, dev_node);
 			break;
 		}
 
@@ -562,7 +648,6 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	}
 end:
 	free(device_id);
-	free(hardware_ids);
 	free(compatible_ids);
 }
 
@@ -607,9 +692,14 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	/* Create the record. */
 	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
 
+	if (dev == NULL) {
+		return NULL;
+	}
+
 	/* Fill out the record */
 	dev->next = NULL;
 	dev->path = hid_internal_UTF16toUTF8(path);
+	dev->interface_number = -1;
 
 	attrib.Size = sizeof(HIDD_ATTRIBUTES);
 	if (HidD_GetAttributes(handle, &attrib)) {
