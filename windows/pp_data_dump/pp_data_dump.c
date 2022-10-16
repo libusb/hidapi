@@ -1,11 +1,8 @@
-#include <stdio.h>
-#include <wchar.h>
-#include <string.h>
-#include <stdlib.h>
 
-#include <../windows/hidapi_descriptor_reconstruct.h>
 
 #include <hid.c>
+#include <../windows/hidapi_descriptor_reconstruct.h>
+
 #include <hidapi.h>
 
 void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
