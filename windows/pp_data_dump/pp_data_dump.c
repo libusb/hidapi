@@ -5,6 +5,11 @@
 
 #include <hidapi.h>
 
+#if defined(__MINGW32__)
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
+#endif
+
 void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
 	fprintf(file, "pp_data->cap[%d]->UsagePage                    = 0x%04hX\n", cap_idx, pp_cap->UsagePage);
 	fprintf(file, "pp_data->cap[%d]->ReportID                     = 0x%02hhX\n", cap_idx, pp_cap->ReportID);
@@ -155,7 +160,6 @@ int main(int argc, char* argv[])
 	(void)argc;
 	(void)argv;
 
-	int res;
 	#define MAX_STR 255
 
 	struct hid_device_info *devs, *cur_dev;
@@ -201,11 +205,16 @@ int main(int argc, char* argv[])
 				fprintf(file, "dev->usage_page          = 0x%04hX\n", cur_dev->usage_page);
 				fprintf(file, "dev->path                = \"%s\"\n", cur_dev->path);
 				fprintf(file, "\n# Preparsed Data struct:\n");
-				res = dump_pp_data(file, device);
+				int res = dump_pp_data(file, device);
 
+				if (res == 0) {
+					printf("Dumped Preparsed Data to %s\n", filename);
+				}
+				else {
+					printf("ERROR: Dump Preparsed Data to %s failed!\n", filename);
+				}
 
 				fclose(file);
-				printf("Dumped Preparsed Data to %s\n", filename);
 			}
 
 			hid_close(device);
