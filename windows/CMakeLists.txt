@@ -49,3 +49,7 @@ hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
 if(HIDAPI_WITH_TESTS)
      add_subdirectory(test)
 endif()
+
+if(HIDAPI_BUILD_PP_DATA_DUMP)
+    add_subdirectory(pp_data_dump)
+endif()
