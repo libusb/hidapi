@@ -1182,8 +1182,12 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
+	errno_t err = wcsncpy_s(string, maxlen, dev->device_info->manufacturer_string, MAX_STRING_WCHARS);
 	string[maxlen - 1] = L'\0';
+
+	if (err) {
+		register_string_error(dev, L"Buffer to small");
+	}
 
 	register_string_error(dev, NULL);
 
@@ -1202,8 +1206,12 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->product_string, maxlen);
+	errno_t err = wcsncpy_s(string, maxlen, dev->device_info->product_string, MAX_STRING_WCHARS);
 	string[maxlen - 1] = L'\0';
+
+	if (err) {
+		register_string_error(dev, L"Buffer to small");
+	}
 
 	register_string_error(dev, NULL);
 
@@ -1222,8 +1230,12 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->serial_number, maxlen);
+	errno_t err = wcsncpy_s(string, maxlen, dev->device_info->serial_number, MAX_STRING_WCHARS);
 	string[maxlen - 1] = L'\0';
+
+	if (err) {
+		register_string_error(dev, L"Buffer to small");
+	}
 
 	register_string_error(dev, NULL);
 
