@@ -539,10 +539,12 @@ int main(int argc, char* argv[])
 			goto end;
 		}
 		else {
+			result = EXIT_FAILURE;
 			fprintf(stderr, "Reconstructed Report Descriptor has different content than expected\n");
 		}
 	}
 	else {
+		result = EXIT_FAILURE;
 		fprintf(stderr, "Reconstructed Report Descriptor has different size: %zu when expected %zu\n", report_descriptor_size, expected_report_descriptor_size);
 	}
 
