@@ -67,8 +67,6 @@ endif()
 
 if(WIN32)
     option(HIDAPI_BUILD_PP_DATA_DUMP "Build small Windows console application pp_data_dump.exe" ${IS_DEBUG_BUILD})
-else()
-    set(HIDAPI_BUILD_PP_DATA_DUMP OFF)
 endif()
 
 add_subdirectory(src)
