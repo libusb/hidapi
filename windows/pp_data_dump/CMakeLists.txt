@@ -3,7 +3,7 @@ project(pp_data_dump C)
 set(HIDAPI_pp_data_dump_TARGETS)
 if(WIN32)
     add_executable(pp_data_dump pp_data_dump.c)    
-    set_target_properties(hid_report_reconstructor_test
+    set_target_properties(pp_data_dump
         PROPERTIES
             C_STANDARD 11
             C_STANDARD_REQUIRED TRUE
