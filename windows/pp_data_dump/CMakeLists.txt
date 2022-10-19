@@ -10,6 +10,6 @@ target_link_libraries(pp_data_dump
     PRIVATE hidapi_winapi
 )
 
-install(TARGETS ${HIDAPI_pp_data_dump_TARGETS}
+install(TARGETS pp_data_dump
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
