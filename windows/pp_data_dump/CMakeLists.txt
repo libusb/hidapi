@@ -7,7 +7,7 @@ set_target_properties(pp_data_dump
         C_STANDARD_REQUIRED TRUE
 )
 target_link_libraries(pp_data_dump
-PRIVATE hidapi_include hidapi_winapi
+    PRIVATE hidapi_winapi
 )
 
 install(TARGETS ${HIDAPI_pp_data_dump_TARGETS}
