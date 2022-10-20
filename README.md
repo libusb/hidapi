@@ -120,19 +120,19 @@ int main(int argc, char* argv[])
 
 	// Read the Manufacturer String
 	res = hid_get_manufacturer_string(handle, wstr, MAX_STR);
-	wprintf(L"Manufacturer String: %s\n", wstr);
+	wprintf(L"Manufacturer String: %ls\n", wstr);
 
 	// Read the Product String
 	res = hid_get_product_string(handle, wstr, MAX_STR);
-	wprintf(L"Product String: %s\n", wstr);
+	wprintf(L"Product String: %ls\n", wstr);
 
 	// Read the Serial Number String
 	res = hid_get_serial_number_string(handle, wstr, MAX_STR);
-	wprintf(L"Serial Number String: (%d) %s\n", wstr[0], wstr);
+	wprintf(L"Serial Number String: (%d) %ls\n", wstr[0], wstr);
 
 	// Read Indexed String 1
 	res = hid_get_indexed_string(handle, 1, wstr, MAX_STR);
-	wprintf(L"Indexed String 1: %s\n", wstr);
+	wprintf(L"Indexed String 1: %ls\n", wstr);
 
 	// Toggle LED (cmd 0x80). The first byte is the report number (0x0).
 	buf[0] = 0x0;
