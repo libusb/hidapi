@@ -117,6 +117,10 @@ int main(int argc, char* argv[])
 	// Open the device using the VID, PID,
 	// and optionally the Serial number.
 	handle = hid_open(0x4d8, 0x3f, NULL);
+	if (!handle) {
+		printf("Unable to open device\n");
+ 		return 1;
+	}
 
 	// Read the Manufacturer String
 	res = hid_get_manufacturer_string(handle, wstr, MAX_STR);
