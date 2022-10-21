@@ -119,8 +119,7 @@ int main(int argc, char* argv[])
 	handle = hid_open(0x4d8, 0x3f, NULL);
 	if (!handle) {
 		printf("Unable to open device\n");
-
-		hid_exit()
+		hid_exit();
  		return 1;
 	}
 
