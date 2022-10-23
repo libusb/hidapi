@@ -50,6 +50,6 @@ if(HIDAPI_WITH_TESTS)
      add_subdirectory(test)
 endif()
 
-if(HIDAPI_BUILD_PP_DATA_DUMP)
+if(DEFINED HIDAPI_BUILD_PP_DATA_DUMP AND HIDAPI_BUILD_PP_DATA_DUMP)
     add_subdirectory(pp_data_dump)
 endif()
