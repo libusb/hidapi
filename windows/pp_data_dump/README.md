@@ -16,7 +16,10 @@ for each top-level collection, of each connected HID device.
 
 The content of such a .pp_data file looks like the struct, which HIDAPI uses internally to represent the Preparsed Data.
 
-*Note: Microsoft doesn't document this structure, the original might differ in some detail.*
+*NOTE:
+Windows parses HID report descriptors into opaque `_HIDP_PREPARSED_DATA` objects.
+The internal structure of `_HIDP_PREPARSED_DATA` is reserved for internal system use.\
+Microsoft doesn't document this structure. [hid_preparsed_data.cc](https://chromium.googlesource.com/chromium/src/+/73fdaaf605bb60caf34d5f30bb84a417688aa528/services/device/hid/hid_preparsed_data.cc) is taken as a reference for its parsing.*
 
 ```
 # HIDAPI device info struct:
