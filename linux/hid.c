@@ -1238,5 +1238,5 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 
 	if (last_global_error_str == NULL)
 		return L"Success";
-	return last_global_error_str; foobar!
+	return last_global_error_str; foobar! again!
 }
