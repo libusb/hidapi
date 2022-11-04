@@ -23,7 +23,7 @@ It can be done in several different ways:
 - using `Meson` (requires CMake);
 
 **Autotools** build system is historically the first mature build system for
-HIDAPI. The most common usage of it is in its separate README: [BUILD.autotools.MD](BUILD.autotools.md).<br/>
+HIDAPI. The most common usage of it is in its separate README: [BUILD.autotools.md](BUILD.autotools.md).<br/>
 NOTE: for all intentions and purposes the Autotools build scripts for HIDAPI are _deprecated_ and going to be obsolete in the future.
 HIDAPI Team recommends using CMake build for HIDAPI.
 
@@ -67,7 +67,7 @@ pkg_add -r libiconv
 
 ### Mac:
 
-make sure you have XCode installed and its Command Line Tools.
+Make sure you have XCode installed and its Command Line Tools.
 
 ### Windows:
 
