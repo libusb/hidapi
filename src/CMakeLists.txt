@@ -71,6 +71,10 @@ endfunction()
 
 # The library
 
+if(HIDAPI_INSTALL_TARGETS)
+    include(GNUInstallDirs)
+endif()
+
 add_library(hidapi_include INTERFACE)
 target_include_directories(hidapi_include INTERFACE
     "$<BUILD_INTERFACE:${PROJECT_ROOT}/hidapi>"
@@ -82,7 +86,6 @@ set(HIDAPI_PUBLIC_HEADERS "${PROJECT_ROOT}/hidapi/hidapi.h")
 add_library(hidapi::include ALIAS hidapi_include)
 
 if(HIDAPI_INSTALL_TARGETS)
-    include(GNUInstallDirs)
     install(TARGETS hidapi_include EXPORT hidapi)
 endif()
 
@@ -160,7 +163,7 @@ if(HIDAPI_INSTALL_TARGETS)
     include(CMakePackageConfigHelpers)
     set(EXPORT_DENERATED_LOCATION "${CMAKE_BINARY_DIR}/export_generated")
     set(EXPORT_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/hidapi")
-    write_basic_package_version_file("${EXPORT_DENERATED_LOCATION}/libhidapi-version.cmake"
+    write_basic_package_version_file("${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
         COMPATIBILITY SameMajorVersion
     )
     configure_package_config_file("cmake/hidapi-config.cmake.in" "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
@@ -174,7 +177,7 @@ if(HIDAPI_INSTALL_TARGETS)
         FILE "libhidapi.cmake"
     )
     install(FILES
-            "${EXPORT_DENERATED_LOCATION}/libhidapi-version.cmake"
+            "${EXPORT_DENERATED_LOCATION}/hidapi-config-version.cmake"
             "${EXPORT_DENERATED_LOCATION}/hidapi-config.cmake"
         DESTINATION "${EXPORT_DESTINATION}"
     )
