@@ -65,6 +65,16 @@ jobs:
         meson setup build_meson hidapisrc
         cd build_meson
         ninja
+    - name: Check CMake Export Package Shared
+      run: |
+        cmake \
+          -B build/shared_test \
+          -S hidapisrc/hidtest \
+          -Dhidapi_ROOT=install/shared \
+          -DCMAKE_INSTALL_PREFIX=install/shared_test \
+          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}" \
+        cd build/shared_test
+        make install
 
   ubuntu-cmake:
 
@@ -107,6 +117,16 @@ jobs:
         meson setup build_meson hidapisrc
         cd build_meson
         ninja
+    - name: Check CMake Export Package Shared
+      run: |
+        cmake \
+          -B build/shared_test \
+          -S hidapisrc/hidtest \
+          -Dhidapi_ROOT=install/shared \
+          -DCMAKE_INSTALL_PREFIX=install/shared_test \
+          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}" \
+        cd build/shared_test
+        make install
 
   windows-cmake:
 
@@ -136,6 +156,17 @@ jobs:
                 install/msvc/include/hidapi/hidapi.h, \
                 install/msvc/include/hidapi/hidapi_winapi.h"
         allow_failure: true
+    - name: Check CMake Export Package
+      shell: cmd
+      run: |
+        cmake \
+          -B build\msvc_test \
+          -S hidapisrc\hidtest \
+          -Dhidapi_ROOT=install\msvc \
+          -DCMAKE_INSTALL_PREFIX=install\msvc_test \
+          "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%" \
+        cd build\msvc_test
+        cmake --build . --target install
 
     - name: Configure CMake NMake
       shell: cmd
@@ -156,6 +187,18 @@ jobs:
                 install/nmake/include/hidapi/hidapi.h, \
                 install/nmake/include/hidapi/hidapi_winapi.h"
         allow_failure: true
+    - name: Check CMake Export Package NMake
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake \
+          -B build\nmake_test \
+          -S hidapisrc\hidtest \
+          -Dhidapi_ROOT=install\nmake \
+          -DCMAKE_INSTALL_PREFIX=install\nmake_test \
+          "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%" \
+        cd build\nmake_test
+        nmake install
 
     - name: Configure CMake MinGW
       shell: cmd
