@@ -593,6 +593,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 		case BUS_BLUETOOTH:
 		case BUS_I2C:
 		case BUS_USB:
+		case BUS_SPI:
 			break;
 
 		default:
@@ -678,6 +679,14 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
 
 			cur_dev->bus_type = HID_API_BUS_I2C;
+
+			break;
+
+		case BUS_SPI:
+			cur_dev->manufacturer_string = wcsdup(L"");
+			cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
+
+			cur_dev->bus_type = HID_API_BUS_SPI;
 
 			break;
 
