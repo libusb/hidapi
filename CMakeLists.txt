@@ -65,6 +65,10 @@ if(HIDAPI_WITH_TESTS)
     enable_testing()
 endif()
 
+if(WIN32)
+    option(HIDAPI_BUILD_PP_DATA_DUMP "Build small Windows console application pp_data_dump.exe" ${IS_DEBUG_BUILD})
+endif()
+
 add_subdirectory(src)
 
 option(HIDAPI_BUILD_HIDTEST "Build small console test application hidtest" ${IS_DEBUG_BUILD})
