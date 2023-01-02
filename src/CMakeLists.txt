@@ -80,7 +80,7 @@ target_include_directories(hidapi_include INTERFACE
     "$<BUILD_INTERFACE:${PROJECT_ROOT}/hidapi>"
 )
 if(APPLE AND CMAKE_FRAMEWORK)
-    # FIXME: it is untrivial to set the include path for Framework correctly
+    # FIXME: https://github.com/libusb/hidapi/issues/492: it is untrivial to set the include path for Framework correctly
 else()
     target_include_directories(hidapi_include INTERFACE
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/hidapi>"
