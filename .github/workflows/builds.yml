@@ -250,12 +250,12 @@ jobs:
       run: |
         cmake ^
           -G"MinGW Makefiles" ^
-          -B build\ming_test ^
+          -B build\mingw_test ^
           -S hidapisrc\hidtest ^
           -Dhidapi_ROOT=install\mingw ^
           -DCMAKE_INSTALL_PREFIX=install\mingw_test ^
           "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
-        cd build\ming_test
+        cd build\mingw_test
         cmake --build . --target install
 
     - name: Check Meson build
