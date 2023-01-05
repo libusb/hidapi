@@ -92,7 +92,7 @@ void print_hid_report_descriptor_from_path(const char *path) {
 		hid_close(device);
 	}
 	else {
-		printf("  Report Descriptor: not available.\n");
+		printf("  Report Descriptor: Unable to open device by path\n");
 	}
 }
 

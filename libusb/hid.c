@@ -592,14 +592,14 @@ static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int in
  */
 static void fill_device_info_usage(struct hid_device_info *cur_dev, libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size)
 {
-	unsigned char hid_report[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+	unsigned char hid_report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
 	unsigned short page = 0, usage = 0;
 
-	int res = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, hid_report, sizeof(hid_report));
+	int res = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, hid_report_descriptor, sizeof(hid_report_descriptor));
 	if (res >= 0) {
 		/* Parse the usage and usage page
 		   out of the report descriptor. */
-		get_usage(hid_report, res,  &page, &usage);
+		get_usage(hid_report_descriptor, res,  &page, &usage);
 	}
 
 	cur_dev->usage_page = page;
@@ -967,6 +967,7 @@ static void read_callback(struct libusb_transfer *transfer)
 
 static void *read_thread(void *param)
 {
+	int res;
 	hid_device *dev = param;
 	uint8_t *buf;
 	const size_t length = dev->input_ep_max_packet_size;
@@ -985,14 +986,18 @@ static void *read_thread(void *param)
 
 	/* Make the first submission. Further submissions are made
 	   from inside read_callback() */
-	libusb_submit_transfer(dev->transfer);
+	res = libusb_submit_transfer(dev->transfer);
+	if(res < 0) {
+                LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
+                dev->shutdown_thread = 1;
+                dev->transfer_loop_finished = 1;
+	}
 
 	/* Notify the main thread that the read thread is up and running. */
 	pthread_barrier_wait(&dev->barrier);
 
 	/* Handle all the events. */
 	while (!dev->shutdown_thread) {
-		int res;
 		res = libusb_handle_events(usb_context);
 		if (res < 0) {
 			/* There was an error. */
