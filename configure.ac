@@ -123,6 +123,7 @@ case $host in
 	os="windows"
 	threads="windows"
 	win_implementation="mingw"
+	LDFLAGS="${LDFLAGS} -static-libgcc"
 	;;
 *-msys*)
 	AC_MSG_RESULT([ (Windows back-end, using MSYS2)])
@@ -130,6 +131,7 @@ case $host in
 	os="windows"
 	threads="windows"
 	win_implementation="mingw"
+	LDFLAGS="${LDFLAGS} -static-libgcc"
 	;;
 *-cygwin*)
 	AC_MSG_RESULT([ (Windows back-end, using Cygwin)])
