@@ -403,7 +403,7 @@ static int parse_hid_vid_pid_from_uevent(const char *uevent, unsigned *bus_type,
 	size_t uevent_len = strlen(uevent);
 	if (uevent_len > sizeof(tmp) - 1)
 		uevent_len = sizeof(tmp) - 1;
-	memcpy(tmp, uevent, sizeof(tmp));
+	memcpy(tmp, uevent, uevent_len);
 	tmp[uevent_len] = '\0';
 
 	char *saveptr = NULL;
