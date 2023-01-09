@@ -25,7 +25,9 @@ set_target_properties(hidapi_winapi
         EXPORT_NAME "winapi"
         OUTPUT_NAME "hidapi"
         VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
+        SUFFIX "-${PROJECT_VERSION_MAJOR}${CMAKE_SHARED_LIBRARY_SUFFIX}"
 )
 
 # compatibility with find_package()
