@@ -409,32 +409,46 @@ static void* hid_internal_get_device_interface_property(const wchar_t* interface
 	return property_value;
 }
 
+/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
+   Request this info via dev node properties instead.
+   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html
+*/
 static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
 {
-	wchar_t *manufacturer_string, *serial_number, *product_string;
-	/* Manufacturer String */
-	manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
-	if (manufacturer_string) {
-		free(dev->manufacturer_string);
-		dev->manufacturer_string = manufacturer_string;
+	if (wcslen(dev->manufacturer_string) == 0) {
+		/* Manufacturer Name String (UUID: 0x2A29) */
+		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
+		if (manufacturer_string) {
+			free(dev->manufacturer_string);
+			dev->manufacturer_string = manufacturer_string;
+		}
 	}
 
-	/* Serial Number String (MAC Address) */
-	serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
-	if (serial_number) {
-		free(dev->serial_number);
-		dev->serial_number = serial_number;
+	if (wcslen(dev->serial_number) == 0) {
+		/* Serial Number String (UUID: 0x2A25) */
+		wchar_t* serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
+		if (serial_number) {
+			free(dev->serial_number);
+			dev->serial_number = serial_number;
+		}
 	}
 
-	/* Get devnode grandparent to reach out Bluetooth LE device node */
-	if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
-		return;
+	if (wcslen(dev->product_string) == 0) {
+		/* Model Number String (UUID: 0x2A24) */
+		wchar_t* product_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
+		if (!product_string) {
+			/* Get devnode grandparent to reach out Bluetooth LE device node */
+			if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
+				return;
 
-	/* Product String */
-	product_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
-	if (product_string) {
-		free(dev->product_string);
-		dev->product_string = product_string;
+			/* Device Name (UUID: 0x2A00) */
+			product_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+		}
+
+		if (product_string) {
+			free(dev->product_string);
+			dev->product_string = product_string;
+		}
 	}
 }
 
@@ -527,12 +541,8 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
-			/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
-			   Request this info via dev node properties instead.
-			   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html */
-			hid_internal_get_ble_info(dev, dev_node);
-
 			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			hid_internal_get_ble_info(dev, dev_node);
 			break;
 		}
 
