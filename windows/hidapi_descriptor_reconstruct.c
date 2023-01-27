@@ -543,6 +543,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				// INPUT, OUTPUT or FEATURE
 				if (list->FirstBit != -1) {
 					if ((last_bit_position[list->MainItemType][list->ReportID] + 1 != list->FirstBit) &&
+						(last_report_item_lookup[list->MainItemType][list->ReportID] != NULL) &&
 						(last_report_item_lookup[list->MainItemType][list->ReportID]->FirstBit != list->FirstBit) // Happens in case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array
 						) {
 						struct rd_main_item_node *list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
