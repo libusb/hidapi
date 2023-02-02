@@ -342,9 +342,13 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 					for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 						for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 							for (int child_idx = 1; child_idx < coll_number_of_direct_childs[collection_node_idx]; child_idx++) {
-								if ((coll_bit_range[child_idx - 1][reportid_idx][rt_idx]->FirstBit != -1) &&
-									(coll_bit_range[child_idx][reportid_idx][rt_idx]->FirstBit != -1) &&
-									(coll_bit_range[child_idx - 1][reportid_idx][rt_idx]->FirstBit > coll_bit_range[child_idx][reportid_idx][rt_idx]->FirstBit)) {
+								// since the coll_bit_range array is not sorted, we need to reference the collection index in 
+								// our sorted coll_child_order array, and look up the corresponding bit ranges for comparing values to sort
+								int prev_coll_idx = coll_child_order[collection_node_idx][child_idx - 1];
+								int cur_coll_idx = coll_child_order[collection_node_idx][child_idx];
+								if ((coll_bit_range[prev_coll_idx][reportid_idx][rt_idx]->FirstBit != -1) &&
+									(coll_bit_range[cur_coll_idx][reportid_idx][rt_idx]->FirstBit != -1) &&
+									(coll_bit_range[prev_coll_idx][reportid_idx][rt_idx]->FirstBit > coll_bit_range[cur_coll_idx][reportid_idx][rt_idx]->FirstBit)) {
 									// Swap position indices of the two compared child collections
 									USHORT idx_latch = coll_child_order[collection_node_idx][child_idx - 1];
 									coll_child_order[collection_node_idx][child_idx - 1] = coll_child_order[collection_node_idx][child_idx];
@@ -562,7 +566,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 					int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 					if (padding < 8) {
 						// Insert padding item after item referenced in last_report_item_lookup
-						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx], last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
 					}
 				}
 			}
