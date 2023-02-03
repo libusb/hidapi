@@ -566,7 +566,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 					int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 					if (padding < 8) {
 						// Insert padding item after item referenced in last_report_item_lookup
-						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + 1 + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
 					}
 				}
 			}
