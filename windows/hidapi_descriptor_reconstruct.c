@@ -551,7 +551,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 						(last_report_item_lookup[list->MainItemType][list->ReportID]->FirstBit != list->FirstBit) // Happens in case of IsMultipleItemsForArray for multiple dedicated usages for a multi-button array
 						) {
 						struct rd_main_item_node *list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
-						rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID], list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
+						rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID] + 1, list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
 					}
 					last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
 					last_report_item_lookup[list->MainItemType][list->ReportID] = list;
@@ -566,7 +566,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 					int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 					if (padding < 8) {
 						// Insert padding item after item referenced in last_report_item_lookup
-						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + 1 + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
 					}
 				}
 			}
@@ -656,7 +656,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			// in the reports are filled with the same style of constant padding. 
 
 			// Write "Report Size" with number of padding bits
-			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit), &rpt_desc);
+			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit + 1), &rpt_desc);
 
 			// Write "Report Count" for padding always as 1
 			rd_write_short_item(rd_global_report_count, 1, &rpt_desc);
