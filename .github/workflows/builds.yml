@@ -197,8 +197,11 @@ jobs:
         cd build\msvc_test
         cmake --build . --target install
     - name: Run CTest MSVC
+      shell: cmd
       working-directory: build/msvc
-      run: ctest -C RelWithDebInfo --output-on-failure
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        ctest -C RelWithDebInfo --output-on-failure
 
     - name: Configure CMake NMake
       shell: cmd
@@ -233,8 +236,11 @@ jobs:
         cd build\nmake_test
         nmake install
     - name: Run CTest NMake
+      shell: cmd
       working-directory: build\nmake
-      run: ctest --output-on-failure
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        ctest --output-on-failure
 
     - name: Configure CMake MinGW
       shell: cmd
