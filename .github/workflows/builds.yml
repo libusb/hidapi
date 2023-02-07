@@ -245,7 +245,7 @@ jobs:
     - name: Configure CMake MinGW
       shell: cmd
       run: |
-        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
+        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
     - name: Build CMake MinGW
       working-directory: build\mingw
       run: cmake --build . --target install
