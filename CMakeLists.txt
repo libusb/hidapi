@@ -56,8 +56,10 @@ endif()
 
 option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentation" OFF)
 
-if((HIDAPI_ENABLE_ASAN) AND (${IS_DEBUG_BUILD}))
-    add_compile_options(-fsanitize=address)
+if(HIDAPI_ENABLE_ASAN)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address")
 endif()
 
 if(WIN32)
