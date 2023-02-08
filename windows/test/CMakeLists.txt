@@ -41,6 +41,14 @@ set(HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES
      047F_C056_0005_000B
 )
 
+set(CMAKE_VERSION_SUPPORTS_ENVIRONMENT_MODIFICATION "3.22")
+
+if(HIDAPI_ENABLE_ASAN AND MSVC)
+     if(CMAKE_VERSION VERSION_LESS CMAKE_VERSION_SUPPORTS_ENVIRONMENT_MODIFICATION)
+          message("CTest/ASAN: Make sure to run ctest from MSVC Command Prompt")
+     endif()
+endif()
+
 foreach(TEST_CASE ${HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES})
      set(TEST_PP_DATA "${CMAKE_CURRENT_LIST_DIR}/data/${TEST_CASE}.pp_data")
      if(NOT EXISTS "${TEST_PP_DATA}")
@@ -56,6 +64,12 @@ foreach(TEST_CASE ${HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES})
           WORKING_DIRECTORY "$<TARGET_FILE_DIR:hidapi_winapi>"
      )
      if(HIDAPI_ENABLE_ASAN)
+          if(MSVC)
+               if(NOT CMAKE_VERSION VERSION_LESS CMAKE_VERSION_SUPPORTS_ENVIRONMENT_MODIFICATION)
+                    get_filename_component(MSVC_BUILD_TOOLS_DIR "${CMAKE_LINKER}" DIRECTORY)
+                    set_property(TEST "WinHidReportReconstructTest_${TEST_CASE}" PROPERTY ENVIRONMENT_MODIFICATION "PATH=path_list_append:${MSVC_BUILD_TOOLS_DIR}")
+               endif()
+          endif()
           set_property(TEST "WinHidReportReconstructTest_${TEST_CASE}" PROPERTY ENVIRONMENT "ASAN_SAVE_DUMPS=AsanDump_${TEST_CASE}.dmp")
      endif()
 endforeach()
