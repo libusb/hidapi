@@ -53,7 +53,7 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_PATCH 0
+#define HID_API_VERSION_PATCH 1
 
 /* Helper macros */
 #define HID_API_AS_STR_IMPL(x) #x
