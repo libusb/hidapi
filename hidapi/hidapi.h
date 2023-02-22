@@ -7,7 +7,7 @@
 
  libusb/hidapi Team
 
- Copyright 2022, All Rights Reserved.
+ Copyright 2023, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
@@ -30,10 +30,15 @@
 #include <wchar.h>
 
 #ifdef _WIN32
+   /* #480: this is to be refactored properly for v1.0 */
+   #ifndef HID_API_EXPORT
       #define HID_API_EXPORT __declspec(dllexport)
+   #endif
       #define HID_API_CALL
 #else
+   #ifndef HID_API_EXPORT
       #define HID_API_EXPORT /**< API export macro */
+   #endif
       #define HID_API_CALL /**< API call macro */
 #endif
 
