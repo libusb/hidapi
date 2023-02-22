@@ -18,7 +18,7 @@ void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
 	fprintf(file, "pp_data->cap[%d]->ReportCount                  = %hu\n", cap_idx, pp_cap->ReportCount);
 	fprintf(file, "pp_data->cap[%d]->BytePosition                 = 0x%04hX\n", cap_idx, pp_cap->BytePosition);
 	fprintf(file, "pp_data->cap[%d]->BitCount                     = %hu\n", cap_idx, pp_cap->BitCount);
-	fprintf(file, "pp_data->cap[%d]->BitField                     = 0x%02X\n", cap_idx, pp_cap->BitField);
+	fprintf(file, "pp_data->cap[%d]->BitField                     = 0x%02lX\n", cap_idx, pp_cap->BitField);
 	fprintf(file, "pp_data->cap[%d]->NextBytePosition             = 0x%04hX\n", cap_idx, pp_cap->NextBytePosition);
 	fprintf(file, "pp_data->cap[%d]->LinkCollection               = 0x%04hX\n", cap_idx, pp_cap->LinkCollection);
 	fprintf(file, "pp_data->cap[%d]->LinkUsagePage                = 0x%04hX\n", cap_idx, pp_cap->LinkUsagePage);
@@ -39,7 +39,7 @@ void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
 	for (int token_idx = 0; token_idx < 4; token_idx++) {
 		fprintf(file, "pp_data->cap[%d]->pp_cap->UnknownTokens[%d].Token    = 0x%02hhX\n", cap_idx, token_idx, pp_cap->UnknownTokens[token_idx].Token);
 		fprintf(file, "pp_data->cap[%d]->pp_cap->UnknownTokens[%d].Reserved = 0x%02hhX%02hhX%02hhX\n", cap_idx, token_idx, pp_cap->UnknownTokens[token_idx].Reserved[0], pp_cap->UnknownTokens[token_idx].Reserved[1], pp_cap->UnknownTokens[token_idx].Reserved[2]);
-		fprintf(file, "pp_data->cap[%d]->pp_cap->UnknownTokens[%d].BitField = 0x%08X\n", cap_idx, token_idx, pp_cap->UnknownTokens[token_idx].BitField);
+		fprintf(file, "pp_data->cap[%d]->pp_cap->UnknownTokens[%d].BitField = 0x%08lX\n", cap_idx, token_idx, pp_cap->UnknownTokens[token_idx].BitField);
 	}
 
 	if (pp_cap->IsRange) {
@@ -64,20 +64,20 @@ void dump_hid_pp_cap(FILE* file, phid_pp_cap pp_cap, unsigned int cap_idx) {
 	}
 
 	if (pp_cap->IsButtonCap) {
-		fprintf(file, "pp_data->cap[%d]->Button.LogicalMin                   = %d\n", cap_idx, pp_cap->Button.LogicalMin);
-		fprintf(file, "pp_data->cap[%d]->Button.LogicalMax                   = %d\n", cap_idx, pp_cap->Button.LogicalMax);
+		fprintf(file, "pp_data->cap[%d]->Button.LogicalMin                   = %ld\n", cap_idx, pp_cap->Button.LogicalMin);
+		fprintf(file, "pp_data->cap[%d]->Button.LogicalMax                   = %ld\n", cap_idx, pp_cap->Button.LogicalMax);
 	}
 	else
 	{
 		fprintf(file, "pp_data->cap[%d]->NotButton.HasNull                   = %hhu\n", cap_idx, pp_cap->NotButton.HasNull);
 		fprintf(file, "pp_data->cap[%d]->NotButton.Reserved4                 = 0x%02hhX%02hhX%02hhX\n", cap_idx, pp_cap->NotButton.Reserved4[0], pp_cap->NotButton.Reserved4[1], pp_cap->NotButton.Reserved4[2]);
-		fprintf(file, "pp_data->cap[%d]->NotButton.LogicalMin                = %d\n", cap_idx, pp_cap->NotButton.LogicalMin);
-		fprintf(file, "pp_data->cap[%d]->NotButton.LogicalMax                = %d\n", cap_idx, pp_cap->NotButton.LogicalMax);
-		fprintf(file, "pp_data->cap[%d]->NotButton.PhysicalMin               = %d\n", cap_idx, pp_cap->NotButton.PhysicalMin);
-		fprintf(file, "pp_data->cap[%d]->NotButton.PhysicalMax               = %d\n", cap_idx, pp_cap->NotButton.PhysicalMax);
+		fprintf(file, "pp_data->cap[%d]->NotButton.LogicalMin                = %ld\n", cap_idx, pp_cap->NotButton.LogicalMin);
+		fprintf(file, "pp_data->cap[%d]->NotButton.LogicalMax                = %ld\n", cap_idx, pp_cap->NotButton.LogicalMax);
+		fprintf(file, "pp_data->cap[%d]->NotButton.PhysicalMin               = %ld\n", cap_idx, pp_cap->NotButton.PhysicalMin);
+		fprintf(file, "pp_data->cap[%d]->NotButton.PhysicalMax               = %ld\n", cap_idx, pp_cap->NotButton.PhysicalMax);
 	};
-	fprintf(file, "pp_data->cap[%d]->Units                    = %u\n", cap_idx, pp_cap->Units);
-	fprintf(file, "pp_data->cap[%d]->UnitsExp                 = %u\n", cap_idx, pp_cap->UnitsExp);
+	fprintf(file, "pp_data->cap[%d]->Units                    = %lu\n", cap_idx, pp_cap->Units);
+	fprintf(file, "pp_data->cap[%d]->UnitsExp                 = %lu\n", cap_idx, pp_cap->UnitsExp);
 }
 
 void dump_hidp_link_collection_node(FILE* file, phid_pp_link_collection_node pcoll, unsigned int coll_idx) {
