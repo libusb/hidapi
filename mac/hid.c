@@ -511,14 +511,10 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		/* max value of entry_id(uint64_t) is 18446744073709551615 which is 20 characters long,
 		   so for (max) "path" string 'DevSrvsID:18446744073709551615' we would need
 		   9+1+20+1=31 bytes buffer, but allocate 32 for simple alignment */
-		cur_dev->path = calloc(1, 32);
+		const size_t path_len = 32;
+		cur_dev->path = calloc(1, path_len);
 		if (cur_dev->path != NULL) {
-			/* Yes, compiler, we know that snprintf is preferable,
-			   but we're not ready to abandon older macOS-es/SDKs where it is not yet available */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-			sprintf(cur_dev->path, "DevSrvsID:%llu", entry_id);
-#pragma GCC diagnostic pop
+			snprintf(cur_dev->path, path_len, "DevSrvsID:%llu", entry_id);
 		}
 	}
 
@@ -988,16 +984,9 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	dev->max_input_report_len = (CFIndex) get_max_report_length(dev->device_handle);
 	dev->input_report_buf = (uint8_t*) calloc(dev->max_input_report_len, sizeof(uint8_t));
 
-
-/* Yes, compiler, we know that snprintf is preferable,
-   but we're not ready to abandon older macOS-es/SDKs where it is not yet available */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 	/* Create the Run Loop Mode for this device.
 	   printing the reference seems to work. */
-	sprintf(str, "HIDAPI_%p", (void*) dev->device_handle);
-#pragma GCC diagnostic pop
-
+	snprintf(str, sizeof(str), "HIDAPI_%p", (void*) dev->device_handle);
 	dev->run_loop_mode =
 		CFStringCreateWithCString(NULL, str, kCFStringEncodingASCII);
 
