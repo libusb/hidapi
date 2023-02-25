@@ -29,17 +29,31 @@
 
 #include <wchar.h>
 
-#ifdef _WIN32
-   /* #480: this is to be refactored properly for v1.0 */
-   #ifndef HID_API_EXPORT
-      #define HID_API_EXPORT __declspec(dllexport)
-   #endif
-      #define HID_API_CALL
+#if defined _WIN32 || defined __CYGWIN__
+#  define HID_API_DEF_IMPORT __declspec(dllimport)
+#  define HID_API_DEF_EXPORT __declspec(dllexport)
+#  define HID_API_DEF_LOCAL
 #else
-   #ifndef HID_API_EXPORT
-      #define HID_API_EXPORT /**< API export macro */
-   #endif
-      #define HID_API_CALL /**< API call macro */
+#  if __GNUC__ >= 4
+#    define HID_API_DEF_IMPORT __attribute__ ((visibility ("default")))
+#    define HID_API_DEF_EXPORT __attribute__ ((visibility ("default")))
+#    define HID_API_DEF_LOCAL  __attribute__ ((visibility ("hidden")))
+#  else
+#    define HID_API_DEF_IMPORT
+#    define HID_API_DEF_EXPORT
+#    define HID_API_DEF_LOCAL
+#  endif
+#endif
+#ifndef HID_API_STATIC
+#  ifdef HID_API_DYNAMIC_EXPORT
+#    define HID_API_EXPORT HID_API_DEF_EXPORT
+#  else
+#    define HID_API_EXPORT HID_API_DEF_IMPORT
+#  endif
+#  define HID_API_CALL
+#  else
+#    define HID_API_EXPORT
+#    define HID_API_CALL
 #endif
 
 #define HID_API_EXPORT_CALL HID_API_EXPORT HID_API_CALL /**< API export and call macro*/

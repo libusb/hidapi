@@ -165,6 +165,12 @@ endif()
 
 add_library(hidapi::hidapi ALIAS hidapi_${EXPORT_ALIAS})
 
+if(NOT BUILD_SHARED_LIBS)
+	target_compile_definitions(hidapi_${EXPORT_ALIAS} PRIVATE HID_API_STATIC)
+else()
+	target_compile_definitions(hidapi_${EXPORT_ALIAS} PRIVATE HID_API_DYNAMIC_EXPORT)
+endif()
+
 if(HIDAPI_INSTALL_TARGETS)
     include(CMakePackageConfigHelpers)
     set(EXPORT_DENERATED_LOCATION "${CMAKE_BINARY_DIR}/export_generated")
