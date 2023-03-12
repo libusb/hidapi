@@ -254,16 +254,19 @@ There is a historical discussion, why such solution is simplest/preferable: http
 # First - configure/build
 
 # Static libraries
-cmake -S <HIDAPI source dir> -B "<build dir>/static" -DCMAKE_INSTALL_PREFIX=<where you need to install HIDAPI> -DBUILD_SHARED_LIBS=FALSE
+cmake -S <HIDAPI source dir> -B "<build dir>/static" -DCMAKE_INSTALL_PREFIX=<your installation prefix> -DBUILD_SHARED_LIBS=FALSE
 cmake --build "<build dir>/static"
 # Shared libraries
-cmake -S <HIDAPI source dir> -B "<build dir>/static" -DCMAKE_INSTALL_PREFIX=<where you need to install HIDAPI> -DBUILD_SHARED_LIBS=TRUE
+cmake -S <HIDAPI source dir> -B "<build dir>/static" -DCMAKE_INSTALL_PREFIX=<your installation prefix> -DBUILD_SHARED_LIBS=TRUE
 cmake --build "<build dir>/shared"
 
-# (Optionally) change the installation destination
-# NOTE1: this is supported by CMake only on some platforms
-# NOTE2: this is *not required*, if the `$pkgdir` already passed as `CMAKE_INSTALL_PREFIX` above
-export DESTDIR="$pkgdir"
+# (Optionally) change the installation destination.
+# NOTE1: this is supported by CMake only on UNIX platforms
+#  See https://cmake.org/cmake/help/latest/envvar/DESTDIR.html
+# NOTE2: this is not the same as `CMAKE_INSTALL_PREFIX` set above
+# NOTE3: this is only required if you have a staging dir other than the final runtime dir,
+#  e.g. during cross-compilation
+export DESTDIR="$STAGING_DIR"
 
 #
 # Install the libraries
