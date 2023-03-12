@@ -53,12 +53,12 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 13
+#define HID_API_VERSION_MINOR 14
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
 */
-#define HID_API_VERSION_PATCH 1
+#define HID_API_VERSION_PATCH 0
 
 /* Helper macros */
 #define HID_API_AS_STR_IMPL(x) #x
@@ -551,6 +551,8 @@ extern "C" {
 		int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen);
 
 		/** @brief Get a report descriptor from a HID device.
+
+			Since version 0.14.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
 
 			User has to provide a preallocated buffer where descriptor will be copied to.
 			The recommended size for preallocated buffer is @ref HID_API_MAX_REPORT_DESCRIPTOR_SIZE bytes.
