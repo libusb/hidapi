@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#include "hidapi.h"
+#include "hidapi_winapi.h"
 
 #include <windows.h>
 
@@ -1307,6 +1307,22 @@ end:
 }
 
 
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
+{
+	PHIDP_PREPARSED_DATA pp_data = NULL;
+
+	if (!HidD_GetPreparsedData(dev->device_handle, &pp_data) || pp_data == NULL) {
+		register_string_error(dev, L"HidD_GetPreparsedData");
+		return -1;
+	}
+
+	int res = hid_winapi_descriptor_reconstruct_pp_data(pp_data, buf, buf_size);
+
+	HidD_FreePreparsedData(pp_data);
+
+	return res;
+}
+
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
 	if (dev) {
@@ -1319,6 +1335,10 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 		return L"Success";
 	return last_global_error_str;
 }
+
+#ifndef hidapi_winapi_EXPORTS
+#include "hidapi_descriptor_reconstruct.c"
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

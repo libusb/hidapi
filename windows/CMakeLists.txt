@@ -3,6 +3,8 @@ list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_winapi.h")
 set(SOURCES
     hid.c
     hidapi_cfgmgr32.h
+    hidapi_descriptor_reconstruct.c
+    hidapi_descriptor_reconstruct.h
     hidapi_hidclass.h
     hidapi_hidpi.h
     hidapi_hidsdi.h
@@ -51,3 +53,11 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+
+if(HIDAPI_WITH_TESTS)
+     add_subdirectory(test)
+endif()
+
+if(DEFINED HIDAPI_BUILD_PP_DATA_DUMP AND HIDAPI_BUILD_PP_DATA_DUMP)
+    add_subdirectory(pp_data_dump)
+endif()

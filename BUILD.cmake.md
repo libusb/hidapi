@@ -88,6 +88,8 @@ Some of the [standard](https://cmake.org/cmake/help/latest/manual/cmake-variable
 HIDAPI-specific CMake variables:
 
 - `HIDAPI_BUILD_HIDTEST` - when set to TRUE, build a small test application `hidtest`;
+- `HIDAPI_WITH_TESTS` - when set to TRUE, build all (unit-)tests;
+currently this option is only available on Windows, since only Windows backend has tests;
 
 <details>
   <summary>Linux-specific variables</summary>
