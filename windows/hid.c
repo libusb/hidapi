@@ -437,12 +437,12 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 		/* Model Number String (UUID: 0x2A24) */
 		wchar_t* product_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
 		if (!product_string) {
-			/* Get devnode grandparent to reach out Bluetooth LE device node */
-			if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
-				return;
-
-			/* Device Name (UUID: 0x2A00) */
-			product_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+			DEVINST parent_dev_node = 0;
+			/* Fallback: Get devnode grandparent to reach out Bluetooth LE device node */
+			if (CM_Get_Parent(&parent_dev_node, dev_node, 0) == CR_SUCCESS) {
+				/* Device Name (UUID: 0x2A00) */
+				product_string = hid_internal_get_devnode_property(parent_dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+			}
 		}
 
 		if (product_string) {
