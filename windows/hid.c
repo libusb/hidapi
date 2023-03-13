@@ -52,7 +52,6 @@ typedef LONG NTSTATUS;
 
 /*#define HIDAPI_USE_DDK*/
 
-#include <devpropdef.h>
 #include "hidapi_cfgmgr32.h"
 #include "hidapi_hidclass.h"
 #include "hidapi_hidsdi.h"
