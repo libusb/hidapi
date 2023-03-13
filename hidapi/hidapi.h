@@ -169,9 +169,9 @@ extern "C" {
 			/** The USB interface which this logical device
 			    represents.
 
-				* Valid only if the device is a USB HID device.
-				* Set to -1 in all other cases.
-				  */
+			    Valid only if the device is a USB HID device.
+			    Set to -1 in all other cases.
+			*/
 			int interface_number;
 
 			/** Pointer to the next device */
