@@ -113,6 +113,13 @@ if(WIN32)
     add_subdirectory("${PROJECT_ROOT}/windows" windows)
     set(EXPORT_ALIAS winapi)
     list(APPEND EXPORT_COMPONENTS winapi)
+    if(NOT DEFINED HIDAPI_WITH_WINRT)
+        set(HIDAPI_WITH_WINRT OFF)
+    endif()
+    if(HIDAPI_WITH_WINRT)
+        add_subdirectory("${PROJECT_ROOT}/winrt" winrt)
+        list(APPEND EXPORT_COMPONENTS winrt)
+    endif()
 elseif(APPLE)
     target_include_directories(hidapi_include INTERFACE
         "$<BUILD_INTERFACE:${PROJECT_ROOT}/mac>"

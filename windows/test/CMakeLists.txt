@@ -5,6 +5,12 @@ set_target_properties(hid_report_reconstructor_test
         C_STANDARD_REQUIRED TRUE
 )
 
+if(MSVC)
+    target_compile_options(hid_report_reconstructor_test
+         PRIVATE /wd5105
+    )
+endif()
+
 target_link_libraries(hid_report_reconstructor_test
      PRIVATE hidapi_include hidapi_winapi
 )

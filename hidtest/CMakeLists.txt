@@ -35,6 +35,12 @@ else()
     list(APPEND HIDAPI_HIDTEST_TARGETS hidtest)
 endif()
 
+if(WIN32 AND TARGET hidapi::winrt)
+    add_executable(hidtest-winrt test.c)
+    target_link_libraries(hidtest-winrt hidapi::winrt)
+    list(APPEND HIDAPI_HIDTEST_TARGETS hidtest-winrt)
+endif()
+
 install(TARGETS ${HIDAPI_HIDTEST_TARGETS}
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
