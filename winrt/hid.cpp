@@ -1,6 +1,9 @@
 #include <hidapi.h>
 
+#include <cwchar>
+
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <winrt/base.h>
@@ -8,48 +11,13 @@
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/Windows.Devices.HumanInterfaceDevice.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Storage.Streams.h>
 
 namespace WinHid = winrt::Windows::Devices::HumanInterfaceDevice;
-
-// has to be defined in global namespace
-struct hid_device_
-{
-    WinHid::HidDevice handle{nullptr};
-
-    hid_device_(const winrt::hstring &id)
-    {
-        handle = WinHid::HidDevice::FromIdAsync(id,
-                                                winrt::Windows::Storage::FileAccessMode::ReadWrite)
-                     .get();
-        if (!handle) {
-            handle = WinHid::HidDevice::FromIdAsync(id,
-                                                    winrt::Windows::Storage::FileAccessMode::Read)
-                         .get();
-        }
-
-        if (!handle) {
-            throw std::runtime_error("Failed to open device: " + winrt::to_string(id));
-        }
-    }
-
-    bool blocking;
-    std::wstring last_error_str;
-    struct hid_device_info *device_info = nullptr;
-};
+namespace WinStreams = winrt::Windows::Storage::Streams;
+namespace WinEnumeration = winrt::Windows::Devices::Enumeration;
 
 namespace {
-
-static const struct hid_api_version api_version = {
-    HID_API_VERSION_MAJOR,
-    HID_API_VERSION_MINOR,
-    HID_API_VERSION_PATCH //
-};
-
-static std::wstring &GlobalErrorStr()
-{
-    static std::wstring global_error;
-    return global_error;
-}
 
 struct HidDeviceInfoExt : public hid_device_info
 {
@@ -59,19 +27,109 @@ struct HidDeviceInfoExt : public hid_device_info
         interface_number = -1;
     }
 
+    void FillFrom(const WinEnumeration::DeviceInformation &dev_info)
+    {
+        owned_path = to_string(dev_info.Id());
+        path = owned_path.data();
+        owned_product_string = dev_info.Name();
+        product_string = const_cast<wchar_t *>(owned_product_string.c_str());
+    }
+
+    void FillFrom(const WinHid::HidDevice &dev)
+    {
+        vendor_id = dev.VendorId();
+        product_id = dev.ProductId();
+        release_number = dev.Version();
+        usage_page = dev.UsagePage();
+        usage = dev.UsageId();
+    }
+
     std::string owned_path;
     winrt::hstring owned_product_string;
 };
 
-auto WinRTHidEnumerate(unsigned short vendor_id, unsigned short product_id)
-{
-    namespace WinEnumeration = winrt::Windows::Devices::Enumeration;
+} // namespace
 
-    std::wstring enumeration_selector
-        = L"System.Devices.InterfaceClassGuid:=\"{4D1E55B2-F16F-11CF-88CB-"
-          L"001111000030}\" AND "
-          L"System.Devices.InterfaceEnabled:=System.StructuredQueryType."
-          L"Boolean#True";
+// has to be defined in global namespace
+struct hid_device_
+{
+    WinHid::HidDevice handle{nullptr};
+
+    hid_device_(const WinEnumeration::DeviceInformation &dev_info)
+        : hid_device_(dev_info.Id())
+    {
+        m_info = dev_info;
+    }
+
+    hid_device_(const winrt::hstring &id)
+        : m_id(id)
+        , m_info{nullptr}
+    {
+        handle = WinHid::HidDevice::FromIdAsync( //
+                     id,
+                     winrt::Windows::Storage::FileAccessMode::ReadWrite)
+                     .get();
+        if (!handle) {
+            // ReadOnly fallback
+            handle = WinHid::HidDevice::FromIdAsync( //
+                         id,
+                         winrt::Windows::Storage::FileAccessMode::Read)
+                         .get();
+        }
+
+        if (!handle) {
+            throw std::runtime_error("Failed to open device: " + winrt::to_string(id));
+        }
+    }
+
+    bool blocking = false;
+    std::wstring last_error_str;
+
+    HidDeviceInfoExt &GetInfo()
+    {
+        if (!m_device_info) {
+            if (!m_info) {
+                m_info = WinEnumeration::DeviceInformation::CreateFromIdAsync(m_id).get();
+            }
+
+            m_device_info.emplace();
+            if (m_info) {
+                m_device_info->FillFrom(m_info);
+            }
+            if (handle) {
+                m_device_info->FillFrom(handle);
+            }
+        }
+
+        return *m_device_info;
+    }
+
+private:
+    winrt::hstring m_id;
+    WinEnumeration::DeviceInformation m_info;
+    std::optional<HidDeviceInfoExt> m_device_info;
+};
+
+namespace {
+
+static constexpr hid_api_version api_version{
+    HID_API_VERSION_MAJOR,
+    HID_API_VERSION_MINOR,
+    HID_API_VERSION_PATCH //
+};
+
+[[nodiscard]] static std::wstring &GlobalErrorStr()
+{
+    static std::wstring global_error;
+    return global_error;
+}
+
+[[nodiscard]] auto WinRTHidEnumerate(unsigned short vendor_id, unsigned short product_id)
+{
+    std::wstring enumeration_selector = //
+        L"System.Devices.InterfaceClassGuid:="
+        "\"{4D1E55B2-F16F-11CF-88CB-001111000030}\" AND "
+        L"System.Devices.InterfaceEnabled:=System.StructuredQueryType.Boolean#True";
 
     // enumeration_selector = WinHid::HidDevice::GetDeviceSelector(0, 0, vendor_id, product_id);
     // L" AND System.DeviceInterface.Hid.UsagePage:=0"
@@ -89,7 +147,7 @@ auto WinRTHidEnumerate(unsigned short vendor_id, unsigned short product_id)
     return WinEnumeration::DeviceInformation::FindAllAsync(enumeration_selector).get();
 }
 
-hid_device_info *do_hid_enumerate( //
+[[nodiscard]] hid_device_info *do_hid_enumerate( //
     unsigned short vendor_id,
     unsigned short product_id)
 {
@@ -102,21 +160,14 @@ hid_device_info *do_hid_enumerate( //
 
     for (const auto &device : devices) {
         auto info = std::make_unique<HidDeviceInfoExt>();
-        info->owned_path = to_string(device.Id());
-        info->path = info->owned_path.data();
-        info->owned_product_string = device.Name();
-        info->product_string = const_cast<wchar_t *>(info->owned_product_string.c_str());
+        info->FillFrom(device);
 
         auto dev_h = WinHid::HidDevice::FromIdAsync(device.Id(),
                                                     winrt::Windows::Storage::FileAccessMode::Read)
                          .get();
 
         if (dev_h) {
-            info->vendor_id = dev_h.VendorId();
-            info->product_id = dev_h.ProductId();
-            info->release_number = dev_h.Version();
-            info->usage_page = dev_h.UsagePage();
-            info->usage = dev_h.UsageId();
+            info->FillFrom(dev_h);
         }
 
         info->next = result.get();
@@ -127,7 +178,7 @@ hid_device_info *do_hid_enumerate( //
     return result.release();
 }
 
-hid_device *do_hid_open( //
+[[nodiscard]] hid_device *do_hid_open( //
     unsigned short vendor_id,
     unsigned short product_id)
 {
@@ -142,7 +193,49 @@ hid_device *do_hid_open( //
         return nullptr;
     }
 
-    return new hid_device_(devices.GetAt(0).Id());
+    return new hid_device_(devices.GetAt(0));
+}
+
+[[nodiscard]] WinStreams::IBuffer ToBuffer(const unsigned char *data, size_t data_size)
+{
+    // this is not the most efficient _possible_ way to create a n IBuffer,
+    // (due to dynamic allocation, etc.)
+    // but that is *the simplest* and recommended one:
+    winrt::Windows::Storage::Streams::DataWriter writer;
+    writer.WriteBytes({data, data + data_size});
+    return writer.DetachBuffer();
+}
+
+[[nodiscard]] size_t FromBuffer(const WinStreams::IBuffer &buffer,
+                                unsigned char *data,
+                                size_t data_size)
+{
+    const size_t copy_size = std::min(size_t(buffer.Length()), data_size);
+    auto reader = WinStreams::DataReader::FromBuffer(buffer);
+    reader.ReadBytes({data, data + copy_size});
+    return copy_size;
+}
+
+[[nodiscard]] int WinRTHidSendFeatureReport( //
+    WinHid::HidDevice &dev,
+    uint16_t report_id,
+    const WinStreams::IBuffer &report_buffer)
+{
+    auto report = dev.CreateFeatureReport(report_id);
+    report.Data(report_buffer);
+
+    return int(dev.SendFeatureReportAsync(report).get());
+}
+
+[[nodiscard]] int WinRTHidSendOutputReport( //
+    WinHid::HidDevice &dev,
+    uint16_t report_id,
+    const WinStreams::IBuffer &report_buffer)
+{
+    auto report = dev.CreateOutputReport(report_id);
+    report.Data(report_buffer);
+
+    return int(dev.SendOutputReportAsync(report).get());
 }
 
 } // namespace
@@ -194,6 +287,38 @@ int HID_API_EXPORT hid_exit(void)
     return 0;
 }
 
+#define HIDAPI_CATCH_GLOBAL_EXCEPTION(ERR_PREFIX) \
+    catch (const ::winrt::hresult_error &e) \
+    { \
+        GlobalErrorStr() = ERR_PREFIX " error: "; \
+        GlobalErrorStr() += e.message(); \
+    } \
+    catch (const std::exception &e) \
+    { \
+        GlobalErrorStr() = ERR_PREFIX " error: "; \
+        GlobalErrorStr() += ::winrt::to_hstring(e.what()); \
+    } \
+    catch (...) \
+    { \
+        GlobalErrorStr() = ERR_PREFIX " error: UNKNOWN"; \
+    }
+
+#define HIDAPI_CATCH_DEVICE_EXCEPTION(ERR_PREFIX) \
+    catch (const ::winrt::hresult_error &e) \
+    { \
+        dev->last_error_str = ERR_PREFIX " error: "; \
+        dev->last_error_str += e.message(); \
+    } \
+    catch (const std::exception &e) \
+    { \
+        dev->last_error_str = ERR_PREFIX " error: "; \
+        dev->last_error_str += ::winrt::to_hstring(e.what()); \
+    } \
+    catch (...) \
+    { \
+        dev->last_error_str = ERR_PREFIX " error: UNKNOWN"; \
+    }
+
 struct hid_device_info HID_API_EXPORT *HID_API_CALL hid_enumerate( //
     unsigned short vendor_id,
     unsigned short product_id)
@@ -202,18 +327,11 @@ struct hid_device_info HID_API_EXPORT *HID_API_CALL hid_enumerate( //
 
     try {
         auto result = do_hid_enumerate(vendor_id, product_id);
-        if (result)
+        if (result != nullptr)
             GlobalErrorStr().clear();
         return result;
-    } catch (const hresult_error &e) {
-        GlobalErrorStr() = L"hid_enumerate error: ";
-        GlobalErrorStr() += e.message();
-    } catch (const std::exception &e) {
-        GlobalErrorStr() = L"hid_enumerate error: ";
-        GlobalErrorStr() += to_hstring(e.what());
-    } catch (...) {
-        GlobalErrorStr() = L"hid_enumerate error: UNKNOWN";
     }
+    HIDAPI_CATCH_GLOBAL_EXCEPTION(L"hid_enumerate")
     return nullptr;
 }
 
@@ -232,48 +350,30 @@ HID_API_EXPORT hid_device *HID_API_CALL hid_open( //
     unsigned short product_id,
     const wchar_t *serial_number)
 {
-    if (serial_number && serial_number[0] != L'\0') {
-        return nullptr;
-    }
-
-    using namespace winrt;
-
     try {
+        if (serial_number && serial_number[0] != L'\0') {
+            GlobalErrorStr() = L"WinRT HIDAPI backand does not support filtering bu SerialNumber";
+            return nullptr;
+        }
+
         auto result = do_hid_open(vendor_id, product_id);
-        if (result)
+        if (result != nullptr)
             GlobalErrorStr().clear();
         return result;
-    } catch (const hresult_error &e) {
-        GlobalErrorStr() = L"hid_open error: ";
-        GlobalErrorStr() += e.message();
-    } catch (const std::exception &e) {
-        GlobalErrorStr() = L"hid_open error: ";
-        GlobalErrorStr() += to_hstring(e.what());
-    } catch (...) {
-        GlobalErrorStr() = L"hid_open error: UNKNOWN";
     }
+    HIDAPI_CATCH_GLOBAL_EXCEPTION(L"hid_open")
     return nullptr;
 }
 
 HID_API_EXPORT hid_device *HID_API_CALL hid_open_path( //
     const char *path)
 {
-    using namespace winrt;
-
     try {
-        auto result = new hid_device_(to_hstring(path));
-        if (result)
-            GlobalErrorStr().clear();
+        auto result = new hid_device_(winrt::to_hstring(path));
+        GlobalErrorStr().clear();
         return result;
-    } catch (const hresult_error &e) {
-        GlobalErrorStr() = L"hid_open_path error: ";
-        GlobalErrorStr() += e.message();
-    } catch (const std::exception &e) {
-        GlobalErrorStr() = L"hid_open_path error: ";
-        GlobalErrorStr() += to_hstring(e.what());
-    } catch (...) {
-        GlobalErrorStr() = L"hid_open_path error: UNKNOWN";
     }
+    HIDAPI_CATCH_GLOBAL_EXCEPTION(L"hid_open_path")
     return nullptr;
 }
 
@@ -288,6 +388,21 @@ int HID_API_EXPORT HID_API_CALL hid_write( //
     const unsigned char *data,
     size_t length)
 {
+    try {
+        if (!data || !length) {
+            dev->last_error_str = L"Invalid buffer";
+            return -1;
+        }
+
+        const int result = WinRTHidSendOutputReport(dev->handle, data[0], ToBuffer(data, length));
+
+        if (result > 0) {
+            dev->last_error_str.clear();
+        }
+
+        return result;
+    }
+    HIDAPI_CATCH_DEVICE_EXCEPTION(L"hid_write")
     return -1;
 }
 
@@ -305,14 +420,14 @@ int HID_API_EXPORT HID_API_CALL hid_read( //
     unsigned char *data,
     size_t length)
 {
-    return -1;
+    return hid_read_timeout(dev, data, length, (dev->blocking) ? -1 : 0);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking( //
     hid_device *dev,
     int nonblock)
 {
-    return -1;
+    return dev->blocking = (nonblock == 0);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_send_feature_report( //
@@ -320,6 +435,21 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report( //
     const unsigned char *data,
     size_t length)
 {
+    try {
+        if (!data || !length) {
+            dev->last_error_str = L"Invalid buffer";
+            return -1;
+        }
+
+        const int result = WinRTHidSendFeatureReport(dev->handle, data[0], ToBuffer(data, length));
+
+        if (result > 0) {
+            dev->last_error_str.clear();
+        }
+
+        return result;
+    }
+    HIDAPI_CATCH_DEVICE_EXCEPTION(L"hid_send_feature_report")
     return -1;
 }
 
@@ -328,6 +458,31 @@ int HID_API_EXPORT HID_API_CALL hid_get_feature_report( //
     unsigned char *data,
     size_t length)
 {
+    try {
+        if (!data || !length) {
+            dev->last_error_str = L"Invalid buffer";
+            return -1;
+        }
+
+        auto report = dev->handle.GetFeatureReportAsync(data[0]).get();
+
+        if (!report) {
+            dev->last_error_str = L"Failed to get Feature Report";
+            return -1;
+        }
+
+        const size_t report_bytes = FromBuffer(report.Data(), data, length);
+
+        if (report_bytes == 0) {
+            dev->last_error_str = L"Got empty Feature report";
+            return -1;
+        } else {
+            dev->last_error_str.clear();
+        }
+
+        return int(report_bytes);
+    }
+    HIDAPI_CATCH_DEVICE_EXCEPTION(L"hid_get_feature_report")
     return -1;
 }
 
@@ -336,6 +491,31 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report( //
     unsigned char *data,
     size_t length)
 {
+    try {
+        if (!data || !length) {
+            dev->last_error_str = L"Invalid buffer";
+            return -1;
+        }
+
+        auto report = dev->handle.GetInputReportAsync(data[0]).get();
+
+        if (!report) {
+            dev->last_error_str = L"Failed to get Input Report";
+            return -1;
+        }
+
+        const size_t report_bytes = FromBuffer(report.Data(), data, length);
+
+        if (report_bytes == 0) {
+            dev->last_error_str = L"Got empty Input report";
+            return -1;
+        } else {
+            dev->last_error_str.clear();
+        }
+
+        return int(report_bytes);
+    }
+    HIDAPI_CATCH_DEVICE_EXCEPTION(L"hid_get_input_report")
     return -1;
 }
 
@@ -344,7 +524,26 @@ int HID_API_EXPORT_CALL hid_get_manufacturer_string( //
     wchar_t *string,
     size_t maxlen)
 {
-    return -1;
+    if (!string || !maxlen) {
+        dev->last_error_str = L"Invalid buffer";
+        return -1;
+    }
+
+    auto info = hid_get_device_info(dev);
+    if (!info) {
+        // error already set
+        return -1;
+    }
+
+    if (!info->manufacturer_string) {
+        dev->last_error_str = L"Manufacturer String is not availale";
+        return -1;
+    }
+
+    std::wcsncpy(string, info->manufacturer_string, maxlen);
+    string[maxlen - 1] = L'\0';
+
+    return 0;
 }
 
 int HID_API_EXPORT_CALL hid_get_product_string( //
@@ -352,7 +551,26 @@ int HID_API_EXPORT_CALL hid_get_product_string( //
     wchar_t *string,
     size_t maxlen)
 {
-    return -1;
+    if (!string || !maxlen) {
+        dev->last_error_str = L"Invalid buffer";
+        return -1;
+    }
+
+    auto info = hid_get_device_info(dev);
+    if (!info) {
+        // error already set
+        return -1;
+    }
+
+    if (!info->product_string) {
+        dev->last_error_str = L"Product String is not availale";
+        return -1;
+    }
+
+    std::wcsncpy(string, info->product_string, maxlen);
+    string[maxlen - 1] = L'\0';
+
+    return 0;
 }
 
 int HID_API_EXPORT_CALL hid_get_serial_number_string( //
@@ -360,29 +578,55 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string( //
     wchar_t *string,
     size_t maxlen)
 {
-    return -1;
+    if (!string || !maxlen) {
+        dev->last_error_str = L"Invalid buffer";
+        return -1;
+    }
+
+    auto info = hid_get_device_info(dev);
+    if (!info) {
+        // error already set
+        return -1;
+    }
+
+    if (!info->serial_number) {
+        dev->last_error_str = L"Serial Number is not availale";
+        return -1;
+    }
+
+    std::wcsncpy(string, info->serial_number, maxlen);
+    string[maxlen - 1] = L'\0';
+
+    return 0;
 }
 
 struct hid_device_info HID_API_EXPORT *HID_API_CALL hid_get_device_info( //
     hid_device *dev)
 {
-    return dev->device_info;
+    try {
+        return &dev->GetInfo();
+    }
+    HIDAPI_CATCH_DEVICE_EXCEPTION(L"hid_get_device_info")
+    return nullptr;
 }
 
 int HID_API_EXPORT_CALL hid_get_indexed_string( //
     hid_device *dev,
-    int string_index,
-    wchar_t *string,
-    size_t maxlen)
+    int /*string_index*/,
+    wchar_t * /*string*/,
+    size_t /*maxlen*/)
 {
+    dev->last_error_str = L"Not available for WinRT backend";
     return -1;
 }
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor( //
     hid_device *dev,
-    unsigned char *buf,
-    size_t buf_size)
+    unsigned char * /*buf*/,
+    size_t /*buf_size*/)
 {
+    dev->last_error_str = L"HID Report reconstruction is not implemnted for WinRT backend";
+
     return -1;
 }
 

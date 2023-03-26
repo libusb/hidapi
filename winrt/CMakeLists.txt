@@ -18,6 +18,8 @@ set_target_properties(hidapi_winrt
         CXX_STANDARD_REQUIRED TRUE
 )
 
+target_compile_definitions(hidapi_winrt PRIVATE _CRT_SECURE_NO_WARNINGS)
+
 target_link_libraries(hidapi_winrt
     PUBLIC hidapi_include
     PRIVATE windowsapp
