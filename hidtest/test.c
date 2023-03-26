@@ -141,14 +141,13 @@ int main(int argc, char* argv[])
 #endif
 
 	devs = hid_enumerate(0x0, 0x0);
-	print_devices_with_descriptor(devs);
-	hid_free_enumeration(devs);
-
-	// Set up the command buffer.
-	memset(buf,0x00,sizeof(buf));
-	buf[0] = 0x01;
-	buf[1] = 0x81;
-
+	if (devs) {
+		print_devices_with_descriptor(devs);
+		hid_free_enumeration(devs);
+	}
+	else {
+		printf("%ls\n", hid_error(NULL));
+	}
 
 	// Open the device using the VID, PID,
 	// and optionally the Serial number.
@@ -159,6 +158,11 @@ int main(int argc, char* argv[])
 		hid_exit();
  		return 1;
 	}
+
+	// Set up the command buffer.
+	memset(buf,0x00,sizeof(buf));
+	buf[0] = 0x01;
+	buf[1] = 0x81;
 
 	// Read the Manufacturer String
 	wstr[0] = 0x0000;
