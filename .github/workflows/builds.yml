@@ -173,7 +173,7 @@ jobs:
     - name: Configure CMake MSVC
       shell: cmd
       run: |
-        cmake -B build\msvc -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cmake -B build\msvc -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_WINRT=ON -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake MSVC
       working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
@@ -182,6 +182,8 @@ jobs:
       with:
         files: "install/msvc/lib/hidapi.lib, \
                 install/msvc/bin/hidapi.dll, \
+                install/msvc/lib/hidapi-winrt.lib, \
+                install/msvc/bin/hidapi-winrt.dll, \
                 install/msvc/include/hidapi/hidapi.h, \
                 install/msvc/include/hidapi/hidapi_winapi.h"
         fail: true
@@ -205,7 +207,7 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_WINRT=ON -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake NMake
       working-directory: build\nmake
       shell: cmd
@@ -217,6 +219,8 @@ jobs:
       with:
         files: "install/nmake/lib/hidapi.lib, \
                 install/nmake/bin/hidapi.dll, \
+                install/nmake/lib/hidapi-winrt.lib, \
+                install/nmake/bin/hidapi-winrt.dll, \
                 install/nmake/include/hidapi/hidapi.h, \
                 install/nmake/include/hidapi/hidapi_winapi.h"
         fail: true
