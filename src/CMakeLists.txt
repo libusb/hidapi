@@ -117,6 +117,9 @@ if(WIN32)
         set(HIDAPI_WITH_WINRT OFF)
     endif()
     if(HIDAPI_WITH_WINRT)
+        target_include_directories(hidapi_include INTERFACE
+            "$<BUILD_INTERFACE:${PROJECT_ROOT}/winrt>"
+        )
         add_subdirectory("${PROJECT_ROOT}/winrt" winrt)
         list(APPEND EXPORT_COMPONENTS winrt)
     endif()

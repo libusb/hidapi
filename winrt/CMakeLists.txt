@@ -1,4 +1,5 @@
 enable_language(CXX)
+list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_winrt.h")
 
 set(SOURCES
     hid.cpp

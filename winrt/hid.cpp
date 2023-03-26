@@ -1,4 +1,4 @@
-#include <hidapi.h>
+#include <hidapi_winrt.h>
 
 #include <cwchar>
 
@@ -29,10 +29,10 @@ struct HidDeviceInfoExt : public hid_device_info
 
     void FillFrom(const WinEnumeration::DeviceInformation &dev_info)
     {
-        owned_path = to_string(dev_info.Id());
-        path = owned_path.data();
-        owned_product_string = dev_info.Name();
-        product_string = const_cast<wchar_t *>(owned_product_string.c_str());
+        m_owned_path = to_string(dev_info.Id());
+        path = m_owned_path.data();
+        m_owned_product_string = dev_info.Name();
+        product_string = const_cast<wchar_t *>(m_owned_product_string.c_str());
     }
 
     void FillFrom(const WinHid::HidDevice &dev)
@@ -44,8 +44,9 @@ struct HidDeviceInfoExt : public hid_device_info
         usage = dev.UsageId();
     }
 
-    std::string owned_path;
-    winrt::hstring owned_product_string;
+private:
+    std::string m_owned_path;
+    winrt::hstring m_owned_product_string;
 };
 
 } // namespace
@@ -82,26 +83,48 @@ struct hid_device_
         }
     }
 
+    ~hid_device_()
+    {
+        if (handle) {
+            handle.Close();
+        }
+    }
+
     bool blocking = false;
     std::wstring last_error_str;
+
+    auto &GetWinRTDeviceInformation()
+    {
+        if (!m_info) {
+            m_info = WinEnumeration::DeviceInformation::CreateFromIdAsync(m_id).get();
+        }
+
+        if (!m_info) {
+            throw std::runtime_error("Failed to get DeviceInformation from Device Instance ID");
+        }
+
+        return m_info;
+    }
 
     HidDeviceInfoExt &GetInfo()
     {
         if (!m_device_info) {
-            if (!m_info) {
-                m_info = WinEnumeration::DeviceInformation::CreateFromIdAsync(m_id).get();
-            }
-
             m_device_info.emplace();
-            if (m_info) {
-                m_device_info->FillFrom(m_info);
-            }
+            m_device_info->FillFrom(GetWinRTDeviceInformation());
+
             if (handle) {
                 m_device_info->FillFrom(handle);
             }
         }
 
         return *m_device_info;
+    }
+
+    winrt::guid GetContainerId()
+    {
+        auto &info = GetWinRTDeviceInformation();
+        return winrt::unbox_value<winrt::guid>(
+            info.Properties().Lookup(L"System.Devices.ContainerId"));
     }
 
 private:
@@ -178,7 +201,7 @@ static constexpr hid_api_version api_version{
     return result.release();
 }
 
-[[nodiscard]] hid_device *do_hid_open( //
+[[nodiscard]] std::unique_ptr<hid_device> do_hid_open( //
     unsigned short vendor_id,
     unsigned short product_id)
 {
@@ -193,7 +216,7 @@ static constexpr hid_api_version api_version{
         return nullptr;
     }
 
-    return new hid_device_(devices.GetAt(0));
+    return std::make_unique<hid_device>(devices.GetAt(0));
 }
 
 [[nodiscard]] WinStreams::IBuffer ToBuffer(const unsigned char *data, size_t data_size)
@@ -357,9 +380,14 @@ HID_API_EXPORT hid_device *HID_API_CALL hid_open( //
         }
 
         auto result = do_hid_open(vendor_id, product_id);
-        if (result != nullptr)
-            GlobalErrorStr().clear();
-        return result;
+        if (result == nullptr) {
+            // error already set
+            return nullptr;
+        }
+
+        //        result->handle.;
+        GlobalErrorStr().clear();
+        return result.release();
     }
     HIDAPI_CATCH_GLOBAL_EXCEPTION(L"hid_open")
     return nullptr;
@@ -369,9 +397,10 @@ HID_API_EXPORT hid_device *HID_API_CALL hid_open_path( //
     const char *path)
 {
     try {
-        auto result = new hid_device_(winrt::to_hstring(path));
+        auto result = std::make_unique<hid_device>(winrt::to_hstring(path));
+
         GlobalErrorStr().clear();
-        return result;
+        return result.release();
     }
     HIDAPI_CATCH_GLOBAL_EXCEPTION(L"hid_open_path")
     return nullptr;
@@ -380,6 +409,8 @@ HID_API_EXPORT hid_device *HID_API_CALL hid_open_path( //
 void HID_API_EXPORT HID_API_CALL hid_close( //
     hid_device *dev)
 {
+    if (!dev)
+        return;
     delete dev;
 }
 
@@ -642,4 +673,10 @@ HID_API_EXPORT const wchar_t *HID_API_CALL hid_error( //
     if (GlobalErrorStr().empty())
         return L"Success";
     return GlobalErrorStr().c_str();
+}
+
+winrt::guid HID_API_EXPORT_CALL hid_winrt_get_container_id( //
+    hid_device *dev)
+{
+    return dev->GetContainerId();
 }
