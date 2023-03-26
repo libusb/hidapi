@@ -2,7 +2,11 @@
 
 #include <cwchar>
 
+#include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -86,8 +90,18 @@ struct hid_device_
     ~hid_device_()
     {
         if (handle) {
+            if (m_input_report_registration_token) {
+                handle.InputReportReceived(m_input_report_registration_token);
+            }
+
             handle.Close();
         }
+    }
+
+    void RegisterForInputReports()
+    {
+        m_input_report_registration_token = handle.InputReportReceived(
+            {this, &hid_device::OnInputReport});
     }
 
     bool blocking = false;
@@ -127,10 +141,20 @@ struct hid_device_
             info.Properties().Lookup(L"System.Devices.ContainerId"));
     }
 
+    size_t ReadInputReport(unsigned char *buf, size_t buf_size, int timeout_ms);
+
+private:
+    void OnInputReport(WinHid::HidDevice, WinHid::HidInputReportReceivedEventArgs args);
+
 private:
     winrt::hstring m_id;
     WinEnumeration::DeviceInformation m_info;
     std::optional<HidDeviceInfoExt> m_device_info;
+    winrt::event_token m_input_report_registration_token;
+
+    std::mutex m_input_reports_mutex;
+    std::condition_variable m_input_reports_condition;
+    std::deque<std::vector<unsigned char>> m_input_reports;
 };
 
 namespace {
@@ -239,6 +263,13 @@ static constexpr hid_api_version api_version{
     return copy_size;
 }
 
+[[nodiscard]] std::vector<unsigned char> FromBuffer(const WinStreams::IBuffer &buffer)
+{
+    std::vector<unsigned char> result(buffer.Length());
+    (void) FromBuffer(buffer, result.data(), result.size());
+    return result;
+}
+
 [[nodiscard]] int WinRTHidSendFeatureReport( //
     WinHid::HidDevice &dev,
     uint16_t report_id,
@@ -262,6 +293,51 @@ static constexpr hid_api_version api_version{
 }
 
 } // namespace
+
+size_t hid_device_::ReadInputReport(unsigned char *buf, size_t buf_size, int timeout_ms)
+{
+    const auto now = std::chrono::steady_clock::now();
+    std::unique_lock lck(m_input_reports_mutex);
+    if (m_input_reports.empty()) {
+        auto have_reports = [this]() { //
+            return !m_input_reports.empty();
+        };
+        if (timeout_ms < 0) {
+            m_input_reports_condition.wait(lck, have_reports);
+        } else {
+            m_input_reports_condition.wait_until( //
+                lck,
+                now + std::chrono::milliseconds(timeout_ms),
+                have_reports);
+        }
+    }
+
+    if (m_input_reports.empty()) {
+        return 0;
+    }
+
+    auto report = m_input_reports.front();
+    const size_t copy_size = std::min(report.size(), buf_size);
+    std::memcpy(buf, report.data(), copy_size);
+    m_input_reports.pop_front();
+    return copy_size;
+}
+
+void hid_device_::OnInputReport(WinHid::HidDevice, WinHid::HidInputReportReceivedEventArgs args)
+{
+    auto report = args.Report();
+
+    {
+        const std::unique_lock lck(m_input_reports_mutex);
+        m_input_reports.emplace_back(FromBuffer(report.Data()));
+
+        constexpr size_t MaxReportsQueue = 64;
+        if (m_input_reports.size() > MaxReportsQueue) {
+            m_input_reports.pop_front();
+        }
+    }
+    m_input_reports_condition.notify_all();
+}
 
 HID_API_EXPORT const struct hid_api_version *HID_API_CALL hid_version()
 {
@@ -385,7 +461,8 @@ HID_API_EXPORT hid_device *HID_API_CALL hid_open( //
             return nullptr;
         }
 
-        //        result->handle.;
+        result->RegisterForInputReports();
+
         GlobalErrorStr().clear();
         return result.release();
     }
@@ -398,6 +475,7 @@ HID_API_EXPORT hid_device *HID_API_CALL hid_open_path( //
 {
     try {
         auto result = std::make_unique<hid_device>(winrt::to_hstring(path));
+        result->RegisterForInputReports();
 
         GlobalErrorStr().clear();
         return result.release();
@@ -443,6 +521,21 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout( //
     size_t length,
     int milliseconds)
 {
+    try {
+        if (!data || !length) {
+            dev->last_error_str = L"Invalid buffer";
+            return -1;
+        }
+
+        const size_t result = dev->ReadInputReport(data, length, milliseconds);
+
+        if (result >= 0) {
+            dev->last_error_str.clear();
+        }
+
+        return int(result);
+    }
+    HIDAPI_CATCH_DEVICE_EXCEPTION(L"hid_read_timeout")
     return -1;
 }
 
