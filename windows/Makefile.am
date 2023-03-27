@@ -1,7 +1,7 @@
 lib_LTLIBRARIES = libhidapi.la
 libhidapi_la_SOURCES = hid.c
 libhidapi_la_LDFLAGS = $(LTLDFLAGS)
-AM_CPPFLAGS = -I$(top_srcdir)/hidapi/
+AM_CPPFLAGS = -I$(top_srcdir)/hidapi/ -DHID_API_DYNAMIC_EXPORT
 libhidapi_la_LIBADD = $(LIBS)
 
 hdrdir = $(includedir)/hidapi
