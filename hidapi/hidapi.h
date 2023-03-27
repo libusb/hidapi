@@ -29,15 +29,24 @@
 
 #include <wchar.h>
 
-/* #480: this is to be refactored properly for v1.0 */
-#ifdef _WIN32
-   #ifndef HID_API_NO_EXPORT_DEFINE
-      #define HID_API_EXPORT __declspec(dllexport)
-   #endif
-#endif
 #ifndef HID_API_EXPORT
-   #define HID_API_EXPORT /**< API export macro */
+#  if defined _WIN32 || defined __CYGWIN__
+#    define HID_API_DEF_IMPORT __declspec(dllimport)
+#    define HID_API_DEF_EXPORT __declspec(dllexport)
+#    ifndef HID_API_STATIC
+#      ifdef HID_API_DYNAMIC_EXPORT
+#        define HID_API_EXPORT HID_API_DEF_EXPORT
+#      else
+#        define HID_API_EXPORT HID_API_DEF_IMPORT
+#      endif
+#    else
+#      define HID_API_EXPORT
+#    endif
+#  else
+#    define HID_API_EXPORT
+#  endif
 #endif
+
 /* To be removed in v1.0 */
 #define HID_API_CALL /**< API call macro */
 

@@ -23,11 +23,9 @@ target_link_libraries(hidapi_winapi
 )
 
 if(NOT BUILD_SHARED_LIBS)
-    target_compile_definitions(hidapi_winapi
-        # prevent marking functions as __declspec(dllexport) for static library build
-        # #480: this should be refactored for v1.0
-        PUBLIC HID_API_NO_EXPORT_DEFINE
-    )
+	target_compile_definitions(hidapi_winapi PUBLIC HID_API_STATIC)
+else()
+	target_compile_definitions(hidapi_winapi PRIVATE HID_API_DYNAMIC_EXPORT)
 endif()
 
 set_target_properties(hidapi_winapi
