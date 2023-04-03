@@ -27,3 +27,6 @@ libtool
 
 # Qt Creator
 CMakeLists.txt.user
+
+# doxgen output
+doxygen/html/
