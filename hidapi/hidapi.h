@@ -107,9 +107,9 @@ extern "C" {
 #endif
 		/** A structure to hold the version numbers. */
 		struct hid_api_version {
-			int major; ///< major version number
-			int minor; ///< minor version number
-			int patch; ///< patch version number
+			int major; /**< major version number */
+			int minor; /**< minor version number */
+			int patch; /**< patch version number */
 		};
 
 		struct hid_device_;

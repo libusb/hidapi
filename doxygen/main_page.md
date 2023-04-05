@@ -6,8 +6,8 @@ For general information, see the [source repository](https://github.com/libusb/h
 
 There are also build instructions hosted on github:
 
-- [Building from source](https://github.com/2bndy5/hidapi/blob/master/BUILD.md)
-- [Using CMake](https://github.com/2bndy5/hidapi/blob/master/BUILD.cmake.md)
-- [Using Autotools (deprecated)](https://github.com/2bndy5/hidapi/blob/master/BUILD.autotools.md)
+- [Building from source](https://github.com/libusb/hidapi/blob/master/BUILD.md)
+- [Using CMake](https://github.com/libusb/hidapi/blob/master/BUILD.cmake.md)
+- [Using Autotools (deprecated)](https://github.com/libusb/hidapi/blob/master/BUILD.autotools.md)
 
 \example test.c contains a basic example usage of the HIDAPI library.
