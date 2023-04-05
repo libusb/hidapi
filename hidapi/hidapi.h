@@ -70,7 +70,9 @@
 	This macro was added in version 0.12.0.
 
 	Convenient function to be used for compile-time checks, like:
+	@code{.c}
 	#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+	@endcode
 
 	@ingroup API
 */
@@ -103,10 +105,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+		/** A structure to hold the version numbers. */
 		struct hid_api_version {
-			int major;
-			int minor;
-			int patch;
+			int major; /**< major version number */
+			int minor; /**< minor version number */
+			int patch; /**< patch version number */
 		};
 
 		struct hid_device_;
@@ -117,27 +120,27 @@ extern "C" {
 			@ingroup API
 		*/
 		typedef enum {
-			/* Unknown bus type */
+			/** Unknown bus type */
 			HID_API_BUS_UNKNOWN = 0x00,
 
-			/* USB bus
+			/** USB bus
 			   Specifications:
 			   https://usb.org/hid */
 			HID_API_BUS_USB = 0x01,
 
-			/* Bluetooth or Bluetooth LE bus
+			/** Bluetooth or Bluetooth LE bus
 			   Specifications:
 			   https://www.bluetooth.com/specifications/specs/human-interface-device-profile-1-1-1/
 			   https://www.bluetooth.com/specifications/specs/hid-service-1-0/
 			   https://www.bluetooth.com/specifications/specs/hid-over-gatt-profile-1-0/ */
 			HID_API_BUS_BLUETOOTH = 0x02,
 
-			/* I2C bus
+			/** I2C bus
 			   Specifications:
 			   https://docs.microsoft.com/previous-versions/windows/hardware/design/dn642101(v=vs.85) */
 			HID_API_BUS_I2C = 0x03,
 
-			/* SPI bus
+			/** SPI bus
 			   Specifications:
 			   https://www.microsoft.com/download/details.aspx?id=103325 */
 			HID_API_BUS_SPI = 0x04,
@@ -619,4 +622,3 @@ extern "C" {
 #endif
 
 #endif
-
