@@ -10,7 +10,7 @@ endif()
 
 set(VERSION "${CMAKE_MATCH_1}")
 string(STRIP "${CMAKE_MATCH_2}" VERSION_SUFFIX)
-# compatinility with find_package() vs add_subdirectory
+# compatibility with find_package() vs add_subdirectory
 set(hidapi_VERSION "${VERSION}" PARENT_SCOPE)
 #
 
