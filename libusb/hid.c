@@ -833,8 +833,10 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							cur_dev = tmp;
 						}
 
-						if (res >= 0)
+						if (res >= 0) {
 							libusb_close(handle);
+							handle = NULL;
+						}
 					}
 				} /* altsettings */
 			} /* interfaces */
