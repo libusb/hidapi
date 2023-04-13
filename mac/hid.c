@@ -552,6 +552,36 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		cur_dev->interface_number = -1;
 	}
 
+    if (cur_dev->interface_number == -1 || cur_dev->interface_number == 0) {
+        int old_interface_number = cur_dev->interface_number;
+        //try to Fallback to older interface number find rules
+        io_string_t temp_dev_path_str;
+        char* temp_dev_path = NULL;
+        /* Fill in the path (IOService plane) */
+        if (iokit_dev != MACH_PORT_NULL) {
+            res = IORegistryEntryGetPath(iokit_dev, kIOServicePlane, temp_dev_path_str);
+            if (res == KERN_SUCCESS)
+                temp_dev_path = strdup(temp_dev_path_str);
+            else
+                temp_dev_path = strdup("");
+        }
+
+        if (temp_dev_path) {
+            const char* match_prefix_string = "Interface@";
+            char* interface_component = strstr(temp_dev_path, match_prefix_string);
+            if (interface_component) {
+                char* decimal_str = interface_component + strlen(match_prefix_string);
+                char* endptr = NULL;
+                cur_dev->interface_number = strtol(decimal_str, &endptr, 10);
+                if (endptr == decimal_str) {
+                     /* The parsing failed. Set interface_number to old_interface_number. */
+                    cur_dev->interface_number = old_interface_number;
+                }
+            }
+            free(temp_dev_path);
+        }
+    }
+
 	/* Bus Type */
 	transport_prop = IOHIDDeviceGetProperty(dev, CFSTR(kIOHIDTransportKey));
 
