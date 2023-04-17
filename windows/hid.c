@@ -988,7 +988,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current; current = &(*current)->next) {
-		if (hotplug_cb->handle == callback_handle) {
+		if ((*current)->handle == callback_handle) {
 			struct hid_hotplug_callback *next = (*current)->next;
 			hotplug_cb = *current;
 			*current = next;
