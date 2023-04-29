@@ -28,6 +28,7 @@
 #include <IOKit/usb/USBSpec.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_error.h>
+#include <stdbool.h>
 #include <wchar.h>
 #include <locale.h>
 #include <pthread.h>
@@ -302,7 +303,7 @@ static CFArrayRef get_array_property(IOHIDDeviceRef device, CFStringRef key)
 static int32_t get_int_property(IOHIDDeviceRef device, CFStringRef key)
 {
 	CFTypeRef ref;
-	int32_t value;
+	int32_t value = 0;
 
 	ref = IOHIDDeviceGetProperty(device, key);
 	if (ref) {
@@ -312,6 +313,20 @@ static int32_t get_int_property(IOHIDDeviceRef device, CFStringRef key)
 		}
 	}
 	return 0;
+}
+
+static bool try_get_int_property(IOHIDDeviceRef device, CFStringRef key, int32_t *out_val)
+{
+	bool result = false;
+	CFTypeRef ref;
+
+	ref = IOHIDDeviceGetProperty(device, key);
+	if (ref) {
+		if (CFGetTypeID(ref) == CFNumberGetTypeID()) {
+			result = CFNumberGetValue((CFNumberRef) ref, kCFNumberSInt32Type, out_val);
+		}
+	}
+	return result;
 }
 
 static CFArrayRef get_usage_pairs(IOHIDDeviceRef device)
@@ -540,24 +555,25 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	/* Release Number */
 	cur_dev->release_number = get_int_property(dev, CFSTR(kIOHIDVersionNumberKey));
 
-	/* Interface Number */
-	/* We can only retrieve the interface number for USB HID devices.
-	 * IOKit always seems to return 0 when querying a standard USB device
-	 * for its interface. */
-	int is_usb_hid = get_int_property(dev, CFSTR(kUSBInterfaceClass)) == kUSBHIDClass;
-	if (is_usb_hid) {
-		/* Get the interface number */
-		cur_dev->interface_number = get_int_property(dev, CFSTR(kUSBInterfaceNumber));
-	} else {
-		cur_dev->interface_number = -1;
-	}
+	/* Interface Number.
+	 * We can only retrieve the interface number for USB HID devices.
+	 * See below */
+	cur_dev->interface_number = -1;
 
 	/* Bus Type */
 	transport_prop = IOHIDDeviceGetProperty(dev, CFSTR(kIOHIDTransportKey));
 
 	if (transport_prop != NULL && CFGetTypeID(transport_prop) == CFStringGetTypeID()) {
 		if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportUSBValue), 0) == kCFCompareEqualTo) {
+			int32_t interface_number = -1;
 			cur_dev->bus_type = HID_API_BUS_USB;
+			if (try_get_int_property(dev, CFSTR(kUSBInterfaceNumber), &interface_number)) {
+				cur_dev->interface_number = interface_number;
+			}
+			else {
+				// TODO: use a different approach - this is a USB device after all
+			}
+
 		/* Match "Bluetooth", "BluetoothLowEnergy" and "Bluetooth Low Energy" strings */
 		} else if (CFStringHasPrefix((CFStringRef)transport_prop, CFSTR(kIOHIDTransportBluetoothValue))) {
 			cur_dev->bus_type = HID_API_BUS_BLUETOOTH;
