@@ -322,23 +322,24 @@ jobs:
     - uses: actions/checkout@v3
       with:
         path: hidapisrc
-    # - name: Install dependencies
+    - name: Install dependencies
+      run: sudo dnf install autoconf automake libtool mingw64-gcc cmake ninja-build
     - name: Configure CMake MinGW
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-        cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared MinGW
-      working-directory: build/shared
-      run: make install
+      working-directory: build/shared-cmake
+      run: ninja install
     - name: Build CMake Static MinGW
-      working-directory: build/static
-      run: make install
+      working-directory: build/static-cmake
+      run: ninja install
     - name: Check artifacts MinGW
       uses: andstor/file-existence-action@v2
       with:
-        files: "install/shared/lib/libhidapi-libusb.so, \
-                install/shared/lib/libhidapi-hidraw.so, \
+        files: "install/shared/bin/libhidapi-libusb.dll, \
+                install/shared/bin/libhidapi-hidraw.dll, \
                 install/shared/include/hidapi/hidapi.h, \
                 install/shared/include/hidapi/hidapi_libusb.h, \
                 install/static/lib/libhidapi-libusb.a, \
@@ -349,20 +350,22 @@ jobs:
     - name: Check CMake Export Package Shared MinGW
       run: |
         cmake \
+          -GNinja \
           -B build/shared_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/shared \
+          -Dhidapi_ROOT=install/shared-cmake \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
           "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cd build/shared_test
-        make install
+        ninja install
     - name: Check CMake Export Package Static MinGW
       run: |
         cmake \
+          -GNinja \
           -B build/static_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/static \
+          -Dhidapi_ROOT=install/static-cmake \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
           "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cd build/static_test
-        make install
+        ninja install
