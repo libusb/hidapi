@@ -350,14 +350,14 @@ jobs:
       uses: andstor/file-existence-action@v2
       with:
         files: "install/shared/bin/libhidapi.dll, \
-                install/shared/lib/libhidapi.a, \
+                install/shared/lib/libhidapi.dll.a, \
                 install/shared/include/hidapi/hidapi.h, \
                 install/shared/include/hidapi/hidapi_winapi.h, \
                 install/static/lib/libhidapi.a, \
                 install/static/include/hidapi/hidapi.h, \
                 install/static/include/hidapi/hidapi_winapi.h\
                 install/automake/bin/libhidapi.dll, \
-                install/automake/lib/libhidapi.a, \
+                install/automake/lib/libhidapi.dll.a, \
                 install/automake/include/hidapi/hidapi.h, \
                 install/automake/include/hidapi/hidapi_winapi.h"
         fail: true
