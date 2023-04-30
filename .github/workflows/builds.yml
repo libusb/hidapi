@@ -363,7 +363,7 @@ jobs:
           -GNinja \
           -B build/shared_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/shared-cmake \
+          -DCMAKE_PREFIX_PATH=install/shared-cmake \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
           "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cd build/shared_test
@@ -374,7 +374,7 @@ jobs:
           -GNinja \
           -B build/static_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/static-cmake \
+          -DCMAKE_PREFIX_PATH=install/static-cmake \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
           "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cd build/static_test
