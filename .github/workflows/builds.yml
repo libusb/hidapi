@@ -333,7 +333,7 @@ jobs:
       working-directory: hidapisrc
       run: |
         ./bootstrap
-        mingw64-configure
+        mingw64-configure --prefix=$PWD/../install/automake
     - name: Build CMake Shared MinGW
       working-directory: build/shared-cmake
       run: ninja install
@@ -344,7 +344,7 @@ jobs:
       working-directory: hidapisrc
       run: |
         make
-        make DESTDIR=$PWD/../install/automake install
+        make install
         make clean
     - name: Check artifacts MinGW
       uses: andstor/file-existence-action@v2
