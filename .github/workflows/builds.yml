@@ -322,7 +322,7 @@ jobs:
     - uses: actions/checkout@v3
       with:
         path: hidapisrc
-    - name: Install dependencies
+    # - name: Install dependencies
     - name: Configure CMake MinGW
       run: |
         rm -rf build install
