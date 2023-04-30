@@ -344,7 +344,7 @@ jobs:
       working-directory: hidapisrc
       run: |
         make
-        make DESTDIR=$PWD/install/automake install
+        make DESTDIR=$PWD/../install/automake install
         make clean
     - name: Check artifacts MinGW
       uses: andstor/file-existence-action@v2
