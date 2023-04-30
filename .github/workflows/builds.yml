@@ -323,12 +323,12 @@ jobs:
       with:
         path: hidapisrc
     - name: Install dependencies
-      run: sudo dnf install autoconf automake libtool mingw64-gcc cmake ninja-build
+      run: sudo dnf install -y autoconf automake libtool mingw64-gcc cmake ninja-build
     - name: Configure CMake MinGW
       run: |
         rm -rf build install
-        cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-        cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared MinGW
       working-directory: build/shared-cmake
       run: ninja install
@@ -349,7 +349,7 @@ jobs:
         fail: true
     - name: Check CMake Export Package Shared MinGW
       run: |
-        cmake \
+        mingw64-cmake \
           -GNinja \
           -B build/shared_test \
           -S hidapisrc/hidtest \
@@ -360,7 +360,7 @@ jobs:
         ninja install
     - name: Check CMake Export Package Static MinGW
       run: |
-        cmake \
+        mingw64-cmake \
           -GNinja \
           -B build/static_test \
           -S hidapisrc/hidtest \
