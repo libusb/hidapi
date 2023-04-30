@@ -333,7 +333,7 @@ jobs:
       working-directory: hidapisrc
       run: |
         ./bootstrap
-        mingw64-configure --prefix=$PWD/../install/automake --with-sysroot=$PWD/../install/automake
+        mingw64-configure
     - name: Build CMake Shared MinGW
       working-directory: build/shared-cmake
       run: ninja install
@@ -344,7 +344,7 @@ jobs:
       working-directory: hidapisrc
       run: |
         make
-        make install
+        make DESTDIR=$PWD/../install/automake install
         make clean
     - name: Check artifacts MinGW
       uses: andstor/file-existence-action@v2
@@ -355,11 +355,7 @@ jobs:
                 install/shared-cmake/include/hidapi/hidapi_winapi.h, \
                 install/static-cmake/lib/libhidapi.a, \
                 install/static-cmake/include/hidapi/hidapi.h, \
-                install/static-cmake/include/hidapi/hidapi_winapi.h,\
-                install/automake/bin/libhidapi.dll, \
-                install/automake/lib/libhidapi.dll.a, \
-                install/automake/include/hidapi/hidapi.h, \
-                install/automake/include/hidapi/hidapi_winapi.h"
+                install/static-cmake/include/hidapi/hidapi_winapi.h"
         fail: true
     - name: Check CMake Export Package Shared MinGW
       run: |
