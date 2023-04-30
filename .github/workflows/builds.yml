@@ -314,7 +314,7 @@ jobs:
         retention-days: ${{ (github.event_name == 'pull_request' || github.ref_name != 'master') && 7 || 90 }}
 
 
-  fedora-cmake:
+  fedora-mingw:
 
     runs-on: ubuntu-latest
     container: fedora:latest
@@ -324,29 +324,29 @@ jobs:
         path: hidapisrc
     - name: Install dependencies
       run: sudo dnf install -y autoconf automake libtool mingw64-gcc cmake ninja-build
-    - name: Configure CMake MinGW
+    - name: Configure CMake
       run: |
         rm -rf build install
         mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-    - name: Configure Automake MinGW
+    - name: Configure Automake
       working-directory: hidapisrc
       run: |
         ./bootstrap
         mingw64-configure
-    - name: Build CMake Shared MinGW
+    - name: Build CMake Shared
       working-directory: build/shared-cmake
       run: ninja install
-    - name: Build CMake Static MinGW
+    - name: Build CMake Static
       working-directory: build/static-cmake
       run: ninja install
-    - name: Build Automake MinGW
+    - name: Build Automake
       working-directory: hidapisrc
       run: |
         make
         make DESTDIR=$PWD/../install/automake install
         make clean
-    - name: Check artifacts MinGW
+    - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
         files: "install/shared-cmake/bin/libhidapi.dll, \
@@ -357,7 +357,7 @@ jobs:
                 install/static-cmake/include/hidapi/hidapi.h, \
                 install/static-cmake/include/hidapi/hidapi_winapi.h"
         fail: true
-    - name: Check CMake Export Package Shared MinGW
+    - name: Check CMake Export Package Shared
       run: |
         mingw64-cmake \
           -GNinja \
@@ -368,7 +368,7 @@ jobs:
           "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cd build/shared_test
         ninja install
-    - name: Check CMake Export Package Static MinGW
+    - name: Check CMake Export Package Static
       run: |
         mingw64-cmake \
           -GNinja \
