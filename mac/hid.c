@@ -329,6 +329,22 @@ static bool try_get_int_property(IOHIDDeviceRef device, CFStringRef key, int32_t
 	return result;
 }
 
+static bool try_get_ioregistry_int_property(io_service_t service, CFStringRef property, int32_t *out_val)
+{
+	bool result = false;
+	CFTypeRef ref = IORegistryEntryCreateCFProperty(service, property, kCFAllocatorDefault, 0);
+
+	if (ref) {
+		if (CFGetTypeID(ref) == CFNumberGetTypeID()) {
+			result = CFNumberGetValue(ref, kCFNumberSInt32Type, out_val);
+		}
+
+		CFRelease(ref);
+	}
+
+	return result;
+}
+
 static CFArrayRef get_usage_pairs(IOHIDDeviceRef device)
 {
 	return get_array_property(device, CFSTR(kIOHIDDeviceUsagePairsKey));
@@ -481,6 +497,46 @@ static void process_pending_events(void) {
 	} while(res != kCFRunLoopRunFinished && res != kCFRunLoopRunTimedOut);
 }
 
+static int read_usb_interface_from_hid_service_parent(io_service_t hid_service)
+{
+	int32_t result = -1;
+	bool success = false;
+	io_registry_entry_t current = IO_OBJECT_NULL;
+	kern_return_t res;
+	int parent_number = 0;
+
+	res = IORegistryEntryGetParentEntry(hid_service, kIOServicePlane, &current);
+	while (KERN_SUCCESS == res
+			/* Only search up to 3 parent entries.
+			 * With the default driver - the parent-of-interest supposed to be the first one,
+			 * but lets assume some custom drivers or so, with deeper tree. */
+			&& parent_number < 3) {
+		io_registry_entry_t parent = IO_OBJECT_NULL;
+		int32_t interface_number = -1;
+		parent_number++;
+
+		success = try_get_ioregistry_int_property(current, CFSTR(kUSBInterfaceNumber), &interface_number);
+		if (success) {
+			result = interface_number;
+			break;
+		}
+
+		res = IORegistryEntryGetParentEntry(current, kIOServicePlane, &parent);
+		if (parent) {
+			IOObjectRelease(current);
+			current = parent;
+		}
+
+	}
+
+	if (current) {
+		IOObjectRelease(current);
+		current = IO_OBJECT_NULL;
+	}
+
+	return result;
+}
+
 static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev, int32_t usage_page, int32_t usage)
 {
 	unsigned short dev_vid;
@@ -490,7 +546,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	CFTypeRef transport_prop;
 
 	struct hid_device_info *cur_dev;
-	io_object_t iokit_dev;
+	io_service_t hid_service;
 	kern_return_t res;
 	uint64_t entry_id = 0;
 
@@ -514,9 +570,9 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 
 	/* Fill in the path (as a unique ID of the service entry) */
 	cur_dev->path = NULL;
-	iokit_dev = IOHIDDeviceGetService(dev);
-	if (iokit_dev != MACH_PORT_NULL) {
-		res = IORegistryEntryGetRegistryEntryID(iokit_dev, &entry_id);
+	hid_service = IOHIDDeviceGetService(dev);
+	if (hid_service != MACH_PORT_NULL) {
+		res = IORegistryEntryGetRegistryEntryID(hid_service, &entry_id);
 	}
 	else {
 		res = KERN_INVALID_ARGUMENT;
@@ -567,11 +623,18 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		if (CFStringCompare((CFStringRef)transport_prop, CFSTR(kIOHIDTransportUSBValue), 0) == kCFCompareEqualTo) {
 			int32_t interface_number = -1;
 			cur_dev->bus_type = HID_API_BUS_USB;
+
+			/* A IOHIDDeviceRef used to have this simple property,
+			 * until macOS 13.3 - we will try to use it. */
 			if (try_get_int_property(dev, CFSTR(kUSBInterfaceNumber), &interface_number)) {
 				cur_dev->interface_number = interface_number;
-			}
-			else {
-				// TODO: use a different approach - this is a USB device after all
+			} else {
+				/* Otherwise fallback to io_service_t property.
+				 * (of one of the parent services). */
+				cur_dev->interface_number = read_usb_interface_from_hid_service_parent(hid_service);
+
+				/* If the above doesn't work -
+				 * no (known) fallback exists at this point. */
 			}
 
 		/* Match "Bluetooth", "BluetoothLowEnergy" and "Bluetooth Low Energy" strings */
