@@ -327,25 +327,39 @@ jobs:
     - name: Configure CMake MinGW
       run: |
         rm -rf build install
-        mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-        mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+    - name: Configure Automake MinGW
+      working-directory: hidapisrc
+      run: |
+        ./bootstrap
+        mingw64-configure
     - name: Build CMake Shared MinGW
       working-directory: build/shared-cmake
       run: ninja install
     - name: Build CMake Static MinGW
       working-directory: build/static-cmake
       run: ninja install
+    - name: Build Automake MinGW
+      working-directory: hidapisrc
+      run: |
+        make
+        make DESTDIR=$PWD/install/automake install
+        make clean
     - name: Check artifacts MinGW
       uses: andstor/file-existence-action@v2
       with:
-        files: "install/shared/bin/libhidapi-libusb.dll, \
-                install/shared/bin/libhidapi-hidraw.dll, \
+        files: "install/shared/bin/libhidapi.dll, \
+                install/shared/lib/libhidapi.a, \
                 install/shared/include/hidapi/hidapi.h, \
-                install/shared/include/hidapi/hidapi_libusb.h, \
-                install/static/lib/libhidapi-libusb.a, \
-                install/static/lib/libhidapi-hidraw.a, \
+                install/shared/include/hidapi/hidapi_winapi.h, \
+                install/static/lib/libhidapi.a, \
                 install/static/include/hidapi/hidapi.h, \
-                install/static/include/hidapi/hidapi_libusb.h"
+                install/static/include/hidapi/hidapi_winapi.h\
+                install/automake/bin/libhidapi.dll, \
+                install/automake/lib/libhidapi.a, \
+                install/automake/include/hidapi/hidapi.h, \
+                install/automake/include/hidapi/hidapi_winapi.h"
         fail: true
     - name: Check CMake Export Package Shared MinGW
       run: |
