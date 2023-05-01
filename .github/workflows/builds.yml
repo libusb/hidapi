@@ -312,3 +312,73 @@ jobs:
         name: hidapi-win
         path: artifacts/
         retention-days: ${{ (github.event_name == 'pull_request' || github.ref_name != 'master') && 7 || 90 }}
+
+
+  fedora-mingw:
+
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        path: hidapisrc
+    - name: Install dependencies
+      run: sudo dnf install -y autoconf automake libtool mingw64-gcc cmake ninja-build make
+    - name: Configure CMake
+      run: |
+        rm -rf build install
+        mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+    - name: Configure Automake
+      working-directory: hidapisrc
+      run: |
+        ./bootstrap
+        mingw64-configure
+    - name: Build CMake Shared
+      working-directory: build/shared-cmake
+      run: ninja install
+    - name: Build CMake Static
+      working-directory: build/static-cmake
+      run: ninja install
+    - name: Build Automake
+      working-directory: hidapisrc
+      run: |
+        make
+        make DESTDIR=$PWD/../install/automake install
+        make clean
+    - name: Build manual Makefile
+      working-directory: hidapisrc/windows
+      run: make -f Makefile-manual OS=MINGW CC=x86_64-w64-mingw32-gcc
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "install/shared-cmake/bin/libhidapi.dll, \
+                install/shared-cmake/lib/libhidapi.dll.a, \
+                install/shared-cmake/include/hidapi/hidapi.h, \
+                install/shared-cmake/include/hidapi/hidapi_winapi.h, \
+                install/static-cmake/lib/libhidapi.a, \
+                install/static-cmake/include/hidapi/hidapi.h, \
+                install/static-cmake/include/hidapi/hidapi_winapi.h"
+        fail: true
+    - name: Check CMake Export Package Shared
+      run: |
+        mingw64-cmake \
+          -GNinja \
+          -B build/shared_test \
+          -S hidapisrc/hidtest \
+          -Dhidapi_DIR=$PWD/install/shared-cmake/lib/cmake/hidapi \
+          -DCMAKE_INSTALL_PREFIX=install/shared_test \
+          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cd build/shared_test
+        ninja install
+    - name: Check CMake Export Package Static
+      run: |
+        mingw64-cmake \
+          -GNinja \
+          -B build/static_test \
+          -S hidapisrc/hidtest \
+          -Dhidapi_DIR=$PWD/install/static-cmake/lib/cmake/hidapi \
+          -DCMAKE_INSTALL_PREFIX=install/static_test \
+          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cd build/static_test
+        ninja install
