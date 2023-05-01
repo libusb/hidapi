@@ -418,6 +418,12 @@ jobs:
         make
         make DESTDIR=$PWD/../install/automake install
         make clean
+    - name: Build manual Makefile
+      run: |
+        cd hidapisrc/linux
+        make -f Makefile-manual
+        cd ../libusb
+        make -f Makefile-manual
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
