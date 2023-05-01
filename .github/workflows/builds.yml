@@ -29,6 +29,7 @@ jobs:
       working-directory: mac
       run: make -f Makefile-manual
 
+
   macos-cmake:
 
     runs-on: macos-latest
@@ -94,6 +95,7 @@ jobs:
         cd build_meson
         ninja
 
+
   ubuntu-cmake:
 
     runs-on: ubuntu-latest
@@ -156,6 +158,7 @@ jobs:
         meson setup build_meson hidapisrc
         cd build_meson
         ninja
+
 
   windows-cmake:
 
@@ -275,6 +278,7 @@ jobs:
         meson setup build_meson hidapisrc
         cd build_meson
         ninja
+
 
   windows-msbuild:
 
@@ -456,3 +460,81 @@ jobs:
           "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cd build/static_test
         make install
+
+
+  alpine:
+
+    runs-on: ubuntu-latest
+    container: alpine:edge
+    env:
+      # A bug in musl: https://www.openwall.com/lists/musl/2020/01/20/2
+      ALPINE_COMPILE_FLAGS: ${NIX_COMPILE_FLAGS} -Wno-overflow
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        path: hidapisrc
+    - name: Install dependencies
+      run: |
+        apk add gcc musl-dev autoconf automake libtool eudev-dev libusb-dev linux-headers cmake ninja make
+    - name: Configure CMake
+      run: |
+        rm -rf build install
+        cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
+        cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
+    - name: Configure Automake
+      working-directory: hidapisrc
+      run: |
+        ./bootstrap
+        ./configure
+    - name: Build CMake Shared
+      working-directory: build/shared-cmake
+      run: ninja install
+    - name: Build CMake Static
+      working-directory: build/static-cmake
+      run: ninja install
+    - name: Build Automake
+      working-directory: hidapisrc
+      run: |
+        make
+        make DESTDIR=$PWD/../install/automake install
+        make clean
+    - name: Build manual Makefile
+      run: |
+        cd hidapisrc/linux
+        make -f Makefile-manual
+        cd ../libusb
+        make -f Makefile-manual
+    - name: Check artifacts
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "install/shared-cmake/lib/libhidapi-libusb.so, \
+                install/shared-cmake/lib/libhidapi-hidraw.so, \
+                install/shared-cmake/include/hidapi/hidapi.h, \
+                install/shared-cmake/include/hidapi/hidapi_libusb.h, \
+                install/static-cmake/lib/libhidapi-libusb.a, \
+                install/static-cmake/lib/libhidapi-hidraw.a, \
+                install/static-cmake/include/hidapi/hidapi.h, \
+                install/static-cmake/include/hidapi/hidapi_libusb.h"
+        fail: true
+    - name: Check CMake Export Package Shared
+      run: |
+        cmake \
+          -GNinja \
+          -B build/shared_test \
+          -S hidapisrc/hidtest \
+          -Dhidapi_ROOT=install/shared-cmake \
+          -DCMAKE_INSTALL_PREFIX=install/shared_test \
+          "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
+        cd build/shared_test
+        ninja install
+    - name: Check CMake Export Package Static
+      run: |
+        cmake \
+          -GNinja \
+          -B build/static_test \
+          -S hidapisrc/hidtest \
+          -Dhidapi_ROOT=install/static-cmake \
+          -DCMAKE_INSTALL_PREFIX=install/static_test \
+          "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
+        cd build/static_test
+        ninja install
