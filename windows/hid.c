@@ -282,6 +282,15 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	}
 }
 
+#if defined(__GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
+/* A bug in GCC/mingw gives:
+ * error: array subscript 0 is outside array bounds of 'wchar_t *[0]' {aka 'short unsigned int *[]'} [-Werror=array-bounds]
+ * |         free(*error_buffer);
+ * Which doesn't make sense in this context. */
+
 static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR *string_error)
 {
 	free(*error_buffer);
@@ -291,6 +300,10 @@ static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 		*error_buffer = _wcsdup(string_error);
 	}
 }
+
+#if defined(__GNUC__)
+# pragma GCC diagnostic pop
+#endif
 
 static void register_winapi_error(hid_device *dev, const WCHAR *op)
 {
@@ -331,12 +344,12 @@ static HANDLE open_device(const wchar_t *path, BOOL open_rw)
 	return handle;
 }
 
-HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version(void)
 {
 	return &api_version;
 }
 
-HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 {
 	return HID_API_VERSION_STR;
 }
