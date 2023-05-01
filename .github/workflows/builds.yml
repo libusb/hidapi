@@ -323,7 +323,7 @@ jobs:
       with:
         path: hidapisrc
     - name: Install dependencies
-      run: sudo dnf install -y autoconf automake libtool mingw64-gcc cmake ninja-build
+      run: sudo dnf install -y autoconf automake libtool mingw64-gcc cmake ninja-build make
     - name: Configure CMake
       run: |
         rm -rf build install
@@ -346,6 +346,9 @@ jobs:
         make
         make DESTDIR=$PWD/../install/automake install
         make clean
+    - name: Build manual Makefile
+      working-directory: hidapi/windows
+      run: make -f Makefile-manual OS=MINGW CC=x86_64-w64-mingw32-gcc
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
