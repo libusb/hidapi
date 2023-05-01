@@ -347,7 +347,7 @@ jobs:
         make DESTDIR=$PWD/../install/automake install
         make clean
     - name: Build manual Makefile
-      working-directory: hidapi/windows
+      working-directory: hidapisrc/windows
       run: make -f Makefile-manual OS=MINGW CC=x86_64-w64-mingw32-gcc
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
