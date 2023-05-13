@@ -14,3 +14,36 @@ jobs:
         path: src
     - name: Install dependencies
       run: brew install ninja
+    - name: Configure
+      run: |
+        cmake -B build -S src -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_HIDTEST=ON -DCMAKE_C_COMPILER=clang
+    - name: Get and configure Coverity
+      run: |
+        curl https://scan.coverity.com/download/cxx/Darwin --output coverity.dmg --data "token=${{ secrets.COVERITY_SCAN_TOKEN }}&project=hidapi"
+        hdiutil attach coverity.dmg -mountroot coverity
+        export COV_DIR_NAME=$(ls -1 --color=never coverity)
+        mkdir cov-root
+        cp ./coverity/${COV_DIR_NAME}/${COV_DIR_NAME}.sh cov-root/
+        cd cov-root/
+        ./${COV_DIR_NAME}.sh
+        ./bin/cov-configure --clang
+        echo "$(pwd)/bin" >> $GITHUB_PATH
+    - name: Build with Coverity
+      working-directory: build
+      run: cov-build --dir cov-int ninja
+    - name: Backup Coverity logs
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverity-logs-macos
+        path: build/cov-int
+        retention-days: 7
+    - name: Submit results to Coverity Scan
+      working-directory: build
+      run: |
+        tar -czf cov-int.tar.gz cov-int
+        curl --form token=${{ secrets.COVERITY_SCAN_TOKEN }} \
+          --form email=${{ secrets.COVERITY_SCAN_EMAIL }} \
+          --form file=@cov-int.tar.gz \
+          --form version="$GITHUB_SHA" \
+          --form description="Automatic macOS build" \
+          https://scan.coverity.com/builds?project=hidapi
