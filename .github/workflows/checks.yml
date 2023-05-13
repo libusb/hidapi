@@ -47,3 +47,31 @@ jobs:
           --form version="$GITHUB_SHA" \
           --form description="Automatic macOS build" \
           https://scan.coverity.com/builds?project=hidapi
+
+
+  coverity-ubuntu:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        path: src
+    - name: Install dependencies
+      run: sudo apt install libudev-dev libusb-1.0-0-dev ninja-build
+    - name: Configure
+      run: |
+        cmake -B build -S src -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_HIDTEST=ON -DCMAKE_C_COMPILER=gcc
+    - uses: vapier/coverity-scan-action@v1
+      with:
+        email: ${{ secrets.COVERITY_SCAN_EMAIL }}
+        token: ${{ secrets.COVERITY_SCAN_TOKEN }}
+        project: hidapi
+        command: ninja
+        working-directory: build
+        description: 'Automatic Linux build'
+    - name: Backup Coverity logs
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverity-logs-linux
+        path: build/cov-int
+        retention-days: 7
