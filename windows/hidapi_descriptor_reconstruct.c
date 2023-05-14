@@ -321,7 +321,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			if ((coll_number_of_direct_childs[collection_node_idx] != 0) &&
 				(coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] == FALSE)) {
 				coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] = TRUE;
-				coll_child_order[collection_node_idx] = malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(coll_child_order[0]));
+				coll_child_order[collection_node_idx] = malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(*coll_child_order[0]));
 
 				{
 					// Create list of child collection indices
