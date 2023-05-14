@@ -55,6 +55,7 @@ static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 		}
 		if (!header_read_success) {
 			fprintf(stderr, "ERROR: Couldn't read PP Data header (missing newline)\n");
+			fclose(file);
 			return  NULL;
 		}
 		printf("'Virtual' Device Read: %04hx %04hx\n", vendor_id, product_id);

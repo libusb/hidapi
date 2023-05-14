@@ -205,9 +205,9 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	rd_bit_range ****coll_bit_range;
 	coll_bit_range = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
-		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
+		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(*coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-			coll_bit_range[collection_node_idx][reportid_idx] = malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(coll_bit_range[0][0]));
+			coll_bit_range[collection_node_idx][reportid_idx] = malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(*coll_bit_range[0][0]));
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = malloc(sizeof(rd_bit_range));
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit = -1;
@@ -378,8 +378,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// ***************************************************************************************
 	// Create sorted main_item_list containing all the Collection and CollectionEnd main items
 	// ***************************************************************************************
-	struct rd_main_item_node *main_item_list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
-	main_item_list = NULL; // List root
+	struct rd_main_item_node *main_item_list = NULL; // List root
 	// Lookup table to find the Collection items in the list by index
 	struct rd_main_item_node **coll_begin_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
 	struct rd_main_item_node **coll_end_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
