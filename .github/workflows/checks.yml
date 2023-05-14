@@ -75,3 +75,50 @@ jobs:
         name: coverity-logs-linux
         path: build/cov-int
         retention-days: 7
+
+
+  coverity-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        path: src
+    - name: Setup MSVC
+      uses: TheMrMilchmann/setup-msvc-dev@v2.0.0
+      with:
+        arch: x64
+    - name: Configure
+      run: |
+        cmake -B build -S src -G"NMake Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_HIDTEST=ON
+    - name: Get and configure Coverity
+      run: |
+        Invoke-WebRequest -Uri https://scan.coverity.com/download/cxx/win64 -OutFile coverity.zip -Method Post -Body @{token='${{ secrets.COVERITY_SCAN_TOKEN }}';project='hidapi'}
+        Expand-Archive coverity.zip -DestinationPath cov-root
+
+        $cov_root=Get-ChildItem -Path 'cov-root'
+        $Env:PATH += ";$($cov_root.FullName)\bin"
+        cov-configure -msvc
+
+        echo "$($cov_root.FullName)\bin" >> $Env:GITHUB_PATH
+    - name: Build with Coverity
+      working-directory: build
+      run: cov-build --dir cov-int nmake
+    - name: Backup Coverity logs
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverity-logs-windows
+        path: build/cov-int
+        retention-days: 7
+    - name: Submit results to Coverity Scan
+      working-directory: build
+      run: |
+        tar -czf cov-int.tar.gz cov-int
+        Invoke-RestMethod -Uri 'https://scan.coverity.com/builds?project=hidapi' `
+          -Method Post -Form @{ `
+            email='${{ secrets.COVERITY_SCAN_EMAIL }}'; `
+            token='${{ secrets.COVERITY_SCAN_TOKEN }}'; `
+            file=Get-Item 'cov-int.tar.gz'; `
+            version=$Env:GITHUB_SHA; `
+            description='Automatic Windows build' `
+          }
