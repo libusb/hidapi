@@ -1026,7 +1026,6 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	/* Set up the HID Manager if it hasn't been done */
 	if (hid_init() < 0) {
-		register_global_error("Couldn't initialize IOHIDManager");
 		return NULL;
 	}
 	/* register_global_error: global error is set/reset by hid_init */
