@@ -1,7 +1,16 @@
 name: Checks
 run-name: Code checks for ${{ github.ref_name }}
 
-on: 
+# General comment:
+# Coverity doesn't support merging or including reports from multible machine/platforms (at least not officially).
+# But otherwise there is no good way to keep the issues from all platforms at Coverity Scans at once.
+# This script uses undocumented (but appears to be working) hack:
+#  The build logs from one machine/platform gets moved to a next once,
+#  and "fixed" so that cov-build can append logs from the next platform.
+#  The "fix" is based on the fact, that Coverity perfectly allows appending logs from multiple builds
+#  that are done *on the same host* machine.
+
+on:
   workflow_dispatch:
 
 jobs:
