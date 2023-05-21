@@ -1007,7 +1007,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
 		if (res < 0) {
 			hid_close(dev);
-			register_device_error_format(dev, "ioctl(GRDESCSIZE) error for '%s', not a HIDRAW device?: %s", path, strerror(errno));
+			register_global_error_format("ioctl(GRDESCSIZE) error for '%s', not a HIDRAW device?: %s", path, strerror(errno));
 			return NULL;
 		}
 
