@@ -936,7 +936,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 
 	interface_path = hid_internal_UTF8toUTF16(path);
 	if (!interface_path) {
-		register_string_error(dev, L"Path conversion failure");
+		register_global_error(L"Path conversion failure");
 		goto end_of_function;
 	}
 
