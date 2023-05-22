@@ -1,5 +1,5 @@
 name: Checks
-run-name: Code checks for ${{ github.ref_name }}
+run-name: Code checks for '${{ github.ref_name }}'
 
 # General comment:
 # Coverity doesn't support merging or including reports from multible machine/platforms (at least not officially).
@@ -11,7 +11,11 @@ run-name: Code checks for ${{ github.ref_name }}
 #  that are done *on the same host* machine.
 
 on:
+  # On-demand run
   workflow_dispatch:
+  # Weekly run
+  schedule:
+    - cron: '30 5 * * 0'
 
 jobs:
   coverity-windows:
