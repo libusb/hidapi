@@ -94,6 +94,7 @@ static HidD_GetPreparsedData_ HidD_GetPreparsedData;
 static HidD_FreePreparsedData_ HidD_FreePreparsedData;
 static HidP_GetCaps_ HidP_GetCaps;
 static HidD_SetNumInputBuffers_ HidD_SetNumInputBuffers;
+static HidD_SetOutputReport_ HidD_SetOutputReport;
 
 static CM_Locate_DevNodeW_ CM_Locate_DevNodeW = NULL;
 static CM_Get_Parent_ CM_Get_Parent = NULL;
@@ -147,6 +148,7 @@ static int lookup_functions()
 	RESOLVE(hid_lib_handle, HidD_FreePreparsedData);
 	RESOLVE(hid_lib_handle, HidP_GetCaps);
 	RESOLVE(hid_lib_handle, HidD_SetNumInputBuffers);
+	RESOLVE(hid_lib_handle, HidD_SetOutputReport);
 
 	RESOLVE(cfgmgr32_lib_handle, CM_Locate_DevNodeW);
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_Parent);
@@ -183,7 +185,27 @@ struct hid_device_ {
 		OVERLAPPED ol;
 		OVERLAPPED write_ol;
 		struct hid_device_info* device_info;
+		BOOL use_hid_write_output_report;
 };
+
+static BOOL hid_internal_is_windows_version_or_greater(WORD wMajorVersion, WORD wMinorVersion, WORD wServicePackMajor)
+{
+	OSVERSIONINFOEXW osvi;
+	DWORDLONG const dwlConditionMask = VerSetConditionMask(
+		VerSetConditionMask(
+			VerSetConditionMask(
+				0, VER_MAJORVERSION, VER_GREATER_EQUAL ),
+			VER_MINORVERSION, VER_GREATER_EQUAL ),
+		VER_SERVICEPACKMAJOR, VER_GREATER_EQUAL );
+
+	memset(&osvi, 0, sizeof(osvi));
+	osvi.dwOSVersionInfoSize = sizeof( osvi );
+	osvi.dwMajorVersion = wMajorVersion;
+	osvi.dwMinorVersion = wMinorVersion;
+	osvi.wServicePackMajor = wServicePackMajor;
+
+	return VerifyVersionInfoW(&osvi, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR, dwlConditionMask) != FALSE;
+}
 
 static hid_device *new_hid_device()
 {
@@ -992,6 +1014,11 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	dev->read_buf = (char*) malloc(dev->input_report_length);
 	dev->device_info = hid_internal_get_device_info(interface_path, dev->device_handle);
 
+	/* On Windows 7, we need to use hid_write_output_report() over Bluetooth */
+	if (dev->output_report_length > 512) {
+		dev->use_hid_write_output_report = !hid_internal_is_windows_version_or_greater( HIBYTE( _WIN32_WINNT_WIN8 ), LOBYTE( _WIN32_WINNT_WIN8 ), 0 );
+	}
+
 end_of_function:
 	free(interface_path);
 	CloseHandle(device_handle);
@@ -1001,6 +1028,17 @@ end_of_function:
 	}
 
 	return dev;
+}
+
+static int hid_internal_write_output_report(hid_device *dev, const unsigned char *data, size_t length)
+{
+	BOOL res;
+	res = HidD_SetOutputReport(dev->device_handle, (void *)data, (ULONG)length);
+	if (!res) {
+		register_winapi_error(dev, L"HidD_SetOutputReport");
+		return -1;
+	}
+	return (int)length;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
@@ -1018,6 +1056,10 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	}
 
 	register_string_error(dev, NULL);
+
+	if (dev->use_hid_write_output_report) {
+		return hid_internal_write_output_report(dev, data, length);
+	}
 
 	/* Make sure the right number of bytes are passed to WriteFile. Windows
 	   expects the number of bytes which are in the _longest_ report (plus
