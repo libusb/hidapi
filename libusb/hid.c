@@ -37,7 +37,6 @@
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <wchar.h>
 
 /* GNU / LibUSB */
@@ -51,66 +50,10 @@
 
 #include "hidapi_libusb.h"
 
-#if defined(__ANDROID__) && __ANDROID_API__ < __ANDROID_API_N__
-
-/* Barrier implementation because Android/Bionic don't have pthread_barrier.
-   This implementation came from Brent Priddy and was posted on
-   StackOverflow. It is used with his permission. */
-typedef int pthread_barrierattr_t;
-typedef struct pthread_barrier {
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-    int count;
-    int trip_count;
-} pthread_barrier_t;
-
-static int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned int count)
-{
-	if(count == 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if(pthread_mutex_init(&barrier->mutex, 0) < 0) {
-		return -1;
-	}
-	if(pthread_cond_init(&barrier->cond, 0) < 0) {
-		pthread_mutex_destroy(&barrier->mutex);
-		return -1;
-	}
-	barrier->trip_count = count;
-	barrier->count = 0;
-
-	return 0;
-}
-
-static int pthread_barrier_destroy(pthread_barrier_t *barrier)
-{
-	pthread_cond_destroy(&barrier->cond);
-	pthread_mutex_destroy(&barrier->mutex);
-	return 0;
-}
-
-static int pthread_barrier_wait(pthread_barrier_t *barrier)
-{
-	pthread_mutex_lock(&barrier->mutex);
-	++(barrier->count);
-	if(barrier->count >= barrier->trip_count)
-	{
-		barrier->count = 0;
-		pthread_cond_broadcast(&barrier->cond);
-		pthread_mutex_unlock(&barrier->mutex);
-		return 1;
-	}
-	else
-	{
-		pthread_cond_wait(&barrier->cond, &(barrier->mutex));
-		pthread_mutex_unlock(&barrier->mutex);
-		return 0;
-	}
-}
-
+#ifndef HIDAPI_THREAD_MODEL_INCLUDE
+#define HIDAPI_THREAD_MODEL_INCLUDE "hidapi_thread_pthread.h"
 #endif
+#include HIDAPI_THREAD_MODEL_INCLUDE
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,10 +111,7 @@ struct hid_device_ {
 	int blocking; /* boolean */
 
 	/* Read thread objects */
-	pthread_t thread;
-	pthread_mutex_t mutex; /* Protects input_reports */
-	pthread_cond_t condition;
-	pthread_barrier_t barrier; /* Ensures correct startup sequence */
+	hidapi_thread_state thread_state;
 	int shutdown_thread;
 	int transfer_loop_finished;
 	struct libusb_transfer *transfer;
@@ -201,9 +141,7 @@ static hid_device *new_hid_device(void)
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
 	dev->blocking = 1;
 
-	pthread_mutex_init(&dev->mutex, NULL);
-	pthread_cond_init(&dev->condition, NULL);
-	pthread_barrier_init(&dev->barrier, NULL, 2);
+	hidapi_thread_state_init(&dev->thread_state);
 
 	return dev;
 }
@@ -211,9 +149,7 @@ static hid_device *new_hid_device(void)
 static void free_hid_device(hid_device *dev)
 {
 	/* Clean up the thread objects */
-	pthread_barrier_destroy(&dev->barrier);
-	pthread_cond_destroy(&dev->condition);
-	pthread_mutex_destroy(&dev->mutex);
+	hidapi_thread_state_destroy(&dev->thread_state);
 
 	hid_free_enumeration(dev->device_info);
 
@@ -863,6 +799,9 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 		int j, k;
 
 		int res = libusb_get_device_descriptor(dev, &desc);
+		if (res < 0)
+			continue;
+
 		unsigned short dev_vid = desc.idVendor;
 		unsigned short dev_pid = desc.idProduct;
 
@@ -1000,7 +939,7 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 	return handle;
 }
 
-static void read_callback(struct libusb_transfer *transfer)
+static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 {
 	hid_device *dev = transfer->user_data;
 	int res;
@@ -1013,13 +952,13 @@ static void read_callback(struct libusb_transfer *transfer)
 		rpt->len = transfer->actual_length;
 		rpt->next = NULL;
 
-		pthread_mutex_lock(&dev->mutex);
+		hidapi_thread_mutex_lock(&dev->thread_state);
 
 		/* Attach the new report object to the end of the list. */
 		if (dev->input_reports == NULL) {
 			/* The list is empty. Put it at the root. */
 			dev->input_reports = rpt;
-			pthread_cond_signal(&dev->condition);
+			hidapi_thread_cond_signal(&dev->thread_state);
 		}
 		else {
 			/* Find the end of the list and attach. */
@@ -1038,7 +977,7 @@ static void read_callback(struct libusb_transfer *transfer)
 				return_data(dev, NULL, 0);
 			}
 		}
-		pthread_mutex_unlock(&dev->mutex);
+		hidapi_thread_mutex_unlock(&dev->thread_state);
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
 		dev->shutdown_thread = 1;
@@ -1097,7 +1036,7 @@ static void *read_thread(void *param)
 	}
 
 	/* Notify the main thread that the read thread is up and running. */
-	pthread_barrier_wait(&dev->barrier);
+	hidapi_thread_barrier_wait(&dev->thread_state);
 
 	/* Handle all the events. */
 	while (!dev->shutdown_thread) {
@@ -1129,15 +1068,15 @@ static void *read_thread(void *param)
 	   make sure that a thread which is about to go to sleep waiting on
 	   the condition actually will go to sleep before the condition is
 	   signaled. */
-	pthread_mutex_lock(&dev->mutex);
-	pthread_cond_broadcast(&dev->condition);
-	pthread_mutex_unlock(&dev->mutex);
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	hidapi_thread_cond_broadcast(&dev->thread_state);
+	hidapi_thread_mutex_unlock(&dev->thread_state);
 
 	/* The dev->transfer->buffer and dev->transfer objects are cleaned up
 	   in hid_close(). They are not cleaned up here because this thread
 	   could end either due to a disconnect or due to a user
 	   call to hid_close(). In both cases the objects can be safely
-	   cleaned up after the call to pthread_join() (in hid_close()), but
+	   cleaned up after the call to hidapi_thread_join() (in hid_close()), but
 	   since hid_close() calls libusb_cancel_transfer(), on these objects,
 	   they can not be cleaned up here. */
 
@@ -1302,10 +1241,10 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 		}
 	}
 
-	pthread_create(&dev->thread, NULL, read_thread, dev);
+	hidapi_thread_create(&dev->thread_state, read_thread, dev);
 
 	/* Wait here for the read thread to be initialized. */
-	pthread_barrier_wait(&dev->barrier);
+	hidapi_thread_barrier_wait(&dev->thread_state);
 	return 1;
 }
 
@@ -1327,11 +1266,20 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	libusb_get_device_list(usb_context, &devs);
 	while ((usb_dev = devs[d++]) != NULL && !good_open) {
+		struct libusb_device_descriptor desc;
 		struct libusb_config_descriptor *conf_desc = NULL;
 		int j,k;
 
-		if (libusb_get_active_config_descriptor(usb_dev, &conf_desc) < 0)
+		res = libusb_get_device_descriptor(usb_dev, &desc);
+		if (res < 0)
 			continue;
+
+		res = libusb_get_active_config_descriptor(usb_dev, &conf_desc);
+		if (res < 0)
+			libusb_get_config_descriptor(usb_dev, 0, &conf_desc);
+		if (!conf_desc)
+			continue;
+
 		for (j = 0; j < conf_desc->bNumInterfaces && !good_open; j++) {
 			const struct libusb_interface *intf = &conf_desc->interface[j];
 			for (k = 0; k < intf->num_altsetting && !good_open; k++) {
@@ -1521,7 +1469,7 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length)
 static void cleanup_mutex(void *param)
 {
 	hid_device *dev = param;
-	pthread_mutex_unlock(&dev->mutex);
+	hidapi_thread_mutex_unlock(&dev->thread_state);
 }
 
 
@@ -1537,8 +1485,8 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* error: variable ‘bytes_read’ might be clobbered by ‘longjmp’ or ‘vfork’ [-Werror=clobbered] */
 	int bytes_read; /* = -1; */
 
-	pthread_mutex_lock(&dev->mutex);
-	pthread_cleanup_push(&cleanup_mutex, dev);
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	hidapi_thread_cleanup_push(cleanup_mutex, dev);
 
 	bytes_read = -1;
 
@@ -1559,7 +1507,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	if (milliseconds == -1) {
 		/* Blocking */
 		while (!dev->input_reports && !dev->shutdown_thread) {
-			pthread_cond_wait(&dev->condition, &dev->mutex);
+			hidapi_thread_cond_wait(&dev->thread_state);
 		}
 		if (dev->input_reports) {
 			bytes_read = return_data(dev, data, length);
@@ -1568,17 +1516,12 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	else if (milliseconds > 0) {
 		/* Non-blocking, but called with timeout. */
 		int res;
-		struct timespec ts;
-		clock_gettime(CLOCK_REALTIME, &ts);
-		ts.tv_sec += milliseconds / 1000;
-		ts.tv_nsec += (milliseconds % 1000) * 1000000;
-		if (ts.tv_nsec >= 1000000000L) {
-			ts.tv_sec++;
-			ts.tv_nsec -= 1000000000L;
-		}
+		hidapi_timespec ts;
+		hidapi_thread_gettime(&ts);
+		hidapi_thread_addtime(&ts, milliseconds);
 
 		while (!dev->input_reports && !dev->shutdown_thread) {
-			res = pthread_cond_timedwait(&dev->condition, &dev->mutex, &ts);
+			res = hidapi_thread_cond_timedwait(&dev->thread_state, &ts);
 			if (res == 0) {
 				if (dev->input_reports) {
 					bytes_read = return_data(dev, data, length);
@@ -1589,7 +1532,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 				   or the read thread was shutdown. Run the
 				   loop again (ie: don't break). */
 			}
-			else if (res == ETIMEDOUT) {
+			else if (res == HIDAPI_THREAD_TIMED_OUT) {
 				/* Timed out. */
 				bytes_read = 0;
 				break;
@@ -1607,8 +1550,8 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	}
 
 ret:
-	pthread_mutex_unlock(&dev->mutex);
-	pthread_cleanup_pop(0);
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+	hidapi_thread_cleanup_pop(0);
 
 	return bytes_read;
 }
@@ -1726,7 +1669,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	libusb_cancel_transfer(dev->transfer);
 
 	/* Wait for read_thread() to end. */
-	pthread_join(dev->thread, NULL);
+	hidapi_thread_join(&dev->thread_state);
 
 	/* Clean up the Transfer objects allocated in read_thread(). */
 	free(dev->transfer->buffer);
@@ -1749,11 +1692,11 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	libusb_close(dev->device_handle);
 
 	/* Clear out the queue of received reports. */
-	pthread_mutex_lock(&dev->mutex);
+	hidapi_thread_mutex_lock(&dev->thread_state);
 	while (dev->input_reports) {
 		return_data(dev, NULL, 0);
 	}
-	pthread_mutex_unlock(&dev->mutex);
+	hidapi_thread_mutex_unlock(&dev->thread_state);
 
 	free_hid_device(dev);
 }
