@@ -169,6 +169,7 @@ jobs:
       with:
         path: hidapisrc
     - name: Install dependencies
+      shell: cmd
       run: |
         choco install ninja
         pip3 install meson
