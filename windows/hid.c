@@ -596,12 +596,8 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 
 static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
-<<<<<<< HEAD
-	wchar_t *device_id = NULL, *parent_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
+	wchar_t *device_id = NULL, *parent_id = NULL, *compatible_ids = NULL;
 	ULONG DeviceInstancePathLength = 0;
-=======
-	wchar_t *device_id = NULL, *compatible_ids = NULL;
->>>>>>> d3013f0af3f4029d82872c1a9487ea461a56dee4
 	CONFIGRET cr;
 	DEVINST dev_node;
 
