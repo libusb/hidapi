@@ -47,6 +47,8 @@ typedef WCHAR* DEVNODEID_W, * DEVINSTID_W;
 #define CM_GET_DEVICE_INTERFACE_LIST_PRESENT (0x00000000)
 
 typedef CONFIGRET(__stdcall* CM_Locate_DevNodeW_)(PDEVINST pdnDevInst, DEVINSTID_W pDeviceID, ULONG ulFlags);
+typedef CONFIGRET(__stdcall* CM_Get_Device_ID_Size_)(PULONG pulLen, DEVINST dnDevInst, ULONG ulFlags);
+typedef CONFIGRET(__stdcall* CM_Get_Device_IDW_)(DEVINST dnDevInst, PWSTR Buffer, ULONG BufferLen,ULONG ulFlags);
 typedef CONFIGRET(__stdcall* CM_Get_Parent_)(PDEVINST pdnDevInst, DEVINST dnDevInst, ULONG ulFlags);
 typedef CONFIGRET(__stdcall* CM_Get_DevNode_PropertyW_)(DEVINST dnDevInst, CONST DEVPROPKEY* PropertyKey, DEVPROPTYPE* PropertyType, PBYTE PropertyBuffer, PULONG PropertyBufferSize, ULONG ulFlags);
 typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_PropertyW_)(LPCWSTR pszDeviceInterface, CONST DEVPROPKEY* PropertyKey, DEVPROPTYPE* PropertyType, PBYTE PropertyBuffer, PULONG PropertyBufferSize, ULONG ulFlags);

@@ -98,6 +98,8 @@ static HidD_SetNumInputBuffers_ HidD_SetNumInputBuffers;
 
 static CM_Locate_DevNodeW_ CM_Locate_DevNodeW = NULL;
 static CM_Get_Parent_ CM_Get_Parent = NULL;
+static CM_Get_Device_IDW_ CM_Get_Device_IDW = NULL;
+static CM_Get_Device_ID_Size_ CM_Get_Device_ID_Size = NULL;
 static CM_Get_DevNode_PropertyW_ CM_Get_DevNode_PropertyW = NULL;
 static CM_Get_Device_Interface_PropertyW_ CM_Get_Device_Interface_PropertyW = NULL;
 static CM_Get_Device_Interface_List_SizeW_ CM_Get_Device_Interface_List_SizeW = NULL;
@@ -151,6 +153,8 @@ static int lookup_functions()
 
 	RESOLVE(cfgmgr32_lib_handle, CM_Locate_DevNodeW);
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_Parent);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_IDW);
+	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_ID_Size);
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_DevNode_PropertyW);
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_PropertyW);
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_List_SizeW);
@@ -465,7 +469,8 @@ static int hid_internal_get_interface_number(const wchar_t* hardware_id)
 
 static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
-	wchar_t *device_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
+	wchar_t *device_id = NULL, *parent_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
+	ULONG DeviceInstancePathLength = 0;
 	CONFIGRET cr;
 	DEVINST dev_node;
 
@@ -497,8 +502,33 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 
 	/* Get devnode parent */
 	cr = CM_Get_Parent(&dev_node, dev_node, 0);
-	if (cr != CR_SUCCESS)
-		goto end;
+	if (cr != CR_SUCCESS) {
+		printf("Error 0x%08x retrieving device parent.\r\n", cr);
+	}
+
+	/* Get parent device id */
+	cr = CM_Get_Device_ID_Size(&DeviceInstancePathLength, dev_node,	0);
+	if (cr != CR_SUCCESS) {
+		printf("Error 0x%08x retrieving device instance path size.\r\n", cr);
+	}
+	else {
+		parent_id = (PWSTR)malloc(DeviceInstancePathLength * sizeof(WCHAR));
+		if (parent_id != NULL) {
+			cr = CM_Get_Device_IDW(dev_node,
+				parent_id,
+				DeviceInstancePathLength,
+				0);
+			if (cr != CR_SUCCESS) {
+				printf("Error 0x%08x retrieving device instance path.\r\n", cr);
+			}
+			else {
+				free(dev->parent_id);
+				dev->parent_id = parent_id;
+				//printf("Parent device instance path is %ls", parent_id);
+				//printf("\r\n");
+			}
+		}
+	}
 
 	/* Get the compatible ids from parent devnode */
 	compatible_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_CompatibleIds, DEVPROP_TYPE_STRING_LIST);
@@ -760,6 +790,7 @@ void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *d
 		free(d->serial_number);
 		free(d->manufacturer_string);
 		free(d->product_string);
+		free(d->parent_id);
 		free(d);
 		d = next;
 	}
