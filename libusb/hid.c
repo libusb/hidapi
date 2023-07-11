@@ -526,12 +526,12 @@ static char *make_path(libusb_device *dev, int config_number, int interface_numb
 	return strdup(str);
 }
 
-HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version(void)
 {
 	return &api_version;
 }
 
-HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 {
 	return HID_API_VERSION_STR;
 }
@@ -833,8 +833,10 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							cur_dev = tmp;
 						}
 
-						if (res >= 0)
+						if (res >= 0) {
 							libusb_close(handle);
+							handle = NULL;
+						}
 					}
 				} /* altsettings */
 			} /* interfaces */
@@ -1628,6 +1630,12 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	}
 	else
 		return -1;
+}
+
+
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
+{
+	return hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
 }
 
 

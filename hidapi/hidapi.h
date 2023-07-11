@@ -7,7 +7,7 @@
 
  libusb/hidapi Team
 
- Copyright 2022, All Rights Reserved.
+ Copyright 2023, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
@@ -29,13 +29,17 @@
 
 #include <wchar.h>
 
+/* #480: this is to be refactored properly for v1.0 */
 #ifdef _WIN32
+   #ifndef HID_API_NO_EXPORT_DEFINE
       #define HID_API_EXPORT __declspec(dllexport)
-      #define HID_API_CALL
-#else
-      #define HID_API_EXPORT /**< API export macro */
-      #define HID_API_CALL /**< API call macro */
+   #endif
 #endif
+#ifndef HID_API_EXPORT
+   #define HID_API_EXPORT /**< API export macro */
+#endif
+/* To be removed in v1.0 */
+#define HID_API_CALL /**< API call macro */
 
 #define HID_API_EXPORT_CALL HID_API_EXPORT HID_API_CALL /**< API export and call macro*/
 
@@ -48,12 +52,12 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 13
+#define HID_API_VERSION_MINOR 14
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
 */
-#define HID_API_VERSION_PATCH 1
+#define HID_API_VERSION_PATCH 0
 
 /* Helper macros */
 #define HID_API_AS_STR_IMPL(x) #x
@@ -66,7 +70,9 @@
 	This macro was added in version 0.12.0.
 
 	Convenient function to be used for compile-time checks, like:
+	@code{.c}
 	#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+	@endcode
 
 	@ingroup API
 */
@@ -99,10 +105,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+		/** A structure to hold the version numbers. */
 		struct hid_api_version {
-			int major;
-			int minor;
-			int patch;
+			int major; /**< major version number */
+			int minor; /**< minor version number */
+			int patch; /**< patch version number */
 		};
 
 		struct hid_device_;
@@ -113,27 +120,27 @@ extern "C" {
 			@ingroup API
 		*/
 		typedef enum {
-			/* Unknown bus type */
+			/** Unknown bus type */
 			HID_API_BUS_UNKNOWN = 0x00,
 
-			/* USB bus
+			/** USB bus
 			   Specifications:
 			   https://usb.org/hid */
 			HID_API_BUS_USB = 0x01,
 
-			/* Bluetooth or Bluetooth LE bus
+			/** Bluetooth or Bluetooth LE bus
 			   Specifications:
 			   https://www.bluetooth.com/specifications/specs/human-interface-device-profile-1-1-1/
 			   https://www.bluetooth.com/specifications/specs/hid-service-1-0/
 			   https://www.bluetooth.com/specifications/specs/hid-over-gatt-profile-1-0/ */
 			HID_API_BUS_BLUETOOTH = 0x02,
 
-			/* I2C bus
+			/** I2C bus
 			   Specifications:
 			   https://docs.microsoft.com/previous-versions/windows/hardware/design/dn642101(v=vs.85) */
 			HID_API_BUS_I2C = 0x03,
 
-			/* SPI bus
+			/** SPI bus
 			   Specifications:
 			   https://www.microsoft.com/download/details.aspx?id=103325 */
 			HID_API_BUS_SPI = 0x04,
@@ -167,11 +174,9 @@ extern "C" {
 			/** The USB interface which this logical device
 			    represents.
 
-				* Valid on both Linux implementations in all cases.
-				* Valid on the Windows implementation only if the device
-				  contains more than one interface.
-				* Valid on the Mac implementation if and only if the device
-				  is a USB HID device. */
+			    Valid only if the device is a USB HID device.
+			    Set to -1 in all other cases.
+			*/
 			int interface_number;
 
 			/** Pointer to the next device */
@@ -547,6 +552,23 @@ extern "C" {
 		*/
 		int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen);
 
+		/** @brief Get a report descriptor from a HID device.
+
+			Since version 0.14.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
+
+			User has to provide a preallocated buffer where descriptor will be copied to.
+			The recommended size for preallocated buffer is @ref HID_API_MAX_REPORT_DESCRIPTOR_SIZE bytes.
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+			@param buf The buffer to copy descriptor into.
+			@param buf_size The size of the buffer in bytes.
+
+			@returns
+				This function returns non-negative number of bytes actually copied, or -1 on error.
+		*/
+		int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size);
+
 		/** @brief Get a string describing the last error which occurred.
 
 			This function is intended for logging/debugging purposes.
@@ -602,4 +624,3 @@ extern "C" {
 #endif
 
 #endif
-

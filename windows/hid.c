@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#include "hidapi.h"
+#include "hidapi_winapi.h"
 
 #include <windows.h>
 
@@ -52,7 +52,6 @@ typedef LONG NTSTATUS;
 
 /*#define HIDAPI_USE_DDK*/
 
-#include <devpropdef.h>
 #include "hidapi_cfgmgr32.h"
 #include "hidapi_hidclass.h"
 #include "hidapi_hidsdi.h"
@@ -269,7 +268,7 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	if (!msg)
 		return;
 
-	int printf_written = swprintf(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", op_len, op, error_code, system_err_len, system_err_buf);
+	int printf_written = swprintf(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", (int)op_len, op, error_code, (int)system_err_len, system_err_buf);
 
 	if (printf_written < 0)
 	{
@@ -287,6 +286,15 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	}
 }
 
+#if defined(__GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
+/* A bug in GCC/mingw gives:
+ * error: array subscript 0 is outside array bounds of 'wchar_t *[0]' {aka 'short unsigned int *[]'} [-Werror=array-bounds]
+ * |         free(*error_buffer);
+ * Which doesn't make sense in this context. */
+
 static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR *string_error)
 {
 	free(*error_buffer);
@@ -296,6 +304,10 @@ static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 		*error_buffer = _wcsdup(string_error);
 	}
 }
+
+#if defined(__GNUC__)
+# pragma GCC diagnostic pop
+#endif
 
 static void register_winapi_error(hid_device *dev, const WCHAR *op)
 {
@@ -336,12 +348,12 @@ static HANDLE open_device(const wchar_t *path, BOOL open_rw)
 	return handle;
 }
 
-HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version(void)
 {
 	return &api_version;
 }
 
-HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 {
 	return HID_API_VERSION_STR;
 }
@@ -413,64 +425,183 @@ static void* hid_internal_get_device_interface_property(const wchar_t* interface
 	return property_value;
 }
 
-static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
+static void hid_internal_towupper(wchar_t* string)
 {
-	wchar_t *manufacturer_string, *serial_number, *product_string;
-	/* Manufacturer String */
-	manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
-	if (manufacturer_string) {
-		free(dev->manufacturer_string);
-		dev->manufacturer_string = manufacturer_string;
-	}
-
-	/* Serial Number String (MAC Address) */
-	serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
-	if (serial_number) {
-		free(dev->serial_number);
-		dev->serial_number = serial_number;
-	}
-
-	/* Get devnode grandparent to reach out Bluetooth LE device node */
-	if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
-		return;
-
-	/* Product String */
-	product_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
-	if (product_string) {
-		free(dev->product_string);
-		dev->product_string = product_string;
-	}
+	for (wchar_t* p = string; *p; ++p) *p = towupper(*p);
 }
 
-/* USB Device Interface Number.
-   It can be parsed out of the Hardware ID if a USB device is has multiple interfaces (composite device).
-   See https://docs.microsoft.com/windows-hardware/drivers/hid/hidclass-hardware-ids-for-top-level-collections
-   and https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
-
-   hardware_id is always expected to be uppercase.
-*/
-static int hid_internal_get_interface_number(const wchar_t* hardware_id)
+static int hid_internal_extract_int_token_value(wchar_t* string, const wchar_t* token)
 {
-	int interface_number;
-	wchar_t *startptr, *endptr;
-	const wchar_t *interface_token = L"&MI_";
+	int token_value;
+	wchar_t* startptr, * endptr;
 
-	startptr = wcsstr(hardware_id, interface_token);
+	startptr = wcsstr(string, token);
 	if (!startptr)
 		return -1;
 
-	startptr += wcslen(interface_token);
-	interface_number = wcstol(startptr, &endptr, 16);
+	startptr += wcslen(token);
+	token_value = wcstol(startptr, &endptr, 16);
 	if (endptr == startptr)
 		return -1;
 
-	return interface_number;
+	return token_value;
+}
+
+static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_node)
+{
+	wchar_t *device_id = NULL, *hardware_ids = NULL;
+
+	device_id = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	if (!device_id)
+		goto end;
+
+	/* Normalize to upper case */
+	hid_internal_towupper(device_id);
+
+	/* Check for Xbox Common Controller class (XUSB) device.
+	   https://docs.microsoft.com/windows/win32/xinput/directinput-and-xusb-devices
+	   https://docs.microsoft.com/windows/win32/xinput/xinput-and-directinput
+	*/
+	if (hid_internal_extract_int_token_value(device_id, L"IG_") != -1) {
+		/* Get devnode parent to reach out USB device. */
+		if (CM_Get_Parent(&dev_node, dev_node, 0) != CR_SUCCESS)
+			goto end;
+	}
+
+	/* Get the hardware ids from devnode */
+	hardware_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
+	if (!hardware_ids)
+		goto end;
+
+	/* Get additional information from USB device's Hardware ID
+	   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
+	   https://docs.microsoft.com/windows-hardware/drivers/usbcon/enumeration-of-interfaces-not-grouped-in-collections
+	*/
+	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
+		/* Normalize to upper case */
+		hid_internal_towupper(hardware_id);
+
+		if (dev->release_number == 0) {
+			/* USB_DEVICE_DESCRIPTOR.bcdDevice value. */
+			int release_number = hid_internal_extract_int_token_value(hardware_id, L"REV_");
+			if (release_number != -1) {
+				dev->release_number = (unsigned short)release_number;
+			}
+		}
+
+		if (dev->interface_number == -1) {
+			/* USB_INTERFACE_DESCRIPTOR.bInterfaceNumber value. */
+			int interface_number = hid_internal_extract_int_token_value(hardware_id, L"MI_");
+			if (interface_number != -1) {
+				dev->interface_number = interface_number;
+			}
+		}
+	}
+
+	/* Try to get USB device manufacturer string if not provided by HidD_GetManufacturerString. */
+	if (wcslen(dev->manufacturer_string) == 0) {
+		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_Manufacturer, DEVPROP_TYPE_STRING);
+		if (manufacturer_string) {
+			free(dev->manufacturer_string);
+			dev->manufacturer_string = manufacturer_string;
+		}
+	}
+
+	/* Try to get USB device serial number if not provided by HidD_GetSerialNumberString. */
+	if (wcslen(dev->serial_number) == 0) {
+		DEVINST usb_dev_node = dev_node;
+		if (dev->interface_number != -1) {
+			/* Get devnode parent to reach out composite parent USB device.
+			   https://docs.microsoft.com/windows-hardware/drivers/usbcon/enumeration-of-the-composite-parent-device
+			*/
+			if (CM_Get_Parent(&usb_dev_node, dev_node, 0) != CR_SUCCESS)
+				goto end;
+		}
+
+		/* Get the device id of the USB device. */
+		free(device_id);
+		device_id = hid_internal_get_devnode_property(usb_dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+		if (!device_id)
+			goto end;
+
+		/* Extract substring after last '\\' of Instance ID.
+		   For USB devices it may contain device's serial number.
+		   https://docs.microsoft.com/windows-hardware/drivers/install/instance-ids
+		*/
+		for (wchar_t *ptr = device_id + wcslen(device_id); ptr > device_id; --ptr) {
+			/* Instance ID is unique only within the scope of the bus.
+			   For USB devices it means that serial number is not available. Skip. */
+			if (*ptr == L'&')
+				break;
+
+			if (*ptr == L'\\') {
+				free(dev->serial_number);
+				dev->serial_number = _wcsdup(ptr + 1);
+				break;
+			}
+		}
+	}
+
+	/* If we can't get the interface number, it means that there is only one interface. */
+	if (dev->interface_number == -1)
+		dev->interface_number = 0;
+
+end:
+	free(device_id);
+	free(hardware_ids);
+}
+
+/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
+   Request this info via dev node properties instead.
+   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html
+*/
+static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
+{
+	if (wcslen(dev->manufacturer_string) == 0) {
+		/* Manufacturer Name String (UUID: 0x2A29) */
+		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
+		if (manufacturer_string) {
+			free(dev->manufacturer_string);
+			dev->manufacturer_string = manufacturer_string;
+		}
+	}
+
+	if (wcslen(dev->serial_number) == 0) {
+		/* Serial Number String (UUID: 0x2A25) */
+		wchar_t* serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
+		if (serial_number) {
+			free(dev->serial_number);
+			dev->serial_number = serial_number;
+		}
+	}
+
+	if (wcslen(dev->product_string) == 0) {
+		/* Model Number String (UUID: 0x2A24) */
+		wchar_t* product_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
+		if (!product_string) {
+			DEVINST parent_dev_node = 0;
+			/* Fallback: Get devnode grandparent to reach out Bluetooth LE device node */
+			if (CM_Get_Parent(&parent_dev_node, dev_node, 0) == CR_SUCCESS) {
+				/* Device Name (UUID: 0x2A00) */
+				product_string = hid_internal_get_devnode_property(parent_dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+			}
+		}
+
+		if (product_string) {
+			free(dev->product_string);
+			dev->product_string = product_string;
+		}
+	}
 }
 
 static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
+<<<<<<< HEAD
 	wchar_t *device_id = NULL, *parent_id = NULL, *compatible_ids = NULL, *hardware_ids = NULL;
 	ULONG DeviceInstancePathLength = 0;
+=======
+	wchar_t *device_id = NULL, *compatible_ids = NULL;
+>>>>>>> d3013f0af3f4029d82872c1a9487ea461a56dee4
 	CONFIGRET cr;
 	DEVINST dev_node;
 
@@ -483,22 +614,6 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	cr = CM_Locate_DevNodeW(&dev_node, (DEVINSTID_W)device_id, CM_LOCATE_DEVNODE_NORMAL);
 	if (cr != CR_SUCCESS)
 		goto end;
-
-	/* Get the hardware ids from devnode */
-	hardware_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
-	if (!hardware_ids)
-		goto end;
-
-	/* Search for interface number in hardware ids */
-	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
-		/* Normalize to upper case */
-		for (wchar_t* p = hardware_id; *p; ++p) *p = towupper(*p);
-
-		dev->interface_number = hid_internal_get_interface_number(hardware_id);
-
-		if (dev->interface_number != -1)
-			break;
-	}
 
 	/* Get devnode parent */
 	cr = CM_Get_Parent(&dev_node, dev_node, 0);
@@ -538,13 +653,14 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	/* Now we can parse parent's compatible IDs to find out the device bus type */
 	for (wchar_t* compatible_id = compatible_ids; *compatible_id; compatible_id += wcslen(compatible_id) + 1) {
 		/* Normalize to upper case */
-		for (wchar_t* p = compatible_id; *p; ++p) *p = towupper(*p);
+		hid_internal_towupper(compatible_id);
 
 		/* USB devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support
 		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
 		if (wcsstr(compatible_id, L"USB") != NULL) {
 			dev->bus_type = HID_API_BUS_USB;
+			hid_internal_get_usb_info(dev, dev_node);
 			break;
 		}
 
@@ -557,12 +673,8 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
-			/* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
-			   Request this info via dev node properties instead.
-			   https://docs.microsoft.com/answers/questions/401236/hidd-getproductstring-with-ble-hid-device.html */
-			hid_internal_get_ble_info(dev, dev_node);
-
 			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			hid_internal_get_ble_info(dev, dev_node);
 			break;
 		}
 
@@ -582,7 +694,6 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	}
 end:
 	free(device_id);
-	free(hardware_ids);
 	free(compatible_ids);
 }
 
@@ -627,9 +738,14 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	/* Create the record. */
 	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
 
+	if (dev == NULL) {
+		return NULL;
+	}
+
 	/* Fill out the record */
 	dev->next = NULL;
 	dev->path = hid_internal_UTF16toUTF8(path);
+	dev->interface_number = -1;
 
 	attrib.Size = sizeof(HIDD_ATTRIBUTES);
 	if (HidD_GetAttributes(handle, &attrib)) {
@@ -855,7 +971,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 
 	interface_path = hid_internal_UTF8toUTF16(path);
 	if (!interface_path) {
-		register_string_error(dev, L"Path conversion failure");
+		register_global_error(L"Path conversion failure");
 		goto end_of_function;
 	}
 
@@ -1338,6 +1454,22 @@ end:
 }
 
 
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
+{
+	PHIDP_PREPARSED_DATA pp_data = NULL;
+
+	if (!HidD_GetPreparsedData(dev->device_handle, &pp_data) || pp_data == NULL) {
+		register_string_error(dev, L"HidD_GetPreparsedData");
+		return -1;
+	}
+
+	int res = hid_winapi_descriptor_reconstruct_pp_data(pp_data, buf, buf_size);
+
+	HidD_FreePreparsedData(pp_data);
+
+	return res;
+}
+
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
 	if (dev) {
@@ -1350,6 +1482,10 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 		return L"Success";
 	return last_global_error_str;
 }
+
+#ifndef hidapi_winapi_EXPORTS
+#include "hidapi_descriptor_reconstruct.c"
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */

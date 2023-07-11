@@ -3,6 +3,8 @@ list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_winapi.h")
 set(SOURCES
     hid.c
     hidapi_cfgmgr32.h
+    hidapi_descriptor_reconstruct.c
+    hidapi_descriptor_reconstruct.h
     hidapi_hidclass.h
     hidapi_hidpi.h
     hidapi_hidsdi.h
@@ -19,6 +21,14 @@ add_library(hidapi_winapi
 target_link_libraries(hidapi_winapi
     PUBLIC hidapi_include
 )
+
+if(NOT BUILD_SHARED_LIBS)
+    target_compile_definitions(hidapi_winapi
+        # prevent marking functions as __declspec(dllexport) for static library build
+        # #480: this should be refactored for v1.0
+        PUBLIC HID_API_NO_EXPORT_DEFINE
+    )
+endif()
 
 set_target_properties(hidapi_winapi
     PROPERTIES
@@ -43,3 +53,11 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+
+if(HIDAPI_WITH_TESTS)
+     add_subdirectory(test)
+endif()
+
+if(DEFINED HIDAPI_BUILD_PP_DATA_DUMP AND HIDAPI_BUILD_PP_DATA_DUMP)
+    add_subdirectory(pp_data_dump)
+endif()

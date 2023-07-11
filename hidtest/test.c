@@ -52,6 +52,23 @@
 #endif
 //
 
+const char *hid_bus_name(hid_bus_type bus_type) {
+	static const char *const HidBusTypeName[] = {
+		"Unknown",
+		"USB",
+		"Bluetooth",
+		"I2C",
+		"SPI",
+	};
+
+	if ((int)bus_type < 0)
+		bus_type = HID_API_BUS_UNKNOWN;
+	if ((int)bus_type >= (int)(sizeof(HidBusTypeName) / sizeof(HidBusTypeName[0])))
+		bus_type = HID_API_BUS_UNKNOWN;
+
+	return HidBusTypeName[bus_type];
+}
+
 void print_device(struct hid_device_info *cur_dev) {
 	printf("Device Found\n  type: %04hx %04hx\n  path: %s\n  serial_number: %ls", cur_dev->vendor_id, cur_dev->product_id, cur_dev->path, cur_dev->serial_number);
 	printf("\n");
@@ -60,15 +77,57 @@ void print_device(struct hid_device_info *cur_dev) {
 	printf("  Release:      %hx\n", cur_dev->release_number);
 	printf("  Interface:    %d\n",  cur_dev->interface_number);
 	printf("  Usage (page): 0x%hx (0x%hx)\n", cur_dev->usage, cur_dev->usage_page);
+<<<<<<< HEAD
 	printf("  Bus type: %d\n", cur_dev->bus_type);
 	printf("  Parent ID: %ls\n", cur_dev->parent_id);
+=======
+	printf("  Bus type: %d (%s)\n", cur_dev->bus_type, hid_bus_name(cur_dev->bus_type));
+>>>>>>> d3013f0af3f4029d82872c1a9487ea461a56dee4
 	printf("\n");
 }
 
+void print_hid_report_descriptor_from_device(hid_device *device) {
+	unsigned char descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+	int res = 0;
+
+	printf("  Report Descriptor: ");
+	res = hid_get_report_descriptor(device, descriptor, sizeof(descriptor));
+	if (res < 0) {
+		printf("error getting: %ls", hid_error(device));
+	}
+	else {
+		printf("(%d bytes)", res);
+	}
+	for (int i = 0; i < res; i++) {
+		if (i % 10 == 0) {
+			printf("\n");
+		}
+		printf("0x%02x, ", descriptor[i]);
+	}
+	printf("\n");
+}
+
+void print_hid_report_descriptor_from_path(const char *path) {
+	hid_device *device = hid_open_path(path);
+	if (device) {
+		print_hid_report_descriptor_from_device(device);
+		hid_close(device);
+	}
+	else {
+		printf("  Report Descriptor: Unable to open device by path\n");
+	}
+}
+
 void print_devices(struct hid_device_info *cur_dev) {
-	while (cur_dev) {
+	for (; cur_dev; cur_dev = cur_dev->next) {
 		print_device(cur_dev);
-		cur_dev = cur_dev->next;
+	}
+}
+
+void print_devices_with_descriptor(struct hid_device_info *cur_dev) {
+	for (; cur_dev; cur_dev = cur_dev->next) {
+		print_device(cur_dev);
+		print_hid_report_descriptor_from_path(cur_dev->path);
 	}
 }
 
@@ -104,7 +163,7 @@ int main(int argc, char* argv[])
 #endif
 
 	devs = hid_enumerate(0x0, 0x0);
-	print_devices(devs);
+	print_devices_with_descriptor(devs);
 	hid_free_enumeration(devs);
 
 	// Set up the command buffer.
@@ -142,8 +201,9 @@ int main(int argc, char* argv[])
 	res = hid_get_serial_number_string(handle, wstr, MAX_STR);
 	if (res < 0)
 		printf("Unable to read serial number string\n");
-	printf("Serial Number String: (%d) %ls", wstr[0], wstr);
-	printf("\n");
+	printf("Serial Number String: (%d) %ls\n", wstr[0], wstr);
+
+	print_hid_report_descriptor_from_device(handle);
 
 	struct hid_device_info* info = hid_get_device_info(handle);
 	if (info == NULL) {

@@ -454,7 +454,7 @@ static int parse_hid_vid_pid_from_uevent_path(const char *uevent_path, unsigned 
 	}
 
 	char buf[1024];
-	res = read(handle, buf, sizeof(buf));
+	res = read(handle, buf, sizeof(buf) - 1); /* -1 for '\0' at the end */
 	close(handle);
 
 	if (res < 0) {
@@ -477,6 +477,28 @@ static int parse_hid_vid_pid_from_sysfs(const char *sysfs_path, unsigned *bus_ty
 
 	res = parse_hid_vid_pid_from_uevent_path(uevent_path, bus_type, vendor_id, product_id);
 	free(uevent_path);
+
+	return res;
+}
+
+static int get_hid_report_descriptor_from_hidraw(hid_device *dev, struct hidraw_report_descriptor *rpt_desc)
+{
+	int desc_size = 0;
+
+	/* Get Report Descriptor Size */
+	int res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
+	if (res < 0) {
+		register_device_error_format(dev, "ioctl(GRDESCSIZE): %s", strerror(errno));
+		return res;
+	}
+
+	/* Get Report Descriptor */
+	memset(rpt_desc, 0x0, sizeof(*rpt_desc));
+	rpt_desc->size = desc_size;
+	res = ioctl(dev->device_handle, HIDIOCGRDESC, rpt_desc);
+	if (res < 0) {
+		register_device_error_format(dev, "ioctl(GRDESC): %s", strerror(errno));
+	}
 
 	return res;
 }
@@ -786,12 +808,12 @@ static struct hid_device_info * create_device_info_for_hid_device(hid_device *de
 	return root;
 }
 
-HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version()
+HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version(void)
 {
 	return &api_version;
 }
 
-HID_API_EXPORT const char* HID_API_CALL hid_version_str()
+HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 {
 	return HID_API_VERSION_STR;
 }
@@ -985,7 +1007,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
 		if (res < 0) {
 			hid_close(dev);
-			register_device_error_format(dev, "ioctl(GRDESCSIZE) error for '%s', not a HIDRAW device?: %s", path, strerror(errno));
+			register_global_error_format("ioctl(GRDESCSIZE) error for '%s', not a HIDRAW device?: %s", path, strerror(errno));
 			return NULL;
 		}
 
@@ -1233,6 +1255,25 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	register_device_error(dev, "hid_get_indexed_string: not supported by hidraw");
 
 	return -1;
+}
+
+
+int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
+{
+	struct hidraw_report_descriptor rpt_desc;
+	int res = get_hid_report_descriptor_from_hidraw(dev, &rpt_desc);
+	if (res < 0) {
+		/* error already registered */
+		return res;
+	}
+
+	if (rpt_desc.size < buf_size) {
+		buf_size = (size_t) rpt_desc.size;
+	}
+
+	memcpy(buf, rpt_desc.value, buf_size);
+
+	return (int) buf_size;
 }
 
 
