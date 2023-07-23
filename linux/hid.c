@@ -192,7 +192,7 @@ static wchar_t *copy_udev_string(struct udev_device *dev, const char *udev_name)
  * Returns 1 if successful, 0 if an invalid key
  * Sets data_len and key_size when successful
  */
-static int get_hid_item_size(__u8 *report_descriptor, unsigned int pos, __u32 size, int *data_len, int *key_size)
+static int get_hid_item_size(__u8 *report_descriptor, __u32 size, unsigned int pos, int *data_len, int *key_size)
 {
 	int key = report_descriptor[pos];
 	int size_code;
@@ -272,6 +272,54 @@ static __u32 get_hid_report_bytes(__u8 *rpt, size_t len, size_t num_bytes, size_
 }
 
 /*
+ * Iterates until the end of a Collection.
+ * Assumes that *pos is exactly at the beginning of a Collection.
+ * Skips all nested Collection, i.e. iterates until the end of current level Collection.
+ *
+ * The return value is non-0 when an end of current Collection is found,
+ * 0 when error is occured (broken Descriptor, end of a Collection is found before its begin,
+ *  or no Collection is found at all).
+ */
+static int hid_iterate_over_collection(__u8 *report_descriptor, __u32 size, unsigned int *pos, int *data_len, int *key_size)
+{
+	int collection_level = 0;
+
+	while (*pos < size) {
+		int key = report_descriptor[*pos];
+		int key_cmd = key & 0xfc;
+
+		/* Determine data_len and key_size */
+		if (!get_hid_item_size(report_descriptor, size, *pos, data_len, key_size))
+			return 0; /* malformed report */
+
+		switch (key_cmd) {
+		case 0xa0: /* Collection 6.2.2.4 (Main) */
+			collection_level++;
+			break;
+		case 0xc0: /* End Collection 6.2.2.4 (Main) */
+			collection_level--;
+			break;
+		}
+
+		if (collection_level < 0) {
+			/* Broken descriptor or someone is using this function wrong,
+			 * i.e. should be called exactly at the collection start */
+			return 0;
+		}
+
+		if (collection_level == 0) {
+			/* Found it!
+			 * Also possible when called not at the collection start, but should not happen if used correctly */
+			return 1;
+		}
+
+		*pos += *data_len + *key_size;
+	}
+
+	return 0; /* Did not found the end of a Collection */
+}
+
+/*
  * Retrieves the device's Usage Page and Usage from the report descriptor.
  * The algorithm returns the current Usage Page/Usage pair whenever a new
  * Collection is found and a Usage Local Item is currently in scope.
@@ -292,22 +340,22 @@ static int get_next_hid_usage(__u8 *report_descriptor, __u32 size, unsigned int 
 {
 	int data_len, key_size;
 	int initial = *pos == 0; /* Used to handle case where no top-level application collection is defined */
-	int usage_pair_ready = 0;
 
-	/* Usage is a Local Item, it must be set before each Main Item (Collection) before a pair is returned */
 	int usage_found = 0;
+	int usage_page_found = 0;
 
 	while (*pos < size) {
 		int key = report_descriptor[*pos];
 		int key_cmd = key & 0xfc;
 
 		/* Determine data_len and key_size */
-		if (!get_hid_item_size(report_descriptor, *pos, size, &data_len, &key_size))
+		if (!get_hid_item_size(report_descriptor, size, *pos, &data_len, &key_size))
 			return -1; /* malformed report */
 
 		switch (key_cmd) {
 		case 0x4: /* Usage Page 6.2.2.7 (Global) */
 			*usage_page = get_hid_report_bytes(report_descriptor, size, data_len, *pos);
+			usage_page_found = 1;
 			break;
 
 		case 0x8: /* Usage 6.2.2.8 (Local) */
@@ -316,34 +364,25 @@ static int get_next_hid_usage(__u8 *report_descriptor, __u32 size, unsigned int 
 			break;
 
 		case 0xa0: /* Collection 6.2.2.4 (Main) */
-			/* A Usage Item (Local) must be found for the pair to be valid */
-			if (usage_found)
-				usage_pair_ready = 1;
+			if (!hid_iterate_over_collection(report_descriptor, size, pos, &data_len, &key_size)) {
+				return -1;
+			}
 
-			/* Usage is a Local Item, unset it */
-			usage_found = 0;
-			break;
+			/* A pair is valid - to be reported when Collection is found */
+			if (usage_found && usage_page_found) {
+				return 0;
+			}
 
-		case 0x80: /* Input 6.2.2.4 (Main) */
-		case 0x90: /* Output 6.2.2.4 (Main) */
-		case 0xb0: /* Feature 6.2.2.4 (Main) */
-		case 0xc0: /* End Collection 6.2.2.4 (Main) */
-			/* Usage is a Local Item, unset it */
-			usage_found = 0;
 			break;
 		}
 
 		/* Skip over this key and its associated data */
 		*pos += data_len + key_size;
-
-		/* Return usage pair */
-		if (usage_pair_ready)
-			return 0;
 	}
 
 	/* If no top-level application collection is found and usage page/usage pair is found, pair is valid
 	   https://docs.microsoft.com/en-us/windows-hardware/drivers/hid/top-level-collections */
-	if (initial && usage_found)
+	if (initial && usage_found && usage_page_found)
 		return 0; /* success */
 
 	return 1; /* finished processing */
