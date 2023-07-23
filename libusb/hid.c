@@ -675,6 +675,107 @@ static uint16_t get_report_descriptor_size_from_interface_descriptors(const stru
 	return result;
 }
 
+static int is_xbox360(unsigned short vendor_id, const struct libusb_interface_descriptor *intf_desc)
+{
+	static const int xb360_iface_subclass = 93;
+	static const int xb360_iface_protocol = 1; /* Wired */
+	static const int xb360w_iface_protocol = 129; /* Wireless */
+	static const int supported_vendors[] = {
+		0x0079, /* GPD Win 2 */
+		0x044f, /* Thrustmaster */
+		0x045e, /* Microsoft */
+		0x046d, /* Logitech */
+		0x056e, /* Elecom */
+		0x06a3, /* Saitek */
+		0x0738, /* Mad Catz */
+		0x07ff, /* Mad Catz */
+		0x0e6f, /* PDP */
+		0x0f0d, /* Hori */
+		0x1038, /* SteelSeries */
+		0x11c9, /* Nacon */
+		0x12ab, /* Unknown */
+		0x1430, /* RedOctane */
+		0x146b, /* BigBen */
+		0x1532, /* Razer Sabertooth */
+		0x15e4, /* Numark */
+		0x162e, /* Joytech */
+		0x1689, /* Razer Onza */
+		0x1949, /* Lab126, Inc. */
+		0x1bad, /* Harmonix */
+		0x20d6, /* PowerA */
+		0x24c6, /* PowerA */
+		0x2c22, /* Qanba */
+		0x2dc8, /* 8BitDo */
+		0x9886, /* ASTRO Gaming */
+	};
+
+	if (intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
+	    intf_desc->bInterfaceSubClass == xb360_iface_subclass &&
+	    (intf_desc->bInterfaceProtocol == xb360_iface_protocol ||
+	     intf_desc->bInterfaceProtocol == xb360w_iface_protocol)) {
+		size_t i;
+		for (i = 0; i < sizeof(supported_vendors)/sizeof(supported_vendors[0]); ++i) {
+			if (vendor_id == supported_vendors[i]) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int is_xboxone(unsigned short vendor_id, const struct libusb_interface_descriptor *intf_desc)
+{
+	static const int xb1_iface_subclass = 71;
+	static const int xb1_iface_protocol = 208;
+	static const int supported_vendors[] = {
+		0x044f, /* Thrustmaster */
+		0x045e, /* Microsoft */
+		0x0738, /* Mad Catz */
+		0x0e6f, /* PDP */
+		0x0f0d, /* Hori */
+		0x10f5, /* Turtle Beach */
+		0x1532, /* Razer Wildcat */
+		0x20d6, /* PowerA */
+		0x24c6, /* PowerA */
+		0x2dc8, /* 8BitDo */
+		0x2e24, /* Hyperkin */
+		0x3537, /* GameSir */
+	};
+
+	if (intf_desc->bInterfaceNumber == 0 &&
+	    intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
+	    intf_desc->bInterfaceSubClass == xb1_iface_subclass &&
+	    intf_desc->bInterfaceProtocol == xb1_iface_protocol) {
+		size_t i;
+		for (i = 0; i < sizeof(supported_vendors)/sizeof(supported_vendors[0]); ++i) {
+			if (vendor_id == supported_vendors[i]) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int should_enumerate_interface(unsigned short vendor_id, const struct libusb_interface_descriptor *intf_desc)
+{
+#if 0
+	printf("Checking interface 0x%x %d/%d/%d/%d\n", vendor_id, intf_desc->bInterfaceNumber, intf_desc->bInterfaceClass, intf_desc->bInterfaceSubClass, intf_desc->bInterfaceProtocol);
+#endif
+
+	if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID)
+		return 1;
+
+	/* Also enumerate Xbox 360 controllers */
+	if (is_xbox360(vendor_id, intf_desc))
+		return 1;
+
+	/* Also enumerate Xbox One controllers */
+	if (is_xboxone(vendor_id, intf_desc))
+		return 1;
+
+	return 0;
+}
+
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
 	libusb_device **devs;
@@ -718,7 +819,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 				for (k = 0; k < intf->num_altsetting; k++) {
 					const struct libusb_interface_descriptor *intf_desc;
 					intf_desc = &intf->altsetting[k];
-					if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID) {
+					if (should_enumerate_interface(dev_vid, intf_desc)) {
 						struct hid_device_info *tmp;
 
 						res = libusb_open(dev, &handle);
@@ -982,8 +1083,71 @@ static void *read_thread(void *param)
 	return NULL;
 }
 
+static void init_xbox360(libusb_device_handle *device_handle, unsigned short idVendor, unsigned short idProduct, const struct libusb_config_descriptor *conf_desc)
+{
+	(void)conf_desc;
 
-static int hidapi_initialize_device(hid_device *dev, int config_number, const struct libusb_interface_descriptor *intf_desc)
+	if ((idVendor == 0x05ac && idProduct == 0x055b) /* Gamesir-G3w */ ||
+	    idVendor == 0x0f0d /* Hori Xbox controllers */) {
+		unsigned char data[20];
+
+		/* The HORIPAD FPS for Nintendo Switch requires this to enable input reports.
+		   This VID/PID is also shared with other HORI controllers, but they all seem
+		   to be fine with this as well.
+		 */
+		memset(data, 0, sizeof(data));
+		libusb_control_transfer(device_handle, 0xC1, 0x01, 0x100, 0x0, data, sizeof(data), 100);
+	}
+}
+
+static void init_xboxone(libusb_device_handle *device_handle, unsigned short idVendor, unsigned short idProduct, const struct libusb_config_descriptor *conf_desc)
+{
+	static const int vendor_microsoft = 0x045e;
+	static const int xb1_iface_subclass = 71;
+	static const int xb1_iface_protocol = 208;
+	int j, k, res;
+
+	(void)idProduct;
+
+	for (j = 0; j < conf_desc->bNumInterfaces; j++) {
+		const struct libusb_interface *intf = &conf_desc->interface[j];
+		for (k = 0; k < intf->num_altsetting; k++) {
+			const struct libusb_interface_descriptor *intf_desc = &intf->altsetting[k];
+			if (intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
+			    intf_desc->bInterfaceSubClass == xb1_iface_subclass &&
+			    intf_desc->bInterfaceProtocol == xb1_iface_protocol) {
+				int bSetAlternateSetting = 0;
+
+				/* Newer Microsoft Xbox One controllers have a high speed alternate setting */
+				if (idVendor == vendor_microsoft &&
+				    intf_desc->bInterfaceNumber == 0 && intf_desc->bAlternateSetting == 1) {
+					bSetAlternateSetting = 1;
+				} else if (intf_desc->bInterfaceNumber != 0 && intf_desc->bAlternateSetting == 0) {
+					bSetAlternateSetting = 1;
+				}
+
+				if (bSetAlternateSetting) {
+					res = libusb_claim_interface(device_handle, intf_desc->bInterfaceNumber);
+					if (res < 0) {
+						LOG("can't claim interface %d: %d\n", intf_desc->bInterfaceNumber, res);
+						continue;
+					}
+
+					LOG("Setting alternate setting for VID/PID 0x%x/0x%x interface %d to %d\n",  idVendor, idProduct, intf_desc->bInterfaceNumber, intf_desc->bAlternateSetting);
+
+					res = libusb_set_interface_alt_setting(device_handle, intf_desc->bInterfaceNumber, intf_desc->bAlternateSetting);
+					if (res < 0) {
+						LOG("xbox init: can't set alt setting %d: %d\n", intf_desc->bInterfaceNumber, res);
+					}
+
+					libusb_release_interface(device_handle, intf_desc->bInterfaceNumber);
+				}
+			}
+		}
+	}
+}
+
+static int hidapi_initialize_device(hid_device *dev, const struct libusb_interface_descriptor *intf_desc, const struct libusb_config_descriptor *conf_desc)
 {
 	int i =0;
 	int res = 0;
@@ -1020,13 +1184,23 @@ static int hidapi_initialize_device(hid_device *dev, int config_number, const st
 		return 0;
 	}
 
+	/* Initialize XBox 360 controllers */
+	if (is_xbox360(desc.idVendor, intf_desc)) {
+		init_xbox360(dev->device_handle, desc.idVendor, desc.idProduct, conf_desc);
+	}
+
+	/* Initialize XBox One controllers */
+	if (is_xboxone(desc.idVendor, intf_desc)) {
+		init_xboxone(dev->device_handle, desc.idVendor, desc.idProduct, conf_desc);
+	}
+
 	/* Store off the string descriptor indexes */
 	dev->manufacturer_index = desc.iManufacturer;
 	dev->product_index      = desc.iProduct;
 	dev->serial_index       = desc.iSerialNumber;
 
 	/* Store off the USB information */
-	dev->config_number = config_number;
+	dev->config_number = conf_desc->bConfigurationValue;
 	dev->interface = intf_desc->bInterfaceNumber;
 
 	dev->report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
@@ -1110,7 +1284,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 			const struct libusb_interface *intf = &conf_desc->interface[j];
 			for (k = 0; k < intf->num_altsetting && !good_open; k++) {
 				const struct libusb_interface_descriptor *intf_desc = &intf->altsetting[k];
-				if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID) {
+				if (should_enumerate_interface(desc.idVendor, intf_desc)) {
 					char dev_path[64];
 					get_path(&dev_path, usb_dev, conf_desc->bConfigurationValue, intf_desc->bInterfaceNumber);
 					if (!strcmp(dev_path, path)) {
@@ -1122,7 +1296,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 							LOG("can't open device\n");
 							break;
 						}
-						good_open = hidapi_initialize_device(dev, conf_desc->bConfigurationValue, intf_desc);
+						good_open = hidapi_initialize_device(dev, intf_desc, conf_desc);
 						if (!good_open)
 							libusb_close(dev->device_handle);
 					}
@@ -1200,7 +1374,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 		goto err;
 	}
 
-	if (!hidapi_initialize_device(dev, conf_desc->bConfigurationValue, selected_intf_desc))
+	if (!hidapi_initialize_device(dev, selected_intf_desc, conf_desc))
 		goto err;
 
 	return dev;
