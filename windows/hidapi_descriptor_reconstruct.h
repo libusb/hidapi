@@ -27,10 +27,11 @@
 
 #include "hidapi_winapi.h"
 
-#if _MSC_VER
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable: 4200)
 #pragma warning(disable: 4201)
+#pragma warning(disable: 4214)
 #endif
 
 #include <windows.h>
