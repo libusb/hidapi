@@ -316,7 +316,7 @@ static int hid_iterate_over_collection(__u8 *report_descriptor, __u32 size, unsi
 		*pos += *data_len + *key_size;
 	}
 
-	return 0; /* Did not found the end of a Collection */
+	return 0; /* Did not find the end of a Collection */
 }
 
 /*
