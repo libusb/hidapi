@@ -203,7 +203,7 @@ jobs:
     - name: Run CTest MSVC
       shell: cmd
       working-directory: build/msvc
-      run: ctest -C RelWithDebInfo --rerun-failed --output-on-failure
+      run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
     - name: Configure CMake NMake
       shell: cmd
@@ -239,7 +239,7 @@ jobs:
         nmake install
     - name: Run CTest NMake
       working-directory: build\nmake
-      run: ctest --rerun-failed --output-on-failure
+      run: ctest --no-compress-output --output-on-failure
 
     - name: Configure CMake MinGW
       shell: cmd
@@ -270,7 +270,7 @@ jobs:
         cmake --build . --target install
     - name: Run CTest MinGW
       working-directory: build\mingw
-      run: ctest --rerun-failed --output-on-failure
+      run: ctest --no-compress-output --output-on-failure
 
     - name: Check Meson build
       shell: cmd
