@@ -400,7 +400,7 @@ static struct hid_device_info *create_device_info(const struct usb_device_info *
 	return root;
 }
 
-static int is_usb_bus_device(const char *s)
+static int is_usb_controller(const char *s)
 {
 	return (!strncmp(s, "usb", 3) && isdigit((int) s[3]));
 }
@@ -415,7 +415,7 @@ static int is_uhid_device(const char *s)
 	return (!strncmp(s, "uhid", 4) && isdigit((int) s[4]));
 }
 
-static void enumerate_bus_devices(int drvctl, const char *dev, char arr[static 256][16], size_t *len, int depth)
+static void walk_device_tree(int drvctl, const char *dev, int depth, char arr[static 256][16], size_t *len, int (*cmp) (const char *))
 {
 	int res;
 	char childname[256][16];
@@ -424,7 +424,7 @@ static void enumerate_bus_devices(int drvctl, const char *dev, char arr[static 2
 	if (depth && (!dev || !*dev))
 		return;
 
-	if (is_usb_bus_device(dev) && *len < 256)
+	if (cmp(dev) && *len < 256)
 		strlcpy(arr[(*len)++], dev, sizeof(*arr));
 
 	strlcpy(dla.l_devname, dev, sizeof(dla.l_devname));
@@ -439,7 +439,7 @@ static void enumerate_bus_devices(int drvctl, const char *dev, char arr[static 2
 		return;
 
 	for (size_t i = 0; i < dla.l_children; i++)
-		enumerate_bus_devices(drvctl, dla.l_childname[i], arr, len, depth + 1);
+		walk_device_tree(drvctl, dla.l_childname[i], depth + 1, arr, len, cmp);
 }
 
 static void enumerate_usb_devices(int bus, uint8_t addr, enumerate_devices_callback func, void *data)
@@ -466,7 +466,6 @@ static void enumerate_usb_devices(int bus, uint8_t addr, enumerate_devices_callb
 
 static void hid_enumerate_callback(const struct usb_device_info *udi, void *data)
 {
-	int res;
 	struct hid_enumerate_data *hed;
 
 	hed = (struct hid_enumerate_data *) data;
@@ -479,9 +478,8 @@ static void hid_enumerate_callback(const struct usb_device_info *udi, void *data
 
 	for (size_t i = 0; i < USB_MAX_DEVNAMES; i++) {
 		const char *parent_dev;
-		char childname[256][16];
-		struct devlistargs dla;
-		size_t j;
+		char arr[256][16];
+		size_t len;
 		const char *child_dev;
 		char devpath[32];
 		int uhid;
@@ -493,27 +491,13 @@ static void hid_enumerate_callback(const struct usb_device_info *udi, void *data
 		if (!is_uhid_parent_device(parent_dev))
 			continue;
 
-		strlcpy(dla.l_devname, parent_dev, sizeof(dla.l_devname));
-		dla.l_childname = childname;
-		dla.l_children = 256;
+		len = 0;
+		walk_device_tree(hed->drvctl, parent_dev, 0, arr, &len, is_uhid_device);
 
-		res = ioctl(hed->drvctl, DRVLISTDEV, &dla);
-		if (res == -1)
+		if (len == 0)
 			continue;
 
-		if (dla.l_children > 256)
-			continue;
-
-		for (j = 0; j < dla.l_children; j++) {
-			child_dev = dla.l_childname[j];
-
-			if (is_uhid_device(child_dev))
-				break;
-		}
-
-		if (j == dla.l_children)
-			continue;
-
+		child_dev = arr[0];
 		strlcpy(devpath, "/dev/", sizeof(devpath));
 		strlcat(devpath, child_dev, sizeof(devpath));
 
@@ -658,7 +642,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	}
 
 	len = 0;
-	enumerate_bus_devices(drvctl, "", arr, &len, 0);
+	walk_device_tree(drvctl, "", 0, arr, &len, is_usb_controller);
 
 	hed.root = NULL;
 	hed.end = NULL;
@@ -742,8 +726,8 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	int res;
 	hid_device *dev;
 	int drvctl;
-	char childname[256][16];
-	struct devlistargs dla;
+	char arr[256][16];
+	size_t len;
 
 	res = hid_init();
 	if (res == -1)
@@ -766,37 +750,21 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 		goto err_2;
 	}
 
-	strlcpy(dla.l_devname, path, sizeof(dla.l_devname));
-	dla.l_childname = childname;
-	dla.l_children = 256;
-
-	res = ioctl(drvctl, DRVLISTDEV, &dla);
-	if (res == -1) {
-		register_global_error("failed to get uhidev child devices");
-		goto err_2;
-	}
-
-	if (dla.l_children > 256) {
-		register_global_error("too many child devices");
-		goto err_2;
-	}
+	len = 0;
+	walk_device_tree(drvctl, path, 0, arr, &len, is_uhid_device);
 
 	dev->poll_handles_length = 0;
 	memset(dev->poll_handles, 0x00, sizeof(dev->poll_handles));
 	memset(dev->report_handles, 0xff, sizeof(dev->report_handles));
 
-	for (size_t i = 0; i < dla.l_children; i++) {
+	for (size_t i = 0; i < len; i++) {
 		const char *child_dev;
 		char devpath[32];
 		int uhid;
 		int rep_id;
 		struct pollfd *ph;
 
-		child_dev = dla.l_childname[i];
-
-		if (!is_uhid_device(child_dev))
-			continue;
-
+		child_dev = arr[i];
 		strlcpy(devpath, "/dev/", sizeof(devpath));
 		strlcat(devpath, child_dev, sizeof(devpath));
 
@@ -1150,10 +1118,4 @@ HID_API_EXPORT const struct hid_api_version* HID_API_CALL hid_version(void)
 HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 {
 	return HID_API_VERSION_STR;
-}
-
-int main(void) {
-	hid_device *dev = hid_open_path("uhidev1");
-	struct hid_device_info *hdi = hid_get_device_info(dev);
-	hid_close(dev);
 }
