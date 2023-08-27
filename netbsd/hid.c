@@ -2,9 +2,10 @@
  HIDAPI - Multi-Platform library for
  communication with HID devices.
 
+ James Buren
  libusb/hidapi Team
 
- Copyright 2022, All Rights Reserved.
+ Copyright 2023, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
@@ -38,15 +39,17 @@
 
 #include "hidapi.h"
 
+#define HIDAPI_MAX_CHILD_DEVICES 256
+
 struct hid_device_ {
+	int device_handle;
+	int blocking;
 	wchar_t *last_error_str;
 	struct hid_device_info *device_info;
 	size_t poll_handles_length;
 	struct pollfd poll_handles[256];
 	int report_handles[256];
-	int device_handle;
-	int blocking;
-	char path[16];
+	char path[USB_MAX_DEVNAMELEN];
 };
 
 struct hid_enumerate_data {
@@ -140,12 +143,13 @@ static void register_device_error_format(hid_device *dev, const char *format, ..
 	va_end(args);
 }
 
+
 /*
  * Gets the size of the HID item at the given position
  * Returns 1 if successful, 0 if an invalid key
  * Sets data_len and key_size when successful
  */
-static int get_hid_item_size(const uint8_t *report_descriptor, uint32_t pos, uint32_t size, int *data_len, int *key_size)
+static int get_hid_item_size(const uint8_t *report_descriptor, uint32_t size, unsigned int pos, int *data_len, int *key_size)
 {
 	int key = report_descriptor[pos];
 	int size_code;
@@ -225,6 +229,60 @@ static uint32_t get_hid_report_bytes(const uint8_t *rpt, size_t len, size_t num_
 }
 
 /*
+ * Iterates until the end of a Collection.
+ * Assumes that *pos is exactly at the beginning of a Collection.
+ * Skips all nested Collection, i.e. iterates until the end of current level Collection.
+ *
+ * The return value is non-0 when an end of current Collection is found,
+ * 0 when error is occured (broken Descriptor, end of a Collection is found before its begin,
+ *  or no Collection is found at all).
+ */
+static int hid_iterate_over_collection(const uint8_t *report_descriptor, uint32_t size, unsigned int *pos, int *data_len, int *key_size)
+{
+	int collection_level = 0;
+
+	while (*pos < size) {
+		int key = report_descriptor[*pos];
+		int key_cmd = key & 0xfc;
+
+		/* Determine data_len and key_size */
+		if (!get_hid_item_size(report_descriptor, size, *pos, data_len, key_size))
+			return 0; /* malformed report */
+
+		switch (key_cmd) {
+		case 0xa0: /* Collection 6.2.2.4 (Main) */
+			collection_level++;
+			break;
+		case 0xc0: /* End Collection 6.2.2.4 (Main) */
+			collection_level--;
+			break;
+		}
+
+		if (collection_level < 0) {
+			/* Broken descriptor or someone is using this function wrong,
+			 * i.e. should be called exactly at the collection start */
+			return 0;
+		}
+
+		if (collection_level == 0) {
+			/* Found it!
+			 * Also possible when called not at the collection start, but should not happen if used correctly */
+			return 1;
+		}
+
+		*pos += *data_len + *key_size;
+	}
+
+	return 0; /* Did not find the end of a Collection */
+}
+
+struct hid_usage_iterator {
+	unsigned int pos;
+	int usage_page_found;
+	unsigned short usage_page;
+};
+
+/*
  * Retrieves the device's Usage Page and Usage from the report descriptor.
  * The algorithm returns the current Usage Page/Usage pair whenever a new
  * Collection is found and a Usage Local Item is currently in scope.
@@ -241,63 +299,64 @@ static uint32_t get_hid_report_bytes(const uint8_t *rpt, size_t len, size_t num_
  * 1 when finished processing descriptor.
  * -1 on a malformed report.
  */
-static int get_next_hid_usage(const uint8_t *report_descriptor, uint32_t size, uint32_t *pos, uint16_t *usage_page, uint16_t *usage)
+static int get_next_hid_usage(const uint8_t *report_descriptor, uint32_t size, struct hid_usage_iterator *ctx, unsigned short *usage_page, unsigned short *usage)
 {
 	int data_len, key_size;
-	int initial = *pos == 0; /* Used to handle case where no top-level application collection is defined */
-	int usage_pair_ready = 0;
+	int initial = ctx->pos == 0; /* Used to handle case where no top-level application collection is defined */
 
-	/* Usage is a Local Item, it must be set before each Main Item (Collection) before a pair is returned */
 	int usage_found = 0;
 
-	while (*pos < size) {
-		int key = report_descriptor[*pos];
+	while (ctx->pos < size) {
+		int key = report_descriptor[ctx->pos];
 		int key_cmd = key & 0xfc;
 
 		/* Determine data_len and key_size */
-		if (!get_hid_item_size(report_descriptor, *pos, size, &data_len, &key_size))
+		if (!get_hid_item_size(report_descriptor, size, ctx->pos, &data_len, &key_size))
 			return -1; /* malformed report */
 
 		switch (key_cmd) {
 		case 0x4: /* Usage Page 6.2.2.7 (Global) */
-			*usage_page = get_hid_report_bytes(report_descriptor, size, data_len, *pos);
+			ctx->usage_page = get_hid_report_bytes(report_descriptor, size, data_len, ctx->pos);
+			ctx->usage_page_found = 1;
 			break;
 
 		case 0x8: /* Usage 6.2.2.8 (Local) */
-			*usage = get_hid_report_bytes(report_descriptor, size, data_len, *pos);
-			usage_found = 1;
+			if (data_len == 4) { /* Usages 5.5 / Usage Page 6.2.2.7 */
+				ctx->usage_page = get_hid_report_bytes(report_descriptor, size, 2, ctx->pos + 2);
+				ctx->usage_page_found = 1;
+				*usage = get_hid_report_bytes(report_descriptor, size, 2, ctx->pos);
+				usage_found = 1;
+			}
+			else {
+				*usage = get_hid_report_bytes(report_descriptor, size, data_len, ctx->pos);
+				usage_found = 1;
+			}
 			break;
 
 		case 0xa0: /* Collection 6.2.2.4 (Main) */
-			/* A Usage Item (Local) must be found for the pair to be valid */
-			if (usage_found)
-				usage_pair_ready = 1;
+			if (!hid_iterate_over_collection(report_descriptor, size, &ctx->pos, &data_len, &key_size)) {
+				return -1;
+			}
 
-			/* Usage is a Local Item, unset it */
-			usage_found = 0;
-			break;
+			/* A pair is valid - to be reported when Collection is found */
+			if (usage_found && ctx->usage_page_found) {
+				*usage_page = ctx->usage_page;
+				return 0;
+			}
 
-		case 0x80: /* Input 6.2.2.4 (Main) */
-		case 0x90: /* Output 6.2.2.4 (Main) */
-		case 0xb0: /* Feature 6.2.2.4 (Main) */
-		case 0xc0: /* End Collection 6.2.2.4 (Main) */
-			/* Usage is a Local Item, unset it */
-			usage_found = 0;
 			break;
 		}
 
 		/* Skip over this key and its associated data */
-		*pos += data_len + key_size;
-
-		/* Return usage pair */
-		if (usage_pair_ready)
-			return 0;
+		ctx->pos += data_len + key_size;
 	}
 
 	/* If no top-level application collection is found and usage page/usage pair is found, pair is valid
 	   https://docs.microsoft.com/en-us/windows-hardware/drivers/hid/top-level-collections */
-	if (initial && usage_found)
-		return 0; /* success */
+	if (initial && usage_found && ctx->usage_page_found) {
+			*usage_page = ctx->usage_page;
+			return 0; /* success */
+	}
 
 	return 1; /* finished processing */
 }
@@ -350,17 +409,18 @@ static struct hid_device_info *create_device_info(const struct usb_device_info *
 	end->bus_type = HID_API_BUS_USB;
 
 	if (ucrd) {
-		uint32_t pos;
 		uint16_t page;
 		uint16_t usage;
+		struct hid_usage_iterator usage_iterator;
 
-		pos = page = usage = 0;
+		page = usage = 0;
+		memset(&usage_iterator, 0, sizeof(usage_iterator));
 
 		/*
 		 * Parse the first usage and usage page
 		 * out of the report descriptor.
 		 */
-		if (!get_next_hid_usage(ucrd->ucrd_data, ucrd->ucrd_size, &pos, &page, &usage)) {
+		if (get_next_hid_usage(ucrd->ucrd_data, ucrd->ucrd_size, &usage_iterator, &page, &usage) == 0) {
 			end->usage_page = page;
 			end->usage = usage;
 		}
@@ -369,8 +429,7 @@ static struct hid_device_info *create_device_info(const struct usb_device_info *
 		 * Parse any additional usage and usage pages
 		 * out of the report descriptor.
 		 */
-
-		while (!get_next_hid_usage(ucrd->ucrd_data, ucrd->ucrd_size, &pos, &page, &usage)) {
+		while (get_next_hid_usage(ucrd->ucrd_data, ucrd->ucrd_size, &usage_iterator, &page, &usage) == 0) {
 			/* Create new record for additional usage pairs */
 			struct hid_device_info *node = (struct hid_device_info *) calloc(1, sizeof(struct hid_device_info));
 
@@ -415,27 +474,33 @@ static int is_uhid_device(const char *s)
 	return (!strncmp(s, "uhid", 4) && isdigit((int) s[4]));
 }
 
-static void walk_device_tree(int drvctl, const char *dev, int depth, char arr[static 256][16], size_t *len, int (*cmp) (const char *))
+static void walk_device_tree(int drvctl, const char *dev, int depth, char arr[static HIDAPI_MAX_CHILD_DEVICES][USB_MAX_DEVNAMELEN], size_t *len, int (*cmp) (const char *))
 {
 	int res;
-	char childname[256][16];
+	char childname[HIDAPI_MAX_CHILD_DEVICES][USB_MAX_DEVNAMELEN];
 	struct devlistargs dla;
 
 	if (depth && (!dev || !*dev))
 		return;
 
-	if (cmp(dev) && *len < 256)
+	if (cmp(dev) && *len < HIDAPI_MAX_CHILD_DEVICES)
 		strlcpy(arr[(*len)++], dev, sizeof(*arr));
 
 	strlcpy(dla.l_devname, dev, sizeof(dla.l_devname));
 	dla.l_childname = childname;
-	dla.l_children = 256;
+	dla.l_children = HIDAPI_MAX_CHILD_DEVICES;
 
 	res = ioctl(drvctl, DRVLISTDEV, &dla);
 	if (res == -1)
 		return;
 
-	if (dla.l_children > 256)
+	/*
+	 * DO NOT CHANGE THIS. This is a fail-safe check
+	 * for the unlikely event that a parent device has
+	 * more than HIDAPI_MAX_CHILD_DEVICES child devices
+	 * to prevent iterating over uninitialized data.
+	 */
+	if (dla.l_children > HIDAPI_MAX_CHILD_DEVICES)
 		return;
 
 	for (size_t i = 0; i < dla.l_children; i++)
@@ -478,10 +543,10 @@ static void hid_enumerate_callback(const struct usb_device_info *udi, void *data
 
 	for (size_t i = 0; i < USB_MAX_DEVNAMES; i++) {
 		const char *parent_dev;
-		char arr[256][16];
+		char arr[HIDAPI_MAX_CHILD_DEVICES][USB_MAX_DEVNAMELEN];
 		size_t len;
 		const char *child_dev;
-		char devpath[32];
+		char devpath[USB_MAX_DEVNAMELEN];
 		int uhid;
 		struct usb_ctl_report_desc ucrd;
 		int use_ucrd;
@@ -602,15 +667,8 @@ static int get_report(hid_device *dev, uint8_t *data, size_t length, int report)
 
 int HID_API_EXPORT HID_API_CALL hid_init(void)
 {
-	const char *locale;
-
 	/* indicate no error */
 	register_global_error(NULL);
-
-	/* Set the locale if it's not set. */
-	locale = setlocale(LC_CTYPE, NULL);
-	if (!locale)
-		setlocale(LC_CTYPE, "");
 
 	return 0;
 }
@@ -627,7 +685,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 {
 	int res;
 	int drvctl;
-	char arr[256][16];
+	char arr[HIDAPI_MAX_CHILD_DEVICES][USB_MAX_DEVNAMELEN];
 	size_t len;
 	struct hid_enumerate_data hed;
 
@@ -651,7 +709,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	hed.product_id = product_id;
 
 	for (size_t i = 0; i < len; i++) {
-		char devpath[32];
+		char devpath[USB_MAX_DEVNAMELEN];
 		int bus;
 
 		strlcpy(devpath, "/dev/", sizeof(devpath));
@@ -688,7 +746,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 {
 	struct hid_device_info *devs;
 	struct hid_device_info *dev;
-	char path[16];
+	char path[USB_MAX_DEVNAMELEN];
 
 	devs = hid_enumerate(vendor_id, product_id);
 	if (!devs)
@@ -726,7 +784,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	int res;
 	hid_device *dev;
 	int drvctl;
-	char arr[256][16];
+	char arr[HIDAPI_MAX_CHILD_DEVICES][USB_MAX_DEVNAMELEN];
 	size_t len;
 
 	res = hid_init();
@@ -759,7 +817,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 
 	for (size_t i = 0; i < len; i++) {
 		const char *child_dev;
-		char devpath[32];
+		char devpath[USB_MAX_DEVNAMELEN];
 		int uhid;
 		int rep_id;
 		struct pollfd *ph;
@@ -776,6 +834,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 
 		res = ioctl(uhid, USB_GET_REPORT_ID, &rep_id);
 		if (res == -1) {
+			close(uhid);
 			register_global_error_format("failed to get report id %s: %s", child_dev, strerror(errno));
 			goto err_3;
 		}
@@ -788,20 +847,17 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 		dev->device_handle = uhid;
 	}
 
+	dev->blocking = 1;
 	dev->last_error_str = NULL;
 	dev->device_info = NULL;
-	dev->blocking = 1;
 	strlcpy(dev->path, path, sizeof(dev->path));
 
+	register_global_error(NULL);
 	return dev;
 
 err_3:
-	for (size_t i = 0; i < 256; i++) {
-		int uhid = dev->report_handles[i];
-
-		if (uhid >= 0)
-			close(uhid);
-	}
+	for (size_t i = 0; i < dev->poll_handles_length; i++)
+		close(dev->poll_handles[i].fd);
 err_2:
 	close(drvctl);
 err_1:
@@ -893,12 +949,8 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 
 	hid_free_enumeration(dev->device_info);
 
-	for (size_t i = 0; i < 256; i++) {
-		int uhid = dev->report_handles[i];
-
-		if (uhid >= 0)
-			close(uhid);
-	}
+	for (size_t i = 0; i < dev->poll_handles_length; i++)
+		close(dev->poll_handles[i].fd);
 
 	free(dev);
 }
