@@ -67,7 +67,19 @@ typedef LONG NTSTATUS;
 
 /* MAXIMUM_USB_STRING_LENGTH from usbspec.h is 255 */
 /* BLUETOOTH_DEVICE_NAME_SIZE from bluetoothapis.h is 256 */
-#define MAX_STRING_WCHARS 256
+
+/*
+Win32 HID API doc says: For USB devices, the maximum string length is 126 wide
+characters (not including the terminating NULL character).
+
+For certain USB devices, using a buffer larger or equal to 127 wchars results
+in successful completion of HID API functions, but a broken string is stored in
+the output buffer. This behaviour persists even if HID API is bypassed and HID
+IOCTLs are passed to the HID driver directly (IOCTL_HID_GET_MANUFACTURER_STRING,
+IOCTL_HID_GET_PRODUCT_STRING, etc). So, the buffer MUST NOT exceed 126 WCHARs.
+*/
+
+#define MAX_STRING_WCHARS 126
 
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
@@ -699,7 +711,8 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	HIDD_ATTRIBUTES attrib;
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	HIDP_CAPS caps;
-	wchar_t string[MAX_STRING_WCHARS];
+	wchar_t string[MAX_STRING_WCHARS + 1];
+	string[MAX_STRING_WCHARS] = L'\0';
 
 	/* Create the record. */
 	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
@@ -735,20 +748,17 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 
 	/* Serial Number */
 	string[0] = L'\0';
-	HidD_GetSerialNumberString(handle, string, sizeof(string));
-	string[MAX_STRING_WCHARS - 1] = L'\0';
+	HidD_GetSerialNumberString(handle, string, MAX_STRING_WCHARS * sizeof(wchar_t));
 	dev->serial_number = _wcsdup(string);
 
 	/* Manufacturer String */
 	string[0] = L'\0';
-	HidD_GetManufacturerString(handle, string, sizeof(string));
-	string[MAX_STRING_WCHARS - 1] = L'\0';
+	HidD_GetManufacturerString(handle, string, MAX_STRING_WCHARS * sizeof(wchar_t));
 	dev->manufacturer_string = _wcsdup(string);
 
 	/* Product String */
 	string[0] = L'\0';
-	HidD_GetProductString(handle, string, sizeof(string));
-	string[MAX_STRING_WCHARS - 1] = L'\0';
+	HidD_GetProductString(handle, string, MAX_STRING_WCHARS * sizeof(wchar_t));
 	dev->product_string = _wcsdup(string);
 
 	hid_internal_get_info(path, dev);
@@ -1355,8 +1365,16 @@ HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_dev
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
 	BOOL res;
+	size_t len;
 
-	res = HidD_GetIndexedString(dev->device_handle, string_index, string, sizeof(wchar_t) * (DWORD) MIN(maxlen, MAX_STRING_WCHARS));
+	if (maxlen <= MAX_STRING_WCHARS)
+		len = maxlen;
+	else {
+		len = MAX_STRING_WCHARS;
+		string[MAX_STRING_WCHARS] = L'\0';
+	}
+
+	res = HidD_GetIndexedString(dev->device_handle, string_index, string, (ULONG)len * sizeof(wchar_t));
 	if (!res) {
 		register_winapi_error(dev, L"HidD_GetIndexedString");
 		return -1;
