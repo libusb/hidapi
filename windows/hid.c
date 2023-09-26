@@ -67,19 +67,16 @@ typedef LONG NTSTATUS;
 
 /* MAXIMUM_USB_STRING_LENGTH from usbspec.h is 255 */
 /* BLUETOOTH_DEVICE_NAME_SIZE from bluetoothapis.h is 256 */
+#define MAX_STRING_WCHARS 256
 
-/*
-Win32 HID API doc says: For USB devices, the maximum string length is 126 wide
-characters (not including the terminating NULL character).
-
-For certain USB devices, using a buffer larger or equal to 127 wchars results
-in successful completion of HID API functions, but a broken string is stored in
-the output buffer. This behaviour persists even if HID API is bypassed and HID
-IOCTLs are passed to the HID driver directly (IOCTL_HID_GET_MANUFACTURER_STRING,
-IOCTL_HID_GET_PRODUCT_STRING, etc). So, the buffer MUST NOT exceed 126 WCHARs.
+/* For certain USB devices, using a buffer larger or equal to 127 wchars results
+   in successful completion of HID API functions, but a broken string is stored
+   in the output buffer. This behaviour persists even if HID API is bypassed and
+   HID IOCTLs are passed to the HID driver directly. Therefore, for USB devices,
+   the buffer MUST NOT exceed 126 WCHARs.
 */
 
-#define MAX_STRING_WCHARS 126
+#define MAX_STRING_WCHARS_USB 126
 
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
@@ -602,11 +599,18 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 }
 
-static void hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
+/* unfortunately, BLUETOOTH vs BLE can't be distinguished using hid_device_info alone
+   so we'll return it as a flag in the high 32-bit (low 32-bits will carry the DEVINST)
+*/
+
+#define HID_INTERNAL_INFO_FLAG_BLE 0x100000000ULL
+
+static ULONGLONG hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
 {
 	wchar_t *device_id = NULL, *compatible_ids = NULL;
 	CONFIGRET cr;
 	DEVINST dev_node;
+	ULONGLONG result = 0;
 
 	/* Get the device id from interface path */
 	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
@@ -628,6 +632,8 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 	if (!compatible_ids)
 		goto end;
 
+	result = dev_node;
+
 	/* Now we can parse parent's compatible IDs to find out the device bus type */
 	for (wchar_t* compatible_id = compatible_ids; *compatible_id; compatible_id += wcslen(compatible_id) + 1) {
 		/* Normalize to upper case */
@@ -638,7 +644,6 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
 		if (wcsstr(compatible_id, L"USB") != NULL) {
 			dev->bus_type = HID_API_BUS_USB;
-			hid_internal_get_usb_info(dev, dev_node);
 			break;
 		}
 
@@ -652,7 +657,7 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
 			dev->bus_type = HID_API_BUS_BLUETOOTH;
-			hid_internal_get_ble_info(dev, dev_node);
+			result |= HID_INTERNAL_INFO_FLAG_BLE;
 			break;
 		}
 
@@ -670,9 +675,11 @@ static void hid_internal_get_info(const wchar_t* interface_path, struct hid_devi
 			break;
 		}
 	}
+
 end:
 	free(device_id);
 	free(compatible_ids);
+	return result;
 }
 
 static char *hid_internal_UTF16toUTF8(const wchar_t *src)
@@ -712,7 +719,9 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 	HIDP_CAPS caps;
 	wchar_t string[MAX_STRING_WCHARS + 1];
-	string[MAX_STRING_WCHARS] = L'\0';
+	ULONG len;
+	ULONG size;
+	ULONGLONG flags;
 
 	/* Create the record. */
 	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
@@ -746,22 +755,39 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 		HidD_FreePreparsedData(pp_data);
 	}
 
+	/* call hid_internal_get_info before reading string descriptors to get dev->bus_type */
+	flags = hid_internal_get_info(path, dev);
+
+	len = dev->bus_type == HID_API_BUS_USB ? MAX_STRING_WCHARS_USB : MAX_STRING_WCHARS;
+	string[len] = L'\0';
+	size = len * sizeof(wchar_t);
+
 	/* Serial Number */
 	string[0] = L'\0';
-	HidD_GetSerialNumberString(handle, string, MAX_STRING_WCHARS * sizeof(wchar_t));
+	HidD_GetSerialNumberString(handle, string, size);
 	dev->serial_number = _wcsdup(string);
 
 	/* Manufacturer String */
 	string[0] = L'\0';
-	HidD_GetManufacturerString(handle, string, MAX_STRING_WCHARS * sizeof(wchar_t));
+	HidD_GetManufacturerString(handle, string, size);
 	dev->manufacturer_string = _wcsdup(string);
 
 	/* Product String */
 	string[0] = L'\0';
-	HidD_GetProductString(handle, string, MAX_STRING_WCHARS * sizeof(wchar_t));
+	HidD_GetProductString(handle, string, size);
 	dev->product_string = _wcsdup(string);
 
-	hid_internal_get_info(path, dev);
+	/* now, the portion of hid_internal_get_info depending on the string descriptors */
+	switch (dev->bus_type) {
+	case HID_API_BUS_USB:
+		hid_internal_get_usb_info(dev, (DEVINST)flags);
+		break;
+
+	case HID_API_BUS_BLUETOOTH:
+		if (flags & HID_INTERNAL_INFO_FLAG_BLE)
+			hid_internal_get_ble_info(dev, (DEVINST)flags);
+		break;
+	}
 
 	return dev;
 }
@@ -1365,16 +1391,13 @@ HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_dev
 int HID_API_EXPORT_CALL HID_API_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
 	BOOL res;
-	size_t len;
 
-	if (maxlen <= MAX_STRING_WCHARS)
-		len = maxlen;
-	else {
-		len = MAX_STRING_WCHARS;
-		string[MAX_STRING_WCHARS] = L'\0';
+	if (dev->device_info && dev->device_info->bus_type == HID_API_BUS_USB && maxlen > MAX_STRING_WCHARS_USB) {
+		string[MAX_STRING_WCHARS_USB] = L'\0';
+		maxlen = MAX_STRING_WCHARS_USB;
 	}
 
-	res = HidD_GetIndexedString(dev->device_handle, string_index, string, (ULONG)len * sizeof(wchar_t));
+	res = HidD_GetIndexedString(dev->device_handle, string_index, string, (ULONG)maxlen * sizeof(wchar_t));
 	if (!res) {
 		register_winapi_error(dev, L"HidD_GetIndexedString");
 		return -1;
