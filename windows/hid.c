@@ -599,18 +599,17 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 }
 
-/* unfortunately, BLUETOOTH vs BLE can't be distinguished using hid_device_info alone
-   so we'll return it as a flag in the high 32-bit (low 32-bits will carry the DEVINST)
+/* Unfortunately, HID_API_BUS_xxx constants alone aren't enough to distinguish between BLUETOOTH and BLE.
+   As such, we'll introduce an internal flag to help us with that; once we're done, we'll clear it away.
 */
 
-#define HID_INTERNAL_INFO_FLAG_BLE 0x100000000ULL
+#define HID_API_BUS_INTERNAL_BLE 0x10
 
-static ULONGLONG hid_internal_get_info(const wchar_t* interface_path, struct hid_device_info* dev)
+static DEVINST hid_internal_detect_bus_type(const wchar_t* interface_path, struct hid_device_info* dev)
 {
 	wchar_t *device_id = NULL, *compatible_ids = NULL;
 	CONFIGRET cr;
-	DEVINST dev_node;
-	ULONGLONG result = 0;
+	DEVINST dev_node = 0;
 
 	/* Get the device id from interface path */
 	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
@@ -631,8 +630,6 @@ static ULONGLONG hid_internal_get_info(const wchar_t* interface_path, struct hid
 	compatible_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_CompatibleIds, DEVPROP_TYPE_STRING_LIST);
 	if (!compatible_ids)
 		goto end;
-
-	result = dev_node;
 
 	/* Now we can parse parent's compatible IDs to find out the device bus type */
 	for (wchar_t* compatible_id = compatible_ids; *compatible_id; compatible_id += wcslen(compatible_id) + 1) {
@@ -656,8 +653,7 @@ static ULONGLONG hid_internal_get_info(const wchar_t* interface_path, struct hid
 
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
-			dev->bus_type = HID_API_BUS_BLUETOOTH;
-			result |= HID_INTERNAL_INFO_FLAG_BLE;
+			dev->bus_type = (hid_bus_type)(HID_API_BUS_BLUETOOTH | HID_API_BUS_INTERNAL_BLE);
 			break;
 		}
 
@@ -679,7 +675,7 @@ static ULONGLONG hid_internal_get_info(const wchar_t* interface_path, struct hid
 end:
 	free(device_id);
 	free(compatible_ids);
-	return result;
+	return dev_node;
 }
 
 static char *hid_internal_UTF16toUTF8(const wchar_t *src)
@@ -721,7 +717,7 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	wchar_t string[MAX_STRING_WCHARS + 1];
 	ULONG len;
 	ULONG size;
-	ULONGLONG flags;
+	DEVINST dev_node;
 
 	/* Create the record. */
 	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
@@ -755,8 +751,8 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 		HidD_FreePreparsedData(pp_data);
 	}
 
-	/* call hid_internal_get_info before reading string descriptors to get dev->bus_type */
-	flags = hid_internal_get_info(path, dev);
+	/* detect bus type before reading string descriptors */
+	dev_node = hid_internal_detect_bus_type(path, dev);
 
 	len = dev->bus_type == HID_API_BUS_USB ? MAX_STRING_WCHARS_USB : MAX_STRING_WCHARS;
 	string[len] = L'\0';
@@ -777,15 +773,15 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	HidD_GetProductString(handle, string, size);
 	dev->product_string = _wcsdup(string);
 
-	/* now, the portion of hid_internal_get_info depending on the string descriptors */
+	/* now, the portion that depends on string descriptors */
 	switch (dev->bus_type) {
 	case HID_API_BUS_USB:
-		hid_internal_get_usb_info(dev, (DEVINST)flags);
+		hid_internal_get_usb_info(dev, dev_node);
 		break;
 
-	case HID_API_BUS_BLUETOOTH:
-		if (flags & HID_INTERNAL_INFO_FLAG_BLE)
-			hid_internal_get_ble_info(dev, (DEVINST)flags);
+	case HID_API_BUS_BLUETOOTH | HID_API_BUS_INTERNAL_BLE:
+		dev->bus_type = (hid_bus_type)(dev->bus_type & ~HID_API_BUS_INTERNAL_BLE);
+		hid_internal_get_ble_info(dev, dev_node);
 		break;
 	}
 
