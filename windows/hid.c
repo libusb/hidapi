@@ -790,6 +790,10 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 		if (detect_bus_type_result.bus_flags & HID_API_BUS_FLAG_BLE)
 			hid_internal_get_ble_info(dev, detect_bus_type_result.dev_node);
 		break;
+
+	default:
+		/* shut down -Wswitch */
+		break;
 	}
 
 	return dev;
