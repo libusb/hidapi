@@ -6,6 +6,7 @@
 
 #if defined(__MINGW32__)
 #pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 #endif
 static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 {
