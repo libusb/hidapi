@@ -213,7 +213,7 @@ typedef struct hidp_preparsed_data_ {
 	USHORT FirstByteOfLinkCollectionArray;
 	USHORT NumberLinkCollectionNodes;
 
-#if defined(__MINGW32__) || defined(__CYGWIN__)
+#ifndef _MSC_VER
 	// MINGW fails with: Flexible array member in union not supported
 	// Solution: https://gcc.gnu.org/onlinedocs/gcc/Zero-Length.html
 	union {
