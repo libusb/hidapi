@@ -277,7 +277,7 @@ jobs:
     - name: Run CTest NMake ClangCL
       shell: cmd
       working-directory: build/clang_cl
-      run: ctest -C RelWithDebInfo --rerun-failed --output-on-failure
+      run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
     - name: Configure CMake MinGW
       shell: cmd
