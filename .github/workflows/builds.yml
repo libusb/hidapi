@@ -181,7 +181,7 @@ jobs:
     - name: Build CMake MSVC
       working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
-    - name: Check artifacts MSVC
+    - name: Check artifacts CMake MSVC
       uses: andstor/file-existence-action@v2
       with:
         files: "install/msvc/lib/hidapi.lib, \
@@ -189,7 +189,7 @@ jobs:
                 install/msvc/include/hidapi/hidapi.h, \
                 install/msvc/include/hidapi/hidapi_winapi.h"
         fail: true
-    - name: Check CMake Export Package
+    - name: Check CMake MSVC Export Package
       shell: cmd
       run: |
         cmake ^
@@ -205,18 +205,18 @@ jobs:
       working-directory: build/msvc
       run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
-    - name: Configure CMake NMake
+    - name: Configure CMake NMake MSVC
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
-    - name: Build CMake NMake
+    - name: Build CMake NMake MSVC
       working-directory: build\nmake
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
-    - name: Check artifacts NMake
+    - name: Check artifacts CMake NMake MSVC
       uses: andstor/file-existence-action@v2
       with:
         files: "install/nmake/lib/hidapi.lib, \
@@ -224,7 +224,7 @@ jobs:
                 install/nmake/include/hidapi/hidapi.h, \
                 install/nmake/include/hidapi/hidapi_winapi.h"
         fail: true
-    - name: Check CMake Export Package NMake
+    - name: Check CMake NMake MSVC Export Package
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
@@ -237,9 +237,47 @@ jobs:
           "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
         cd build\nmake_test
         nmake install
-    - name: Run CTest NMake
+    - name: Run CTest NMake MSVC
       working-directory: build\nmake
       run: ctest --no-compress-output --output-on-failure
+
+    - name: Configure CMake NMake ClangCL
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake -G"NMake Makefiles" -B build\clang_cl -S hidapisrc -D CMAKE_C_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=OFF -DCMAKE_INSTALL_PREFIX=install\clang_cl -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake NMake ClangCL
+      working-directory: build\clang_cl
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        nmake install
+    - name: Check artifacts CMake NMake ClangCL
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "install/clang_cl/lib/hidapi.lib, \
+                install/clang_cl/bin/hidapi.dll, \
+                install/clang_cl/include/hidapi/hidapi.h, \
+                install/clang_cl/include/hidapi/hidapi_winapi.h"
+        fail: true
+    - name: Check CMake NMake ClangCL Export Package
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake ^
+          -G"NMake Makefiles" ^
+          -B build\clang_cl_test ^
+          -S hidapisrc\hidtest ^
+          -D CMAKE_C_COMPILER=clang-cl ^
+          -Dhidapi_ROOT=install\clang_cl ^
+          -DCMAKE_INSTALL_PREFIX=install\clang_cl_test ^
+          "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cd build\clang_cl_test
+        cmake --build . --target install
+    - name: Run CTest NMake ClangCL
+      shell: cmd
+      working-directory: build/clang_cl
+      run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
     - name: Configure CMake MinGW
       shell: cmd
@@ -288,14 +326,14 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: microsoft/setup-msbuild@v1.1
-    - name: MSBuild x86
+    - name: MSBuild x86 MSVC
       run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=Win32
     - name: Check artifacts x86
       uses: andstor/file-existence-action@v2
       with:
         files: "windows/Release/hidapi.dll, windows/Release/hidapi.lib, windows/Release/hidapi.pdb"
         fail: true
-    - name: MSBuild x64
+    - name: MSBuild x64 MSVC
       run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=x64
     - name: Check artifacts x64
       uses: andstor/file-existence-action@v2
