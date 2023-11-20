@@ -93,7 +93,7 @@ static int pthread_barrier_wait(pthread_barrier_t *barrier)
 		do {
 			pthread_cond_wait(&barrier->cond, &(barrier->mutex));
 		}
-		while (!(barrier->count >= barrier->trip_count));
+		while (barrier->count != 0);
 
 		pthread_mutex_unlock(&barrier->mutex);
 		return 0;
