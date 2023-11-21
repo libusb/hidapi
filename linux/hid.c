@@ -35,6 +35,7 @@
 #include <sys/utsname.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <pthread.h>
 
 /* Linux */
 #include <linux/hidraw.h>
@@ -880,6 +881,70 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+static struct hid_hotplug_context {
+	/* UDEV context that handles the monitor */
+	struct udev* udev_ctx;
+
+	/* UDEV monitor that receives events */
+	struct udev_monitor* mon;
+
+	/* File descriptor for the UDEV monitor that allows to check for new events with select() */
+	int monitor_fd;
+
+	/* Thread for the UDEV monitor */
+	pthread_t thread;
+
+	pthread_mutex_t mutex;
+
+	/* HIDAPI unique callback handle counter */
+	hid_hotplug_callback_handle next_handle;
+
+	/* Linked list of the hotplug callbacks */
+	struct hid_hotplug_callback *hotplug_cbs;
+
+	/* Linked list of the device infos (mandatory when the device is disconnected) */
+	struct hid_device_info *devs;
+} hid_hotplug_context = {
+	.udev_ctx = NULL,
+	.monitor_fd = -1,
+	.next_handle = 1,
+	.hotplug_cbs = NULL,
+	.devs = NULL
+};
+
+static void hid_internal_hotplug_cleanup()
+{
+	if (hid_hotplug_context.hotplug_cbs == NULL) {
+		/* Cleanup connected device list */
+		hid_free_enumeration(hid_hotplug_context.devs);
+		hid_hotplug_context.devs = NULL;
+		/* Disarm the udev monitor */
+		udev_monitor_unref(hid_hotplug_context.mon);
+		udev_unref(hid_hotplug_context.udev_ctx);
+	}
+}
+
+static void hid_internal_hotplug_init()
+{
+	pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+}
+
+static void hid_internal_hotplug_exit()
+{
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
+	/* Reove all callbacks from the list */
+	while(*current)
+	{
+		hid_hotplug_callback* next = (*current)->next;
+		free(*current);
+		*current = next;
+	}
+	hid_internal_hotplug_cleanup();
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	pthread_mutex_destroy(&hid_hotplug_context.mutex);
+}
+
 int HID_API_EXPORT hid_init(void)
 {
 	const char *locale;
@@ -892,15 +957,25 @@ int HID_API_EXPORT hid_init(void)
 	if (!locale)
 		setlocale(LC_CTYPE, "");
 
+	hid_internal_hotplug_init();
+
 	return 0;
 }
+
 
 int HID_API_EXPORT hid_exit(void)
 {
 	/* Free global error message */
 	register_global_error(NULL);
 
+	hid_internal_hotplug_exit();
+	
 	return 0;
+}
+
+static int hid_internal_match_device_id(unsigned short vendor_id, unsigned short product_id, unsigned short expected_vendor_id, unsigned short expected_product_id)
+{
+    return (expected_vendor_id == 0x0 || vendor_id == expected_vendor_id) && (expected_product_id == 0x0 || product_id == expected_product_id);
 }
 
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
@@ -1004,26 +1079,222 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 	}
 }
 
+struct hid_hotplug_callback {
+    hid_hotplug_callback_handle handle;
+    unsigned short vendor_id;
+    unsigned short product_id;
+    hid_hotplug_event events;
+    void *user_data;
+    hid_hotplug_callback_fn callback;
+
+    /* Pointer to the next notification */
+    struct hid_hotplug_callback *next;
+};
+
+static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotplug_event event)
+{
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
+	while (*current) {
+		struct hid_hotplug_callback *callback = *current;
+		if ((callback->events & event) && hid_internal_match_device_id(info->vendor_id, info->product_id,
+																	   callback->vendor_id, callback->product_id)) {
+			int result = callback->callback(callback->handle, info, event, callback->user_data);
+			/* If the result is non-zero, we remove the callback and proceed */
+			/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
+			if (result) {
+				struct hid_hotplug_callback *callback = *current;
+				*current = (*current)->next;
+				free(callback);
+				continue;
+			}
+		}
+		current = &callback->next;
+	}
+}
+
+static int match_udev_to_info(struct udev_device* raw_dev, struct hid_device_info *info)
+{
+	const char *path = udev_device_get_devnode(raw_dev);
+	if (!strcmp(path, info->path)) {
+		return 1;
+	}
+	return 0;
+}
+
+static void* hotplug_thread(void* user_data)
+{
+	while (hid_hotplug_context.monitor_fd > 0) {
+		fd_set fds;
+		struct timeval tv;
+		int ret;
+
+		FD_ZERO(&fds);
+		FD_SET(hid_hotplug_context.monitor_fd, &fds);
+		/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
+		/* This timeout only affects how much time it takes to stop the thread */
+		tv.tv_sec = 0;
+		tv.tv_usec = 5000;
+
+		ret = select(hid_hotplug_context.monitor_fd+1, &fds, NULL, NULL, &tv);
+
+		/* Check if our file descriptor has received data. */
+		if (ret > 0 && FD_ISSET(hid_hotplug_context.monitor_fd, &fds)) {
+
+			/* Make the call to receive the device.
+			   select() ensured that this will not block. */
+			struct udev_device *raw_dev = udev_monitor_receive_device(hid_hotplug_context.mon);
+			if (raw_dev) {
+				/* Lock the mutex so callback/device lists don't change elsewhere from here on */
+				pthread_mutex_lock(&hid_hotplug_context.mutex);
+
+				const char* action = udev_device_get_action(raw_dev);
+				if (!strcmp(action, "add")) {
+					// We create a list of all usages on this UDEV device
+					struct hid_device_info *info = create_device_info_for_device(raw_dev);
+					struct hid_device_info *info_cur = info;
+					while (info_cur) {
+						/* For each device, call all matching callbacks */
+						/* TODO: possibly make the `next` field NULL to match the behavior on other systems */
+						hid_internal_invoke_callbacks(info_cur, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED);
+						info_cur = info_cur->next;
+					}
+
+					/* Append all we got to the end of the device list */
+					if (info) {
+						if (hid_hotplug_context.devs != NULL) {
+							struct hid_device_info *last = hid_hotplug_context.devs;
+							while (last->next != NULL) {
+								last = last->next;
+							}
+							last->next = info;
+						} else {
+							hid_hotplug_context.devs = info;
+						}
+					}
+				} else if (!strcmp(action, "remove")) {
+					for (struct hid_device_info **current = &hid_hotplug_context.devs; *current;) {
+						struct hid_device_info* info = *current;
+						if (match_udev_to_info(raw_dev, *current)) {
+							/* If the libusb device that's left matches this HID device, we detach it from the list */
+							*current = (*current)->next;
+							info->next = NULL;
+							hid_internal_invoke_callbacks(info, HID_API_HOTPLUG_EVENT_DEVICE_LEFT);
+							/* Free every removed device */
+							free(info);
+						} else {
+							current = &info->next;
+						}
+					}
+				}
+				udev_device_unref(raw_dev);
+				pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			}
+		}
+	}
+	return NULL;
+}
+
 int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short vendor_id, unsigned short product_id, int events, int flags, hid_hotplug_callback_fn callback, void *user_data, hid_hotplug_callback_handle *callback_handle)
 {
-	/* Stub */
-    (void)vendor_id;
-    (void)product_id;
-    (void)events;
-    (void)flags;
-    (void)callback;
-    (void)user_data;
-    (void)callback_handle;
+	struct hid_hotplug_callback* hotplug_cb;
+
+	/* Check params */
+	if (events == 0
+		|| (events & ~(HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT))
+		|| (flags & ~(HID_API_HOTPLUG_ENUMERATE))
+		|| callback == NULL) {
+		return -1;
+	}
+
+	hotplug_cb = (struct hid_hotplug_callback*)calloc(1, sizeof(struct hid_hotplug_callback));
+
+	if (hotplug_cb == NULL) {
+		return -1;
+	}
+
+	/* Fill out the record */
+	hotplug_cb->next = NULL;
+	hotplug_cb->vendor_id = vendor_id;
+	hotplug_cb->product_id = product_id;
+	hotplug_cb->events = events;
+	hotplug_cb->user_data = user_data;
+	hotplug_cb->callback = callback;
+
+	/* TODO: protect the handle by the context hotplug lock */
+	hotplug_cb->handle = hid_hotplug_context.next_handle++;
+
+	/* handle the unlikely case of handle overflow */
+	if (hid_hotplug_context.next_handle < 0)
+	{
+		hid_hotplug_context.next_handle = 1;
+	}
+
+	/* Return allocated handle */
+	if (callback_handle != NULL) {
+		*callback_handle = hotplug_cb->handle;
+	}
+
+	/* Append a new callback to the end */
+	if (hid_hotplug_context.hotplug_cbs != NULL) {
+		struct hid_hotplug_callback *last = hid_hotplug_context.hotplug_cbs;
+		while (last->next != NULL) {
+			last = last->next;
+		}
+		last->next = hotplug_cb;
+	}
+	else {
+		// Prepare a UDEV context to run monitoring on
+		hid_hotplug_context.udev_ctx = udev_new();
+		if(!hid_hotplug_context.udev_ctx)
+		{
+			return -1;
+		}
+
+		hid_hotplug_context.mon = udev_monitor_new_from_netlink(hid_hotplug_context.udev_ctx, "udev");
+		udev_monitor_filter_add_match_subsystem_devtype(hid_hotplug_context.mon, "hidraw", NULL);
+		udev_monitor_enable_receiving(hid_hotplug_context.mon);
+		hid_hotplug_context.monitor_fd = udev_monitor_get_fd(hid_hotplug_context.mon);
+
+		/* After monitoring is all set up, enumerate all devices */
+		hid_hotplug_context.devs = hid_enumerate(0, 0);
+
+		/* Don't forget to actually register the callback */
+		hid_hotplug_context.hotplug_cbs = hotplug_cb;
+
+		/* Start the thread that will be doing the event scanning */
+		pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
+	}
 
 	return -1;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	/* Stub */
-	(void)callback_handle;
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
-	return -1;
+	if (hid_hotplug_context.hotplug_cbs == NULL) {
+		pthread_mutex_unlock(&hid_hotplug_context.mutex);
+		return -1;
+	}
+
+	int result = -1;
+
+	/* Remove this notification */
+	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
+		if ((*current)->handle == callback_handle) {
+			struct hid_hotplug_callback *next = (*current)->next;
+			free(*current);
+			*current = next;
+			result = 0;
+			break;
+		}
+	}
+
+	hid_internal_cleanup_hotplugs();
+
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+
+	return result;
 }
 
 hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
@@ -1190,7 +1461,6 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	dev->blocking = !nonblock;
 	return 0; /* Success */
 }
-
 
 int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char *data, size_t length)
 {
