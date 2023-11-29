@@ -183,6 +183,9 @@ struct hid_device_ {
 		OVERLAPPED ol;
 		OVERLAPPED write_ol;
 		struct hid_device_info* device_info;
+		CRITICAL_SECTION cs;
+		CRITICAL_SECTION cs_read;
+		CRITICAL_SECTION cs_write;
 };
 
 static hid_device *new_hid_device()
@@ -208,6 +211,9 @@ static hid_device *new_hid_device()
 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	dev->device_info = NULL;
+	InitializeCriticalSection(&dev->cs);
+	InitializeCriticalSection(&dev->cs_read);
+	InitializeCriticalSection(&dev->cs_write);
 
 	return dev;
 }
@@ -223,6 +229,9 @@ static void free_hid_device(hid_device *dev)
 	free(dev->feature_buf);
 	free(dev->read_buf);
 	hid_free_enumeration(dev->device_info);
+	DeleteCriticalSection(&dev->cs);
+	DeleteCriticalSection(&dev->cs_read);
+	DeleteCriticalSection(&dev->cs_write);
 	free(dev);
 }
 
@@ -1012,8 +1021,12 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 
 	unsigned char *buf;
 
+	EnterCriticalSection(&dev->cs);
+	EnterCriticalSection(&dev->cs_write);
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
+		LeaveCriticalSection(&dev->cs_write);
+		LeaveCriticalSection(&dev->cs);
 		return function_result;
 	}
 
@@ -1049,10 +1062,15 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	}
 
 	if (overlapped) {
+
+		/* Allow other operations while we wait */
+		LeaveCriticalSection(&dev->cs);
+
 		/* Wait for the transaction to complete. This makes
 		   hid_write() synchronous. */
 		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
 		if (res != WAIT_OBJECT_0) {
+			EnterCriticalSection(&dev->cs);
 			/* There was a Timeout. */
 			register_winapi_error(dev, L"hid_write/WaitForSingleObject");
 			goto end_of_function;
@@ -1060,6 +1078,9 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 
 		/* Get the result. */
 		res = GetOverlappedResult(dev->device_handle, &dev->write_ol, &bytes_written, FALSE/*wait*/);
+
+		EnterCriticalSection(&dev->cs);
+
 		if (res) {
 			function_result = bytes_written;
 		}
@@ -1071,6 +1092,9 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	}
 
 end_of_function:
+	LeaveCriticalSection(&dev->cs_write);
+	LeaveCriticalSection(&dev->cs);
+
 	return function_result;
 }
 
@@ -1082,8 +1106,12 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	BOOL res = FALSE;
 	BOOL overlapped = FALSE;
 
+	EnterCriticalSection(&dev->cs);
+	EnterCriticalSection(&dev->cs_read);
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
+		LeaveCriticalSection(&dev->cs_read);
+		LeaveCriticalSection(&dev->cs);
 		return -1;
 	}
 
@@ -1116,12 +1144,17 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	}
 
 	if (overlapped) {
+
+		/* Allow for other operations while we wait */
+		LeaveCriticalSection(&dev->cs);
+
 		if (milliseconds >= 0) {
 			/* See if there is any data yet. */
 			res = WaitForSingleObject(ev, milliseconds);
 			if (res != WAIT_OBJECT_0) {
 				/* There was no data this time. Return zero bytes available,
 				   but leave the Overlapped I/O running. */
+				LeaveCriticalSection(&dev->cs_read);
 				return 0;
 			}
 		}
@@ -1130,6 +1163,8 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 		   we are in non-blocking mode. Get the number of bytes read. The actual
 		   data has been copied to the data[] array which was passed to ReadFile(). */
 		res = GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE/*wait*/);
+
+		EnterCriticalSection(&dev->cs);
 	}
 	/* Set pending back to false, even if GetOverlappedResult() returned error. */
 	dev->read_pending = FALSE;
@@ -1155,6 +1190,8 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	}
 
 end_of_function:
+	LeaveCriticalSection(&dev->cs_read);
+	LeaveCriticalSection(&dev->cs);
 	if (!res) {
 		return -1;
 	}
@@ -1179,8 +1216,10 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 	unsigned char *buf;
 	size_t length_to_send;
 
+	EnterCriticalSection(&dev->cs);
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
+		LeaveCriticalSection(&dev->cs);
 		return -1;
 	}
 
@@ -1207,9 +1246,11 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 
 	if (!res) {
 		register_winapi_error(dev, L"HidD_SetFeature");
+		LeaveCriticalSection(&dev->cs);
 		return -1;
 	}
 
+	LeaveCriticalSection(&dev->cs);
 	return (int) length;
 }
 
@@ -1221,8 +1262,10 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 	OVERLAPPED ol;
 	memset(&ol, 0, sizeof(ol));
 
+	EnterCriticalSection(&dev->cs);
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
+		LeaveCriticalSection(&dev->cs);
 		return -1;
 	}
 
@@ -1238,6 +1281,7 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 		if (GetLastError() != ERROR_IO_PENDING) {
 			/* DeviceIoControl() failed. Return error. */
 			register_winapi_error(dev, L"Get Input/Feature Report DeviceIoControl");
+			LeaveCriticalSection(&dev->cs);
 			return -1;
 		}
 	}
@@ -1248,6 +1292,7 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 	if (!res) {
 		/* The operation failed. */
 		register_winapi_error(dev, L"Get Input/Feature Report GetOverLappedResult");
+		LeaveCriticalSection(&dev->cs);
 		return -1;
 	}
 
@@ -1258,6 +1303,7 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 		bytes_returned++;
 	}
 
+	LeaveCriticalSection(&dev->cs);
 	return bytes_returned;
 }
 
@@ -1278,17 +1324,24 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
+	/* Wait for operations to complete */
+	EnterCriticalSection(&dev->cs);
+
 	/* Cancel I/O specifically for overlapped operations. There are cases
-	   where CancelIo() does _not_ cancel the associated overlapped
-	   operations, causing GetOverlappedResult() to hang forever for
-	   read/write operations.
+			where CancelIo() does _not_ cancel the associated overlapped
+			operations, causing GetOverlappedResult() to hang forever for
+			read/write operations.
 
-	   This is also the recommended way of cancelling pending overlapped
-	   operations according to:
+			This is also the recommended way of cancelling pending overlapped
+			operations according to:
 
-	   https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations */
+			https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations */
 	CancelIoEx(dev->device_handle, &dev->ol);
 	CancelIoEx(dev->device_handle, &dev->write_ol);
+
+	/* Wait for read/writes to complete */
+	EnterCriticalSection(&dev->cs_read);
+	EnterCriticalSection(&dev->cs_write);
 
 	/* Cancel all remaining I/O */
 	CancelIo(dev->device_handle);
@@ -1436,8 +1489,11 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 {
 	PHIDP_PREPARSED_DATA pp_data = NULL;
 
+	EnterCriticalSection(&dev->cs);
+
 	if (!HidD_GetPreparsedData(dev->device_handle, &pp_data) || pp_data == NULL) {
 		register_string_error(dev, L"HidD_GetPreparsedData");
+		LeaveCriticalSection(&dev->cs);
 		return -1;
 	}
 
@@ -1445,6 +1501,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 
 	HidD_FreePreparsedData(pp_data);
 
+	LeaveCriticalSection(&dev->cs);
 	return res;
 }
 
