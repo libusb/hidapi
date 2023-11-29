@@ -1328,20 +1328,23 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 	EnterCriticalSection(&dev->cs);
 
 	/* Cancel I/O specifically for overlapped operations. There are cases
-			where CancelIo() does _not_ cancel the associated overlapped
-			operations, causing GetOverlappedResult() to hang forever for
-			read/write operations.
+	   where CancelIo() does _not_ cancel the associated overlapped
+	   operations, causing GetOverlappedResult() to hang forever for
+	   read/write operations.
 
-			This is also the recommended way of cancelling pending overlapped
-			operations according to:
+	   This is also the recommended way of cancelling pending overlapped
+	   operations according to:
 
-			https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations */
+	   https://learn.microsoft.com/en-us/windows/win32/fileio/canceling-pending-i-o-operations */
 	CancelIoEx(dev->device_handle, &dev->ol);
 	CancelIoEx(dev->device_handle, &dev->write_ol);
+
+	LeaveCriticalSection(&dev->cs);
 
 	/* Wait for read/writes to complete */
 	EnterCriticalSection(&dev->cs_read);
 	EnterCriticalSection(&dev->cs_write);
+	EnterCriticalSection(&dev->cs);
 
 	/* Cancel all remaining I/O */
 	CancelIo(dev->device_handle);
