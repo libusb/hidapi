@@ -69,6 +69,10 @@
 #define HIDIOCGINPUT(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x0A, len)
 #endif
 
+/* The value of the first callback handle to be given upon registration */
+/* Can be any arbitrary positive integer */
+#define FIRST_HOTPLUG_CALLBACK_HANDLE 1
+
 struct hid_device_ {
 	int device_handle;
 	int blocking;
@@ -909,7 +913,7 @@ static struct hid_hotplug_context {
 } hid_hotplug_context = {
 	.udev_ctx = NULL,
 	.monitor_fd = -1,
-	.next_handle = 1,
+	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
 	.mutex_ready = 0,
 	.hotplug_cbs = NULL,
 	.devs = NULL
