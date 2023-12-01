@@ -946,7 +946,7 @@ static void hid_internal_hotplug_exit()
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
 	/* Remove all callbacks from the list */
-	while(*current) {
+	while (*current) {
 		hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
