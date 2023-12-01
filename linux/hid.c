@@ -895,6 +895,8 @@ static struct hid_hotplug_context {
 	pthread_t thread;
 
 	pthread_mutex_t mutex;
+	
+	int mutex_ready;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
@@ -908,40 +910,50 @@ static struct hid_hotplug_context {
 	.udev_ctx = NULL,
 	.monitor_fd = -1,
 	.next_handle = 1,
+	.mutex_ready = 0,
 	.hotplug_cbs = NULL,
 	.devs = NULL
 };
 
 static void hid_internal_hotplug_cleanup()
 {
-	if (hid_hotplug_context.hotplug_cbs == NULL) {
-		/* Cleanup connected device list */
-		hid_free_enumeration(hid_hotplug_context.devs);
-		hid_hotplug_context.devs = NULL;
-		/* Disarm the udev monitor */
-		udev_monitor_unref(hid_hotplug_context.mon);
-		udev_unref(hid_hotplug_context.udev_ctx);
+	if (hid_hotplug_context.hotplug_cbs != NULL) {
+		return;
 	}
+
+	/* Cleanup connected device list */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
+	/* Disarm the udev monitor */
+	udev_monitor_unref(hid_hotplug_context.mon);
+	udev_unref(hid_hotplug_context.udev_ctx);
 }
 
 static void hid_internal_hotplug_init()
 {
-	pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+	if (!hid_hotplug_context.mutex_ready) {
+		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+		hid_hotplug_context.mutex_ready = 1;
+	}
 }
 
 static void hid_internal_hotplug_exit()
 {
+	if (!hid_hotplug_context.mutex_ready) {
+		return;
+	}
+
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
 	/* Remove all callbacks from the list */
-	while(*current)
-	{
+	while(*current) {
 		hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
 	}
 	hid_internal_hotplug_cleanup();
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	hid_hotplug_context.mutex_ready = 0;
 	pthread_mutex_destroy(&hid_hotplug_context.mutex);
 }
 
@@ -956,8 +968,6 @@ int HID_API_EXPORT hid_init(void)
 	locale = setlocale(LC_CTYPE, NULL);
 	if (!locale)
 		setlocale(LC_CTYPE, "");
-
-	hid_internal_hotplug_init();
 
 	return 0;
 }
@@ -1220,7 +1230,12 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	hotplug_cb->user_data = user_data;
 	hotplug_cb->callback = callback;
 
-	/* TODO: protect the handle by the context hotplug lock */
+	/* Ensure we are ready to actually use the mutex */
+	hid_internal_hotplug_init();
+
+	/* Lock the mutex to avoid race conditions */
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
 	/* handle the unlikely case of handle overflow */
@@ -1247,6 +1262,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		hid_hotplug_context.udev_ctx = udev_new();
 		if(!hid_hotplug_context.udev_ctx)
 		{
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
 		}
 
@@ -1265,11 +1281,17 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
 	}
 
-	return -1;
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	
+	return 0;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
+	if (!hid_hotplug_context.mutex_ready) {
+		return -1;
+	}
+
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
 	if (hid_hotplug_context.hotplug_cbs == NULL) {
