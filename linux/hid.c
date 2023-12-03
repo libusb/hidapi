@@ -919,6 +919,18 @@ static struct hid_hotplug_context {
 	.devs = NULL
 };
 
+struct hid_hotplug_callback {
+	hid_hotplug_callback_handle handle;
+	unsigned short vendor_id;
+	unsigned short product_id;
+	hid_hotplug_event events;
+	void *user_data;
+	hid_hotplug_callback_fn callback;
+
+	/* Pointer to the next notification */
+	struct hid_hotplug_callback *next;
+};
+
 static void hid_internal_hotplug_cleanup()
 {
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
@@ -948,10 +960,10 @@ static void hid_internal_hotplug_exit()
 	}
 
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while (*current) {
-		hid_hotplug_callback* next = (*current)->next;
+		struct hid_hotplug_callback* next = (*current)->next;
 		free(*current);
 		*current = next;
 	}
@@ -1092,18 +1104,6 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 		d = next;
 	}
 }
-
-struct hid_hotplug_callback {
-    hid_hotplug_callback_handle handle;
-    unsigned short vendor_id;
-    unsigned short product_id;
-    hid_hotplug_event events;
-    void *user_data;
-    hid_hotplug_callback_fn callback;
-
-    /* Pointer to the next notification */
-    struct hid_hotplug_callback *next;
-};
 
 static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotplug_event event)
 {
@@ -1316,7 +1316,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 		}
 	}
 
-	hid_internal_cleanup_hotplugs();
+	hid_internal_hotplug_cleanup();
 
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
