@@ -605,10 +605,11 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 
 typedef struct hid_internal_detect_bus_type_result_ {
 	DEVINST dev_node;
+	hid_bus_type bus_type;
 	unsigned int bus_flags;
 } hid_internal_detect_bus_type_result;
 
-static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wchar_t* interface_path, struct hid_device_info* dev)
+static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wchar_t* interface_path)
 {
 	wchar_t *device_id = NULL, *compatible_ids = NULL;
 	CONFIGRET cr;
@@ -644,20 +645,20 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support
 		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
 		if (wcsstr(compatible_id, L"USB") != NULL) {
-			dev->bus_type = HID_API_BUS_USB;
+			result.bus_type = HID_API_BUS_USB;
 			break;
 		}
 
 		/* Bluetooth devices
 		   https://docs.microsoft.com/windows-hardware/drivers/bluetooth/installing-a-bluetooth-device */
 		if (wcsstr(compatible_id, L"BTHENUM") != NULL) {
-			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			result.bus_type = HID_API_BUS_BLUETOOTH;
 			break;
 		}
 
 		/* Bluetooth LE devices */
 		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
-			dev->bus_type = HID_API_BUS_BLUETOOTH;
+			result.bus_type = HID_API_BUS_BLUETOOTH;
 			result.bus_flags |= HID_API_BUS_FLAG_BLE;
 			break;
 		}
@@ -665,14 +666,14 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 		/* I2C devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support-and-power-management */
 		if (wcsstr(compatible_id, L"PNP0C50") != NULL) {
-			dev->bus_type = HID_API_BUS_I2C;
+			result.bus_type = HID_API_BUS_I2C;
 			break;
 		}
 
 		/* SPI devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-for-spi */
 		if (wcsstr(compatible_id, L"PNP0C51") != NULL) {
-			dev->bus_type = HID_API_BUS_SPI;
+			result.bus_type = HID_API_BUS_SPI;
 			break;
 		}
 	}
@@ -759,7 +760,8 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	}
 
 	/* detect bus type before reading string descriptors */
-	detect_bus_type_result = hid_internal_detect_bus_type(path, dev);
+	detect_bus_type_result = hid_internal_detect_bus_type(path);
+	dev->bus_type = detect_bus_type_result.bus_type;
 
 	len = dev->bus_type == HID_API_BUS_USB ? MAX_STRING_WCHARS_USB : MAX_STRING_WCHARS;
 	string[len] = L'\0';
