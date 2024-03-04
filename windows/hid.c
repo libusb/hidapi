@@ -793,7 +793,9 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 			hid_internal_get_ble_info(dev, detect_bus_type_result.dev_node);
 		break;
 
-	default:
+	case HID_API_BUS_UNKNOWN:
+	case HID_API_BUS_SPI:
+	case HID_API_BUS_I2C:
 		/* shut down -Wswitch */
 		break;
 	}
