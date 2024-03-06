@@ -38,9 +38,6 @@
 
 #include "hidapi_darwin.h"
 
-/* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
-extern const double NSAppKitVersionNumber;
-
 /* Barrier implementation because Mac OSX doesn't have pthread_barrier.
    It also doesn't have clock_gettime(). So much for POSIX and SUSv2.
    This implementation came from Brent Priddy and was posted on
@@ -57,15 +54,15 @@ static int pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrie
 {
 	(void) attr;
 
-	if(count == 0) {
+	if (count == 0) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	if(pthread_mutex_init(&barrier->mutex, 0) < 0) {
+	if (pthread_mutex_init(&barrier->mutex, 0) < 0) {
 		return -1;
 	}
-	if(pthread_cond_init(&barrier->cond, 0) < 0) {
+	if (pthread_cond_init(&barrier->cond, 0) < 0) {
 		pthread_mutex_destroy(&barrier->mutex);
 		return -1;
 	}
@@ -86,16 +83,18 @@ static int pthread_barrier_wait(pthread_barrier_t *barrier)
 {
 	pthread_mutex_lock(&barrier->mutex);
 	++(barrier->count);
-	if(barrier->count >= barrier->trip_count)
-	{
+	if (barrier->count >= barrier->trip_count) {
 		barrier->count = 0;
-		pthread_cond_broadcast(&barrier->cond);
 		pthread_mutex_unlock(&barrier->mutex);
+		pthread_cond_broadcast(&barrier->cond);
 		return 1;
 	}
-	else
-	{
-		pthread_cond_wait(&barrier->cond, &(barrier->mutex));
+	else {
+		do {
+			pthread_cond_wait(&barrier->cond, &(barrier->mutex));
+		}
+		while (barrier->count != 0);
+
 		pthread_mutex_unlock(&barrier->mutex);
 		return 0;
 	}
@@ -376,7 +375,7 @@ static int get_string_property(IOHIDDeviceRef device, CFStringRef prop, wchar_t 
 
 	buf[0] = 0;
 
-	if (str) {
+	if (str && CFGetTypeID(str) == CFStringGetTypeID()) {
 		CFIndex str_len = CFStringGetLength(str);
 		CFRange range;
 		CFIndex used_buf_len;
@@ -466,7 +465,7 @@ int HID_API_EXPORT hid_init(void)
 	register_global_error(NULL);
 
 	if (!hid_mgr) {
-		is_macos_10_10_or_greater = (NSAppKitVersionNumber >= 1343); /* NSAppKitVersionNumber10_10 */
+		is_macos_10_10_or_greater = (kCFCoreFoundationVersionNumber >= 1151.16); /* kCFCoreFoundationVersionNumber10_10 */
 		hid_darwin_set_open_exclusive(1); /* Backward compatibility */
 		return init_hid_manager();
 	}
@@ -769,7 +768,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 		}
 		cur_dev = tmp;
 
-		/* move the pointer to the tail of returnd list */
+		/* move the pointer to the tail of returned list */
 		while (cur_dev->next != NULL) {
 			cur_dev = cur_dev->next;
 		}
@@ -1188,7 +1187,9 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length)
 	   return buffer (data), and delete the liked list item. */
 	struct input_report *rpt = dev->input_reports;
 	size_t len = (length < rpt->len)? length: rpt->len;
-	memcpy(data, rpt->data, len);
+	if (data != NULL) {
+		memcpy(data, rpt->data, len);
+	}
 	dev->input_reports = rpt->next;
 	free(rpt->data);
 	free(rpt);
