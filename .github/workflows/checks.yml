@@ -139,7 +139,9 @@ jobs:
       with:
         path: src
     - name: Install dependencies
-      run: sudo apt install libudev-dev libusb-1.0-0-dev ninja-build
+      run: |
+        sudo apt update
+        sudo apt install libudev-dev libusb-1.0-0-dev ninja-build
     - name: Configure
       run: |
         cmake -B build -S src -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_HIDTEST=ON -DCMAKE_C_COMPILER=gcc
