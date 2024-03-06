@@ -885,6 +885,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 							libusb_close(handle);
 							handle = NULL;
 						}
+						break;
 					}
 				} /* altsettings */
 			} /* interfaces */
@@ -1928,7 +1929,7 @@ uint16_t get_usb_code_for_current_locale(void)
 		return 0x0;
 
 	/* Make a copy of the current locale string. */
-	strncpy(search_string, locale, sizeof(search_string));
+	strncpy(search_string, locale, sizeof(search_string)-1);
 	search_string[sizeof(search_string)-1] = '\0';
 
 	/* Chop off the encoding part, and make it lower case. */

@@ -46,7 +46,9 @@ A simple command list, to build HIDAPI with Autotools as a _shared library_ and 
 
 ```sh
 ./bootstrap # this prepares the configure script
-./configure
+mkdir build
+cd build # in-source builds are not recommended and known to be broken in some cases (https://github.com/libusb/hidapi/issues/621)
+../configure
 make # build the library
 make install # as root, or using sudo, this will install hidapi into your system
 ```

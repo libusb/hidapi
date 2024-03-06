@@ -3,7 +3,8 @@ name: GitHub Builds
 on: [push, pull_request]
 
 env:
-  NIX_COMPILE_FLAGS: -Wall -Wextra -pedantic -Werror
+  NIX_COMPILE_FLAGS:   -Wall -Wextra -pedantic -Werror
+  GNU_COMPILE_FLAGS: -Wall -Wextra -pedantic -Werror -Wformat-signedness
   MSVC_COMPILE_FLAGS: /W4 /WX
 
 jobs:
@@ -112,8 +113,8 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-        cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
     - name: Build CMake Shared
       working-directory: build/shared
       run: make install
@@ -139,7 +140,7 @@ jobs:
           -S hidapisrc/hidtest \
           -Dhidapi_ROOT=install/shared \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
-          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+          "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cd build/shared_test
         make install
     - name: Check CMake Export Package Static
@@ -149,7 +150,7 @@ jobs:
           -S hidapisrc/hidtest \
           -Dhidapi_ROOT=install/static \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
-          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+          "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cd build/static_test
         make install
 
@@ -181,7 +182,7 @@ jobs:
     - name: Build CMake MSVC
       working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
-    - name: Check artifacts MSVC
+    - name: Check artifacts CMake MSVC
       uses: andstor/file-existence-action@v2
       with:
         files: "install/msvc/lib/hidapi.lib, \
@@ -189,7 +190,7 @@ jobs:
                 install/msvc/include/hidapi/hidapi.h, \
                 install/msvc/include/hidapi/hidapi_winapi.h"
         fail: true
-    - name: Check CMake Export Package
+    - name: Check CMake MSVC Export Package
       shell: cmd
       run: |
         cmake ^
@@ -205,18 +206,18 @@ jobs:
       working-directory: build/msvc
       run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
-    - name: Configure CMake NMake
+    - name: Configure CMake NMake MSVC
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
-    - name: Build CMake NMake
+    - name: Build CMake NMake MSVC
       working-directory: build\nmake
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
-    - name: Check artifacts NMake
+    - name: Check artifacts CMake NMake MSVC
       uses: andstor/file-existence-action@v2
       with:
         files: "install/nmake/lib/hidapi.lib, \
@@ -224,7 +225,7 @@ jobs:
                 install/nmake/include/hidapi/hidapi.h, \
                 install/nmake/include/hidapi/hidapi_winapi.h"
         fail: true
-    - name: Check CMake Export Package NMake
+    - name: Check CMake NMake MSVC Export Package
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
@@ -237,14 +238,52 @@ jobs:
           "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
         cd build\nmake_test
         nmake install
-    - name: Run CTest NMake
+    - name: Run CTest NMake MSVC
       working-directory: build\nmake
       run: ctest --no-compress-output --output-on-failure
+
+    - name: Configure CMake NMake ClangCL
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake -G"NMake Makefiles" -B build\clang_cl -S hidapisrc -D CMAKE_C_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=OFF -DCMAKE_INSTALL_PREFIX=install\clang_cl -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake NMake ClangCL
+      working-directory: build\clang_cl
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        nmake install
+    - name: Check artifacts CMake NMake ClangCL
+      uses: andstor/file-existence-action@v2
+      with:
+        files: "install/clang_cl/lib/hidapi.lib, \
+                install/clang_cl/bin/hidapi.dll, \
+                install/clang_cl/include/hidapi/hidapi.h, \
+                install/clang_cl/include/hidapi/hidapi_winapi.h"
+        fail: true
+    - name: Check CMake NMake ClangCL Export Package
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmake ^
+          -G"NMake Makefiles" ^
+          -B build\clang_cl_test ^
+          -S hidapisrc\hidtest ^
+          -D CMAKE_C_COMPILER=clang-cl ^
+          -Dhidapi_ROOT=install\clang_cl ^
+          -DCMAKE_INSTALL_PREFIX=install\clang_cl_test ^
+          "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cd build\clang_cl_test
+        cmake --build . --target install
+    - name: Run CTest NMake ClangCL
+      shell: cmd
+      working-directory: build/clang_cl
+      run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
     - name: Configure CMake MinGW
       shell: cmd
       run: |
-        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
+        cmake -G"MinGW Makefiles" -B build\mingw -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DCMAKE_INSTALL_PREFIX=install\mingw -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%GNU_COMPILE_FLAGS%"
     - name: Build CMake MinGW
       working-directory: build\mingw
       run: cmake --build . --target install
@@ -265,7 +304,7 @@ jobs:
           -S hidapisrc\hidtest ^
           -Dhidapi_ROOT=install\mingw ^
           -DCMAKE_INSTALL_PREFIX=install\mingw_test ^
-          "-DCMAKE_C_FLAGS=%NIX_COMPILE_FLAGS%"
+          "-DCMAKE_C_FLAGS=%GNU_COMPILE_FLAGS%"
         cd build\mingw_test
         cmake --build . --target install
     - name: Run CTest MinGW
@@ -288,14 +327,14 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: microsoft/setup-msbuild@v1.1
-    - name: MSBuild x86
+    - name: MSBuild x86 MSVC
       run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=Win32
     - name: Check artifacts x86
       uses: andstor/file-existence-action@v2
       with:
         files: "windows/Release/hidapi.dll, windows/Release/hidapi.lib, windows/Release/hidapi.pdb"
         fail: true
-    - name: MSBuild x64
+    - name: MSBuild x64 MSVC
       run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=x64
     - name: Check artifacts x64
       uses: andstor/file-existence-action@v2
@@ -332,8 +371,8 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-        mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        mingw64-cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        mingw64-cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
     - name: Configure Automake
       working-directory: hidapisrc
       run: |
@@ -373,7 +412,7 @@ jobs:
           -S hidapisrc/hidtest \
           -Dhidapi_DIR=$PWD/install/shared-cmake/lib/cmake/hidapi \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
-          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+          "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cd build/shared_test
         ninja install
     - name: Check CMake Export Package Static
@@ -384,7 +423,7 @@ jobs:
           -S hidapisrc/hidtest \
           -Dhidapi_DIR=$PWD/install/static-cmake/lib/cmake/hidapi \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
-          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+          "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cd build/static_test
         ninja install
 
@@ -404,8 +443,8 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared-cmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
-        cmake -B build/static-cmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/shared-cmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        cmake -B build/static-cmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
     - name: Configure Automake
       working-directory: hidapisrc
       run: |
@@ -448,7 +487,7 @@ jobs:
           -S hidapisrc/hidtest \
           -Dhidapi_ROOT=install/shared-cmake \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
-          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+          "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cd build/shared_test
         make install
     - name: Check CMake Export Package Static
@@ -458,7 +497,7 @@ jobs:
           -S hidapisrc/hidtest \
           -Dhidapi_ROOT=install/static-cmake \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
-          "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+          "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cd build/static_test
         make install
 
@@ -469,7 +508,7 @@ jobs:
     container: alpine:edge
     env:
       # A bug in musl: https://www.openwall.com/lists/musl/2020/01/20/2
-      ALPINE_COMPILE_FLAGS: ${NIX_COMPILE_FLAGS} -Wno-overflow
+      ALPINE_COMPILE_FLAGS: ${GNU_COMPILE_FLAGS} -Wno-overflow
     steps:
     - uses: actions/checkout@v3
       with:
