@@ -1137,6 +1137,8 @@ static int match_udev_to_info(struct udev_device* raw_dev, struct hid_device_inf
 
 static void* hotplug_thread(void* user_data)
 {
+	(void) user_data;
+
 	while (hid_hotplug_context.monitor_fd > 0) {
 		fd_set fds;
 		struct timeval tv;
