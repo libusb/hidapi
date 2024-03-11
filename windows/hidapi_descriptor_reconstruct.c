@@ -46,7 +46,7 @@ static void rd_append_byte(unsigned char byte, struct rd_buffer* rpt_desc) {
  *
  * @param[in]  rd_item  Enumeration identifying type (Main, Global, Local) and function (e.g Usage or Report Count) of the item.
  * @param[in]  data     Data (Size depends on rd_item 0,1,2 or 4bytes).
- * @param      list     Chained list of report descriptor bytes.
+ * @param      rpt_desc Pointer to report descriptor buffer struct.
  *
  * @return Returns 0 if successful, -1 for error.
  */
@@ -205,9 +205,9 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	rd_bit_range ****coll_bit_range;
 	coll_bit_range = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
-		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
+		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(*coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-			coll_bit_range[collection_node_idx][reportid_idx] = malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(coll_bit_range[0][0]));
+			coll_bit_range[collection_node_idx][reportid_idx] = malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(*coll_bit_range[0][0]));
 			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = malloc(sizeof(rd_bit_range));
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit = -1;
@@ -235,7 +235,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	}
 
 	// *************************************************************************
-	// -Determine hierachy levels of each collections and store it in:
+	// -Determine hierarchy levels of each collections and store it in:
 	//  coll_levels[COLLECTION_INDEX]
 	// -Determine number of direct childs of each collections and store it in:
 	//  coll_number_of_direct_childs[COLLECTION_INDEX]
@@ -303,10 +303,10 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		}
 	}
 
-	// *************************************************************************************************
-	// Determine child collection order of the whole hierachy, based on previously determined bit ranges
+	// **************************************************************************************************
+	// Determine child collection order of the whole hierarchy, based on previously determined bit ranges
 	// and store it this index coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
-	// *************************************************************************************************
+	// **************************************************************************************************
 	USHORT **coll_child_order;
 	coll_child_order = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
 	{
@@ -321,12 +321,12 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			if ((coll_number_of_direct_childs[collection_node_idx] != 0) &&
 				(coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] == FALSE)) {
 				coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] = TRUE;
-				coll_child_order[collection_node_idx] = malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(coll_child_order[0]));
+				coll_child_order[collection_node_idx] = malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(*coll_child_order[0]));
 
 				{
 					// Create list of child collection indices
 					// sorted reverse to the order returned to HidP_GetLinkCollectionNodeschild
-					// which seems to match teh original order, as long as no bit position needs to be considered
+					// which seems to match the original order, as long as no bit position needs to be considered
 					USHORT child_idx = link_collection_nodes[collection_node_idx].FirstChild;
 					int child_count = coll_number_of_direct_childs[collection_node_idx] - 1;
 					coll_child_order[collection_node_idx][child_count] = child_idx;
@@ -378,8 +378,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// ***************************************************************************************
 	// Create sorted main_item_list containing all the Collection and CollectionEnd main items
 	// ***************************************************************************************
-	struct rd_main_item_node *main_item_list = (struct rd_main_item_node*)malloc(sizeof(main_item_list));
-	main_item_list = NULL; // List root
+	struct rd_main_item_node *main_item_list = NULL; // List root
 	// Lookup table to find the Collection items in the list by index
 	struct rd_main_item_node **coll_begin_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
 	struct rd_main_item_node **coll_end_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
