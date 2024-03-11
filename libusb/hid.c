@@ -55,6 +55,10 @@
 #endif
 #include HIDAPI_THREAD_MODEL_INCLUDE
 
+/* The value of the first callback handle to be given upon registration */
+/* Can be any arbitrary positive integer */
+#define FIRST_HOTPLUG_CALLBACK_HANDLE 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
