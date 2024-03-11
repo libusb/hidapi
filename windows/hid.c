@@ -1112,7 +1112,6 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 				/* If the result is non-zero, we remove the callback and proceed */
 				/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
 				if (result) {
-					struct hid_hotplug_callback *callback = *current;
 					*current = (*current)->next;
 					free(callback);
 					continue;
