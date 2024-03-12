@@ -1101,7 +1101,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	libusb_ref_device(device);
 
 	struct hid_hotplug_queue* msg = calloc(1, sizeof(struct hid_hotplug_queue));
-	if(NULL == msg) {
+	if (NULL == msg) {
 		return 0;
 	}
 
@@ -1112,8 +1112,8 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	/* We use this thread's mutex to protect the queue */
 	hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
 	struct hid_hotplug_queue* end = hid_hotplug_context.queue;
-	if(end) {
-		while(end->next) {
+	if (end) {
+		while (end->next) {
 			end = end->next;
 		}
 		end->next = msg;
@@ -1138,8 +1138,7 @@ static void* hotplug_thread(void* user_data)
 	tv.tv_sec = 0;
 	tv.tv_usec = 5000;
 
-	while(hid_hotplug_context.thread_running)
-	{
+	while (hid_hotplug_context.thread_running) {
 		/* This will allow libusb to call the callbacks, which will fill up the queue */
 		libusb_handle_events_timeout_completed(hid_hotplug_context.context, &tv, NULL);
 	}
@@ -1208,10 +1207,10 @@ static void* callback_thread(void* user_data)
 	ts.tv_nsec = 5000000;
 
 	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
-	while(hid_hotplug_context.thread_running) {
+	while (hid_hotplug_context.thread_running) {
 		/* We use this thread's mutex to protect the queue */
 		hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
-		while(hid_hotplug_context.queue) {
+		while (hid_hotplug_context.queue) {
 			process_hotplug_event(hid_hotplug_context.queue);
 
 			/* Empty the queue */
@@ -1283,7 +1282,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 	else {
 		/* Fill already connected devices so we can use this info in disconnection notification */
-		if(libusb_init(&hid_hotplug_context.context)) {
+		if (libusb_init(&hid_hotplug_context.context)) {
 			free(hotplug_cb);
 			pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 			return -1;
@@ -1293,7 +1292,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		hid_hotplug_context.hotplug_cbs = hotplug_cb;
 
 		/* Arm a global callback to receive ALL notifications for HID class devices */
-		if(libusb_hotplug_register_callback(hid_hotplug_context.context,
+		if (libusb_hotplug_register_callback(hid_hotplug_context.context,
 											LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
 											0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, &hid_libusb_hotplug_callback, NULL,
 											&hid_hotplug_context.callback_handle)) {
