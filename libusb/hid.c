@@ -137,8 +137,14 @@ static struct hid_api_version api_version = {
 
 static libusb_context *usb_context = NULL;
 
+struct hid_hotplug_queue {
+	libusb_device* device;
+	int event; /* Arrived or removed */
+	struct hid_hotplug_queue* next;
+};
+
 static struct hid_hotplug_context {
-	/* A separate libusb context for hotplug events */
+	/* A separate libusb context for hotplug events: helps avoid mutual blocking with read_thread's */
 	libusb_context * context;
 
 	/* libusb callback handle */
@@ -147,11 +153,20 @@ static struct hid_hotplug_context {
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
 
-	pthread_t thread;
+	/* A thread that fills the event queue */
+	hidapi_thread_state libusb_thread;
 
-	pthread_mutex_t mutex;
+	/* A separate thread which processes hidapi's internal event queue */
+	hidapi_thread_state callback_thread;
+
+	/* This mutex prevents changes to the callback list */
+	pthread_mutex_t cb_mutex;
 
 	int mutex_ready;
+
+	int thread_running;
+
+	struct hid_hotplug_queue* queue;
 
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
@@ -161,8 +176,10 @@ static struct hid_hotplug_context {
 } hid_hotplug_context = {
 	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
 	.mutex_ready = 0,
+	.thread_running = 0,
+	.queue = NULL,
 	.hotplug_cbs = NULL,
-	.devs = NULL
+	.devs = NULL,
 };
 
 uint16_t get_usb_code_for_current_locale(void);
@@ -530,7 +547,15 @@ static void hid_internal_hotplug_cleanup()
 		return;
 	}
 
-	pthread_join(hid_hotplug_context.thread, NULL);
+	/* Mark the threads as stopped */
+	hid_hotplug_context.thread_running = 0;
+
+	/* Forcibly wake up the thread so it can shut down immediately */
+	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+
+	/* Wait for both threads to stop */
+	hidapi_thread_join(&hid_hotplug_context.libusb_thread);
+	hidapi_thread_join(&hid_hotplug_context.callback_thread);
 
 	/* Cleanup connected device list */
 	hid_free_enumeration(hid_hotplug_context.devs);
@@ -543,7 +568,9 @@ static void hid_internal_hotplug_cleanup()
 static void hid_internal_hotplug_init()
 {
 	if (!hid_hotplug_context.mutex_ready) {
-		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+		hidapi_thread_state_init(&hid_hotplug_context.libusb_thread);
+		hidapi_thread_state_init(&hid_hotplug_context.callback_thread);
+		pthread_mutex_init(&hid_hotplug_context.cb_mutex, NULL);
 		hid_hotplug_context.mutex_ready = 1;
 	}
 }
@@ -554,7 +581,7 @@ static void hid_internal_hotplug_exit()
 		return;
 	}
 
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while (*current) {
@@ -563,9 +590,12 @@ static void hid_internal_hotplug_exit()
 		*current = next;
 	}
 	hid_internal_hotplug_cleanup();
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 	hid_hotplug_context.mutex_ready = 0;
-	pthread_mutex_destroy(&hid_hotplug_context.mutex);
+	pthread_mutex_destroy(&hid_hotplug_context.cb_mutex);
+
+	hidapi_thread_state_destroy(&hid_hotplug_context.callback_thread);
+	hidapi_thread_state_destroy(&hid_hotplug_context.libusb_thread);
 }
 
 int HID_API_EXPORT hid_init(void)
@@ -812,9 +842,9 @@ static int is_xbox360(unsigned short vendor_id, const struct libusb_interface_de
 	};
 
 	if (intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
-	    intf_desc->bInterfaceSubClass == xb360_iface_subclass &&
-	    (intf_desc->bInterfaceProtocol == xb360_iface_protocol ||
-	     intf_desc->bInterfaceProtocol == xb360w_iface_protocol)) {
+		intf_desc->bInterfaceSubClass == xb360_iface_subclass &&
+		(intf_desc->bInterfaceProtocol == xb360_iface_protocol ||
+		intf_desc->bInterfaceProtocol == xb360w_iface_protocol)) {
 		size_t i;
 		for (i = 0; i < sizeof(supported_vendors)/sizeof(supported_vendors[0]); ++i) {
 			if (vendor_id == supported_vendors[i]) {
@@ -845,9 +875,9 @@ static int is_xboxone(unsigned short vendor_id, const struct libusb_interface_de
 	};
 
 	if (intf_desc->bInterfaceNumber == 0 &&
-	    intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
-	    intf_desc->bInterfaceSubClass == xb1_iface_subclass &&
-	    intf_desc->bInterfaceProtocol == xb1_iface_protocol) {
+		intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
+		intf_desc->bInterfaceSubClass == xb1_iface_subclass &&
+		intf_desc->bInterfaceProtocol == xb1_iface_protocol) {
 		size_t i;
 		for (i = 0; i < sizeof(supported_vendors)/sizeof(supported_vendors[0]); ++i) {
 			if (vendor_id == supported_vendors[i]) {
@@ -1041,6 +1071,8 @@ static int match_libusb_to_info(libusb_device *device, struct hid_device_info* i
 
 static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotplug_event event)
 {
+	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	while (*current) {
 		struct hid_hotplug_callback *callback = *current;
@@ -1057,6 +1089,7 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 		}
 		current = &callback->next;
 	}
+	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 }
 
 static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void * user_data)
@@ -1064,9 +1097,56 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	(void)ctx;
 	(void)user_data;
 
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
-		struct hid_device_info* info = hid_enumerate_from_libusb(device, 0, 0);
+	/* Make sure we HOLD the device until we are done with it - otherwise libusb would delete it the moment we exit this function */
+	libusb_ref_device(device);
+
+	struct hid_hotplug_queue* msg = calloc(1, sizeof(struct hid_hotplug_queue));
+	if(NULL == msg) {
+		return 0;
+	}
+
+	msg->device = device;
+	msg->event = event;
+	msg->next = NULL;
+
+	/* We use this thread's mutex to protect the queue */
+	hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
+	struct hid_hotplug_queue* end = hid_hotplug_context.queue;
+	if(end) {
+		while(end->next) {
+			end = end->next;
+		}
+		end->next = msg;
+	} else {
+		hid_hotplug_context.queue = msg;
+	}
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
+
+	return 0;
+}
+
+static void* hotplug_thread(void* user_data)
+{
+	(void) user_data;
+
+	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
+	/* This timeout only affects how much time it takes to stop the thread */
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 5000;
+
+	while(hid_hotplug_context.thread_running)
+	{
+		/* This will allow libusb to call the callbacks, which will fill up the queue */
+		libusb_handle_events_timeout_completed(hid_hotplug_context.context, &tv, NULL);
+	}
+	return NULL;
+}
+
+static void process_hotplug_event(struct hid_hotplug_queue* msg)
+{
+	if (msg->event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
+		struct hid_device_info* info = hid_enumerate_from_libusb(msg->device, 0, 0);
 		struct hid_device_info* info_cur = info;
 		while (info_cur) {
 			/* For each device, call all matching callbacks */
@@ -1089,10 +1169,10 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 			}
 		}
 	}
-	else if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
+	else if (msg->event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
 		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current;) {
 			struct hid_device_info* info = *current;
-			if (match_libusb_to_info(device, *current)) {
+			if (match_libusb_to_info(msg->device, *current)) {
 				/* If the libusb device that's left matches this HID device, we detach it from the list */
 				*current = (*current)->next;
 				info->next = NULL;
@@ -1105,27 +1185,42 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 		}
 	}
 
-	/* Clean up if the last callback was removed */
-	hid_internal_hotplug_cleanup();
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	/* Release the libusb device - we are done with it */
+	libusb_unref_device(msg->device);
 
-	return 0;
+	/* Clean up if the last callback was removed */
+	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+	hid_internal_hotplug_cleanup();
+	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 }
 
-static void* hotplug_thread(void* user_data)
+static void* callback_thread(void* user_data)
 {
 	(void) user_data;
 
 	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
 	/* This timeout only affects how much time it takes to stop the thread */
-	struct timeval tv;
-	tv.tv_sec = 0;
-	tv.tv_usec = 5000;
+	hidapi_timespec ts;
+	ts.tv_sec = 0;
+	ts.tv_nsec = 5000000;
 
-	while(1)
-	{
-		libusb_handle_events_timeout_completed(hid_hotplug_context.context, &tv, NULL);
+	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
+	while(hid_hotplug_context.thread_running) {
+		/* We use this thread's mutex to protect the queue */
+		hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
+		while(hid_hotplug_context.queue) {
+			process_hotplug_event(hid_hotplug_context.queue);
+
+			/* Empty the queue */
+			hid_hotplug_context.queue = hid_hotplug_context.queue->next;
+		}
+		hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
+
+		/* Make the tread fall asleep and wait for a condition to wake it up */
+		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
 	}
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
+
 	return NULL;
 }
 
@@ -1160,9 +1255,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	/* Ensure we are ready to actually use the mutex */
 	hid_internal_hotplug_init();
 
-	/* Lock the mutex to avoid race conditions */
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	
+	/* Lock the mutex to avoid race itions */
+	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
 	/* handle the unlikely case of handle overflow */
@@ -1186,7 +1281,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	else {
 		/* Fill already connected devices so we can use this info in disconnection notification */
 		if(libusb_init(&hid_hotplug_context.context)) {
-			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			free(hotplug_cb);
+			pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 			return -1;
 		}
 
@@ -1198,10 +1294,18 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 											LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
 											0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, &hid_libusb_hotplug_callback, NULL,
 											&hid_hotplug_context.callback_handle)) {
-			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			/* Major malfunction, failed to register a callback */
+			libusb_exit(hid_hotplug_context.context);
+			free(hotplug_cb);
+			hid_hotplug_context.hotplug_cbs = NULL;
+			pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 			return -1;
 		}
-		pthread_create(&hid_hotplug_context.thread, NULL, hotplug_thread, NULL);
+
+		/* Initialization succeeded! We run the threads now */
+		hid_hotplug_context.thread_running = 1;
+		hidapi_thread_create(&hid_hotplug_context.libusb_thread, hotplug_thread, NULL);
+		hidapi_thread_create(&hid_hotplug_context.callback_thread, callback_thread, NULL);
 	}
 
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
@@ -1216,7 +1320,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 
 	return 0;
 }
@@ -1229,10 +1333,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 		return -1;
 	}
 
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
 
 	if (hid_hotplug_context.hotplug_cbs == NULL) {
-		pthread_mutex_unlock(&hid_hotplug_context.mutex);
+		pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 		return -1;
 	}
 
@@ -1249,7 +1353,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	hid_internal_hotplug_cleanup();
 
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 
 	return 0;
 }
@@ -1439,13 +1543,13 @@ static void init_xbox360(libusb_device_handle *device_handle, unsigned short idV
 	(void)conf_desc;
 
 	if ((idVendor == 0x05ac && idProduct == 0x055b) /* Gamesir-G3w */ ||
-	    idVendor == 0x0f0d /* Hori Xbox controllers */) {
+		idVendor == 0x0f0d /* Hori Xbox controllers */) {
 		unsigned char data[20];
 
 		/* The HORIPAD FPS for Nintendo Switch requires this to enable input reports.
-		   This VID/PID is also shared with other HORI controllers, but they all seem
-		   to be fine with this as well.
-		 */
+			This VID/PID is also shared with other HORI controllers, but they all seem
+			to be fine with this as well.
+			*/
 		memset(data, 0, sizeof(data));
 		libusb_control_transfer(device_handle, 0xC1, 0x01, 0x100, 0x0, data, sizeof(data), 100);
 	}
@@ -1465,13 +1569,13 @@ static void init_xboxone(libusb_device_handle *device_handle, unsigned short idV
 		for (k = 0; k < intf->num_altsetting; k++) {
 			const struct libusb_interface_descriptor *intf_desc = &intf->altsetting[k];
 			if (intf_desc->bInterfaceClass == LIBUSB_CLASS_VENDOR_SPEC &&
-			    intf_desc->bInterfaceSubClass == xb1_iface_subclass &&
-			    intf_desc->bInterfaceProtocol == xb1_iface_protocol) {
+				intf_desc->bInterfaceSubClass == xb1_iface_subclass &&
+				intf_desc->bInterfaceProtocol == xb1_iface_protocol) {
 				int bSetAlternateSetting = 0;
 
 				/* Newer Microsoft Xbox One controllers have a high speed alternate setting */
 				if (idVendor == vendor_microsoft &&
-				    intf_desc->bInterfaceNumber == 0 && intf_desc->bAlternateSetting == 1) {
+					intf_desc->bInterfaceNumber == 0 && intf_desc->bAlternateSetting == 1) {
 					bSetAlternateSetting = 1;
 				} else if (intf_desc->bInterfaceNumber != 0 && intf_desc->bAlternateSetting == 0) {
 					bSetAlternateSetting = 1;
