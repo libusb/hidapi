@@ -1122,6 +1122,9 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	}
 	hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
 
+	/* Wake up the other thread so it can react to the new message immediately */
+	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+
 	return 0;
 }
 
