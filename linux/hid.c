@@ -937,6 +937,8 @@ static void hid_internal_hotplug_cleanup()
 		return;
 	}
 
+	pthread_join(hid_hotplug_context.thread, NULL);
+
 	/* Cleanup connected device list */
 	hid_free_enumeration(hid_hotplug_context.devs);
 	hid_hotplug_context.devs = NULL;
