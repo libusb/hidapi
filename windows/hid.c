@@ -48,6 +48,7 @@ typedef LONG NTSTATUS;
 #include <ntdef.h>
 #include <wctype.h>
 #define _wcsdup wcsdup
+#define _stricmp strcasecmp
 #endif
 
 /*#define HIDAPI_USE_DDK*/
