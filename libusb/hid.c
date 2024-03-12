@@ -138,11 +138,16 @@ static struct hid_api_version api_version = {
 static libusb_context *usb_context = NULL;
 
 static struct hid_hotplug_context {
+	/* A separate libusb context for hotplug events */
+	libusb_context * context;
+
 	/* libusb callback handle */
 	libusb_hotplug_callback_handle callback_handle;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
+
+	pthread_t thread;
 
 	pthread_mutex_t mutex;
 
@@ -524,11 +529,15 @@ static void hid_internal_hotplug_cleanup()
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
 		return;
 	}
+
+	pthread_join(hid_hotplug_context.thread, NULL);
+
 	/* Cleanup connected device list */
 	hid_free_enumeration(hid_hotplug_context.devs);
 	hid_hotplug_context.devs = NULL;
 	/* Disarm the libusb listener */
 	libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
+	libusb_exit(hid_hotplug_context.context);
 }
 
 static void hid_internal_hotplug_init()
@@ -1103,6 +1112,23 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	return 0;
 }
 
+static void* hotplug_thread(void* user_data)
+{
+	(void) user_data;
+
+	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
+	/* This timeout only affects how much time it takes to stop the thread */
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 5000;
+
+	while(1)
+	{
+		libusb_handle_events_timeout_completed(hid_hotplug_context.context, &tv, NULL);
+	}
+	return NULL;
+}
+
 int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short vendor_id, unsigned short product_id, int events, int flags, hid_hotplug_callback_fn callback, void *user_data, hid_hotplug_callback_handle *callback_handle)
 {
 	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
@@ -1159,19 +1185,23 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 	else {
 		/* Fill already connected devices so we can use this info in disconnection notification */
-		hid_hotplug_context.devs = hid_enumerate(0, 0);
-		hid_hotplug_context.hotplug_cbs = hotplug_cb;
-
-		/* Arm or global callback to receive ALL notifications for HID class devices */
-		int result = libusb_hotplug_register_callback(usb_context,
-													  LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
-													  0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_CLASS_HID, &hid_libusb_hotplug_callback, NULL,
-													  &hid_hotplug_context.callback_handle);
-		if (result) {
-			/* Major failure */
+		if(libusb_init(&hid_hotplug_context.context)) {
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
 		}
+
+		hid_hotplug_context.devs = hid_enumerate(0, 0);
+		hid_hotplug_context.hotplug_cbs = hotplug_cb;
+
+		/* Arm a global callback to receive ALL notifications for HID class devices */
+		if(libusb_hotplug_register_callback(hid_hotplug_context.context,
+											LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+											0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, &hid_libusb_hotplug_callback, NULL,
+											&hid_hotplug_context.callback_handle)) {
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			return -1;
+		}
+		pthread_create(&hid_hotplug_context.thread, NULL, hotplug_thread, NULL);
 	}
 
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
