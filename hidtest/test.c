@@ -127,31 +127,34 @@ void print_devices_with_descriptor(struct hid_device_info *cur_dev) {
 }
 
 int device_callback(
-    hid_hotplug_callback_handle callback_handle,
-    struct hid_device_info* device,
-    hid_hotplug_event event,
-    void* user_data)
+	hid_hotplug_callback_handle callback_handle,
+	struct hid_device_info* device,
+	hid_hotplug_event event,
+	void* user_data)
 {
 	(void)user_data;
 
-    if (event & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)
-        printf("Handle %d: New device is connected: %s.\n", callback_handle, device->path);
-    else
-        printf("Handle %d: Device was disconnected: %s.\n", callback_handle, device->path);
+	if (event & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)
+		printf("Handle %d: New device is connected: %s.\n", callback_handle, device->path);
+	else
+		printf("Handle %d: Device was disconnected: %s.\n", callback_handle, device->path);
 
-    printf("type: %04hx %04hx\n  serial_number: %ls", device->vendor_id, device->product_id, device->serial_number);
-    printf("\n");
-    printf("  Manufacturer: %ls\n", device->manufacturer_string);
-    printf("  Product:      %ls\n", device->product_string);
-    printf("  Release:      %hx\n", device->release_number);
-    printf("  Interface:    %d\n", device->interface_number);
-    printf("  Usage (page): 0x%hx (0x%hx)\n", device->usage, device->usage_page);
-    printf("\n");
+	printf("type: %04hx %04hx\n  serial_number: %ls", device->vendor_id, device->product_id, device->serial_number);
+	printf("\n");
+	printf("  Manufacturer: %ls\n", device->manufacturer_string);
+	printf("  Product:      %ls\n", device->product_string);
+	printf("  Release:      %hx\n", device->release_number);
+	printf("  Interface:    %d\n", device->interface_number);
+	printf("  Usage (page): 0x%hx (0x%hx)\n", device->usage, device->usage_page);
+	printf("\n");
 
-    //if (device->product_id == 0x0ce6)
-    //    return 1;
+	/* Printed data might not show on the screen - force it out */
+	fflush(stdout);
 
-    return 0;
+	//if (device->product_id == 0x0ce6)
+	//	return 1;
+
+	return 0;
 }
 
 int main(int argc, char* argv[])
