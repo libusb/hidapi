@@ -1125,6 +1125,8 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
 		if (hotplug_event == HID_API_HOTPLUG_EVENT_DEVICE_LEFT) {
 			free(device);
 		}
+
+		hid_internal_hotplug_cleanup();
 	}
 
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
