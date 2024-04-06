@@ -414,7 +414,7 @@ int HID_API_EXPORT hid_init(void)
 		if (lookup_functions() < 0) {
 			register_global_winapi_error(L"resolve DLL functions");
 			return -1;
-        }
+		}
 		hidapi_initialized = TRUE;
 	}
 #endif
