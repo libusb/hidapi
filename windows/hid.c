@@ -200,7 +200,7 @@ struct hid_device_ {
 	char *read_buf;
 	OVERLAPPED ol;
 	OVERLAPPED write_ol;
-	struct hid_device_info* device_info;
+	struct hid_device_info *device_info;
 };
 
 static struct hid_hotplug_context {
