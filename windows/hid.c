@@ -1085,8 +1085,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		}
 
 		/* Get and remove this device from the device list */
-		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current;
-			 current = &(*current)->next) {
+		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current; current = &(*current)->next) {
 			/* Case-independent path comparison is mandatory */
 			if (_stricmp((*current)->path, path) == 0) {
 				struct hid_device_info *next = (*current)->next;
