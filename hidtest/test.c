@@ -151,9 +151,6 @@ int device_callback(
 	/* Printed data might not show on the screen - force it out */
 	fflush(stdout);
 
-	//if (device->product_id == 0x0ce6)
-	//	return 1;
-
 	return 0;
 }
 
