@@ -465,10 +465,10 @@ static void hid_internal_hotplug_exit()
 		return;
 	}
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
-	struct hid_hotplug_callback** current = &hid_hotplug_context.hotplug_cbs;
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while (*current) {
-		struct hid_hotplug_callback* next = (*current)->next;
+		struct hid_hotplug_callback *next = (*current)->next;
 		free(*current);
 		*current = next;
 	}
