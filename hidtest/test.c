@@ -127,10 +127,10 @@ void print_devices_with_descriptor(struct hid_device_info *cur_dev) {
 }
 
 int device_callback(
-    hid_hotplug_callback_handle callback_handle,
-    struct hid_device_info* device,
-    hid_hotplug_event event,
-    void* user_data)
+	hid_hotplug_callback_handle callback_handle,
+	struct hid_device_info* device,
+	hid_hotplug_event event,
+	void* user_data)
 {
 	(void)user_data;
 
@@ -148,12 +148,9 @@ int device_callback(
 	printf("  Usage (page): 0x%hx (0x%hx)\n", device->usage, device->usage_page);
 	printf("\n");
 
-	//if (device->product_id == 0x0ce6)
-	//    return 1;
-
 	/* Printed data might not show on the screen - force it out */
 	fflush(stdout);
-	
+
 	return 0;
 }
 
