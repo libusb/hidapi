@@ -210,7 +210,7 @@ static struct hid_hotplug_context {
 	/* Critical section (faster mutex substitute), for both cached device list and callback list changes */
 	CRITICAL_SECTION critical_section;
 
-	int critical_section_ready;
+	BOOL critical_section_ready;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
