@@ -1029,11 +1029,7 @@ void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *d
 	}
 }
 
-DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify,
-										  PVOID context,
-										  CM_NOTIFY_ACTION action,
-										  PCM_NOTIFY_EVENT_DATA event_data,
-										  DWORD event_data_size)
+DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context, CM_NOTIFY_ACTION action, PCM_NOTIFY_EVENT_DATA event_data, DWORD event_data_size)
 {
 	struct hid_device_info *device = NULL;
 	hid_hotplug_event hotplug_event = 0;
