@@ -232,9 +232,9 @@ static uint32_t get_bytes(uint8_t *rpt, size_t len, size_t num_bytes, size_t cur
 	}
 	else if (num_bytes == 4) {
 		return (rpt[cur+4] * 0x01000000 +
-				rpt[cur+3] * 0x00010000 +
-				rpt[cur+2] * 0x00000100 +
-				rpt[cur+1] * 0x00000001);
+		        rpt[cur+3] * 0x00010000 +
+		        rpt[cur+2] * 0x00000100 +
+		        rpt[cur+1] * 0x00000001);
 	}
 	else
 		return 0;
