@@ -2,7 +2,7 @@
 
 | CI instance          | Status |
 |----------------------|--------|
-| `Linux/macOS/Windows (master)` | [![GitHub Builds](https://github.com/libusb/hidapi/workflows/GitHub%20Builds/badge.svg?branch=master)](https://github.com/libusb/hidapi/actions/workflows/builds.yml?query=branch%3Amaster) |
+| `Linux/macOS/Windows (master)` | [![GitHub Builds](https://github.com/libusb/hidapi/actions/workflows/builds.yml/badge.svg?branch=master)](https://github.com/libusb/hidapi/actions/workflows/builds.yml?query=branch%3Amaster) |
 | `Windows (master)` | [![Build status](https://ci.appveyor.com/api/projects/status/xfmr5fo8w0re8ded/branch/master?svg=true)](https://ci.appveyor.com/project/libusb/hidapi/branch/master) |
 | `BSD, last build (branch/PR)` | [![builds.sr.ht status](https://builds.sr.ht/~z3ntu/hidapi.svg)](https://builds.sr.ht/~z3ntu/hidapi) |
 | `Coverity Scan (last)` | ![Coverity Scan](https://scan.coverity.com/projects/583/badge.svg) |
