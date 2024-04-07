@@ -1231,7 +1231,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 
 	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
-	int was_in_use = (2 == hid_hotplug_context.critical_section_state);
+	int old_state = hid_hotplug_context.critical_section_state;
 	hid_hotplug_context.critical_section_state = 2;
 	
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
@@ -1246,9 +1246,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	if (!was_in_use) {
-		hid_hotplug_context.critical_section_state = 1;
-	}
+	hid_hotplug_context.critical_section_state = old_state;
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return 0;
