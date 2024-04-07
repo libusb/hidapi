@@ -497,7 +497,7 @@ static struct hid_hotplug_context {
 
 	pthread_mutex_t mutex;
 
-	int mutex_ready;
+	int mutex_state;
 
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
@@ -510,7 +510,7 @@ static struct hid_hotplug_context {
 	.run_loop_mode = NULL,
 	.source = NULL,
 	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
-	.mutex_ready = 0,
+	.mutex_state = 0,
 	.thread_state = 0, /* 0 = starting (events ignored), 1 = running (events processed), 2 = shutting down */
 	.hotplug_cbs = NULL,
 	.devs = NULL
@@ -539,15 +539,22 @@ static void hid_internal_hotplug_cleanup()
 
 static void hid_internal_hotplug_init()
 {
-	if (!hid_hotplug_context.mutex_ready) {
-		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
-		hid_hotplug_context.mutex_ready = 1;
+	if (!hid_hotplug_context.mutex_state) {
+		/* Initialize the mutex as recursive */
+		pthread_mutexattr_t attr;
+		pthread_mutexattr_init(&attr);
+		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+		pthread_mutex_init(&hid_hotplug_context.mutex, &attr);
+		pthread_mutexattr_destroy(&attr);
+
+		/* Set state to Ready */
+		hid_hotplug_context.mutex_state = 1;
 	}
 }
 
 static void hid_internal_hotplug_exit()
 {
-	if (!hid_hotplug_context.mutex_ready) {
+	if (hid_hotplug_context.mutex_state != 1) {
 		return;
 	}
 
@@ -562,7 +569,7 @@ static void hid_internal_hotplug_exit()
 	}
 	hid_internal_hotplug_cleanup();
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
-	hid_hotplug_context.mutex_ready = 0;
+	hid_hotplug_context.mutex_state = 0;
 	pthread_mutex_destroy(&hid_hotplug_context.mutex);
 }
 
@@ -956,11 +963,12 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 	}
 	struct hid_device_info* info_cur = info;
 	
-	/* NOTE: we don't call any callbacks and we don't lock the mutex during initialization: the mutex is held by the main thread, but it's waiting by a barrier*/
+	/* NOTE: we don't call any callbacks and we don't lock the mutex during initialization: the mutex is held by the main thread, but it's waiting by a barrier */
 	if (hid_hotplug_context.thread_state > 0)
 	{
 		/* Lock the mutex to avoid race conditions */
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
+		hid_hotplug_context.mutex_state = 2;
 		
 		/* Invoke all callbacks */
 		while(info_cur)
@@ -986,6 +994,7 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 
 	if (hid_hotplug_context.thread_state > 0)
 	{
+		hid_hotplug_context.mutex_state = 1;
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 	}
 }
@@ -1178,6 +1187,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		hid_hotplug_context.hotplug_cbs = hotplug_cb;
 	}
 
+	/* Mark the mutex as IN USE, to prevent callback removal from inside a callback */
+	int was_in_use = (2 == hid_hotplug_context.mutex_state);
+	hid_hotplug_context.mutex_state = 2;
+
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
 		struct hid_device_info* device = hid_hotplug_context.devs;
 		/* Notify about already connected devices, if asked so */
@@ -1190,6 +1203,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 	
+	if (!was_in_use) {
+		hid_hotplug_context.mutex_state = 1;
+	}
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	return 0;
@@ -1197,7 +1213,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	if (!hid_hotplug_context.mutex_ready) {
+	if (!hid_hotplug_context.mutex_state) {
 		return -1;
 	}
 
@@ -1213,9 +1229,14 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
 		if ((*current)->handle == callback_handle) {
-			struct hid_hotplug_callback *next = (*current)->next;
-			free(*current);
-			*current = next;
+			/* Check if we were already in a locked state, as we are NOT allowed to remove any callbacks if we are */
+			if (hid_hotplug_context.mutex_state == 2) {
+				(*current)->events = 0;
+			} else {
+				struct hid_hotplug_callback *next = (*current)->next;
+				free(*current);
+				*current = next;
+			}
 			result = 0;
 			break;
 		}

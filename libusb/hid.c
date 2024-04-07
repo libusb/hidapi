@@ -570,7 +570,15 @@ static void hid_internal_hotplug_init()
 	if (!hid_hotplug_context.mutex_state) {
 		hidapi_thread_state_init(&hid_hotplug_context.libusb_thread);
 		hidapi_thread_state_init(&hid_hotplug_context.callback_thread);
-		pthread_mutex_init(&hid_hotplug_context.cb_mutex, NULL);
+
+		/* Initialize the mutex as recursive */
+		pthread_mutexattr_t attr;
+		pthread_mutexattr_init(&attr);
+		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+		pthread_mutex_init(&hid_hotplug_context.mutex, &attr);
+		pthread_mutexattr_destroy(&attr);
+
+		/* Set state to Ready */
 		hid_hotplug_context.mutex_state = 1;
 	}
 }

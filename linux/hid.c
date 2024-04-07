@@ -939,19 +939,19 @@ static void hid_internal_hotplug_cleanup()
 	}
 
 	pthread_join(hid_hotplug_context.thread, NULL);
-
-	/* Cleanup connected device list */
-	hid_free_enumeration(hid_hotplug_context.devs);
-	hid_hotplug_context.devs = NULL;
-	/* Disarm the udev monitor */
-	udev_monitor_unref(hid_hotplug_context.mon);
-	udev_unref(hid_hotplug_context.udev_ctx);
 }
 
 static void hid_internal_hotplug_init()
 {
 	if (!hid_hotplug_context.mutex_state) {
-		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+		/* Initialize the mutex as recursive */
+		pthread_mutexattr_t attr;
+		pthread_mutexattr_init(&attr);
+		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+		pthread_mutex_init(&hid_hotplug_context.mutex, &attr);
+		pthread_mutexattr_destroy(&attr);
+
+		/* Set state to Ready */
 		hid_hotplug_context.mutex_state = 1;
 	}
 }
@@ -1110,6 +1110,7 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 
 static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotplug_event event)
 {
+	hid_hotplug_context.mutex_state = 2;
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	while (*current) {
 		struct hid_hotplug_callback *callback = *current;
@@ -1125,6 +1126,7 @@ static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotp
 		}
 		current = &callback->next;
 	}
+	hid_hotplug_context.mutex_state = 1;
 }
 
 static int match_udev_to_info(struct udev_device* raw_dev, struct hid_device_info *info)
@@ -1140,10 +1142,18 @@ static void* hotplug_thread(void* user_data)
 {
 	(void) user_data;
 
+	/* Note: we shall enter and leave the cycle with the mutex locked */
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+
 	while (hid_hotplug_context.monitor_fd > 0) {
 		fd_set fds;
 		struct timeval tv;
 		int ret;
+
+		/* On every iteration, check if we still have any callbacks left and leave if none are left */
+		if(!hid_hotplug_context.hotplug_cbs) {
+			break;
+		}
 
 		FD_ZERO(&fds);
 		FD_SET(hid_hotplug_context.monitor_fd, &fds);
@@ -1152,7 +1162,12 @@ static void* hotplug_thread(void* user_data)
 		tv.tv_sec = 0;
 		tv.tv_usec = 5000;
 
+		/* We unlock the mutex as we enter the select call, so other threads can access the list of callbacks while this thread sleeps */
+		pthread_mutex_unlock(&hid_hotplug_context.mutex);
+
 		ret = select(hid_hotplug_context.monitor_fd+1, &fds, NULL, NULL, &tv);
+
+		pthread_mutex_lock(&hid_hotplug_context.mutex);
 
 		/* Check if our file descriptor has received data. */
 		if (ret > 0 && FD_ISSET(hid_hotplug_context.monitor_fd, &fds)) {
@@ -1161,10 +1176,6 @@ static void* hotplug_thread(void* user_data)
 			   select() ensured that this will not block. */
 			struct udev_device *raw_dev = udev_monitor_receive_device(hid_hotplug_context.mon);
 			if (raw_dev) {
-				/* Lock the mutex so callback/device lists don't change elsewhere from here on */
-				pthread_mutex_lock(&hid_hotplug_context.mutex);
-				hid_hotplug_context.mutex_state = 2;
-
 				const char* action = udev_device_get_action(raw_dev);
 				if (!strcmp(action, "add")) {
 					// We create a list of all usages on this UDEV device
@@ -1217,12 +1228,20 @@ static void* hotplug_thread(void* user_data)
 					}
 					current = &callback->next;
 				}
-
-				hid_hotplug_context.mutex_state = 1;
-				pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			}
 		}
 	}
+
+	/* Cleanup connected device list */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
+	/* Disarm the udev monitor */
+	udev_monitor_unref(hid_hotplug_context.mon);
+	udev_unref(hid_hotplug_context.udev_ctx);
+	
+	/* Finally unlock the mutex when we are done cleaning up */
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+
 	return NULL;
 }
 
