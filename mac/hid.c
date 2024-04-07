@@ -932,23 +932,25 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 
 static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotplug_event event)
 {
+	hid_hotplug_context.mutex_state = 2;
+
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	while (*current) {
 		struct hid_hotplug_callback *callback = *current;
 		if ((callback->events & event) && hid_internal_match_device_id(info->vendor_id, info->product_id,
 																	   callback->vendor_id, callback->product_id)) {
 			int result = callback->callback(callback->handle, info, event, callback->user_data);
-			/* If the result is non-zero, we remove the callback and proceed */
+			/* If the result is non-zero, we mark the callback for removal and proceed */
 			/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
 			if (result) {
-				struct hid_hotplug_callback *callback = *current;
-				*current = (*current)->next;
-				free(callback);
+				(*current)->events = 0;
 				continue;
 			}
 		}
 		current = &callback->next;
 	}
+
+	hid_hotplug_context.mutex_state = 1;
 }
 
 static void hid_internal_hotplug_connect_callback(void *context, IOReturn result, void *sender, IOHIDDeviceRef device)
@@ -968,7 +970,6 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 	{
 		/* Lock the mutex to avoid race conditions */
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
-		hid_hotplug_context.mutex_state = 2;
 		
 		/* Invoke all callbacks */
 		while(info_cur)
@@ -994,7 +995,6 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 
 	if (hid_hotplug_context.thread_state > 0)
 	{
-		hid_hotplug_context.mutex_state = 1;
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 	}
 }

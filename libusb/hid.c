@@ -1096,6 +1096,7 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 		}
 		current = &callback->next;
 	}
+
 	hid_hotplug_context.mutex_state = 1;
 	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
 }

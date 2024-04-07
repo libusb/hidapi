@@ -1111,6 +1111,7 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotplug_event event)
 {
 	hid_hotplug_context.mutex_state = 2;
+
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	while (*current) {
 		struct hid_hotplug_callback *callback = *current;
@@ -1126,6 +1127,7 @@ static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotp
 		}
 		current = &callback->next;
 	}
+
 	hid_hotplug_context.mutex_state = 1;
 }
 
