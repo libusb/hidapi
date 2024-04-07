@@ -556,13 +556,6 @@ static void hid_internal_hotplug_cleanup()
 	/* Wait for both threads to stop */
 	hidapi_thread_join(&hid_hotplug_context.libusb_thread);
 	hidapi_thread_join(&hid_hotplug_context.callback_thread);
-
-	/* Cleanup connected device list */
-	hid_free_enumeration(hid_hotplug_context.devs);
-	hid_hotplug_context.devs = NULL;
-	/* Disarm the libusb listener */
-	libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
-	libusb_exit(hid_hotplug_context.context);
 }
 
 static void hid_internal_hotplug_init()
@@ -1230,6 +1223,14 @@ static void* callback_thread(void* user_data)
 		/* Make the tread fall asleep and wait for a condition to wake it up */
 		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
 	}
+
+	/* Cleanup connected device list */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
+	/* Disarm the libusb listener */
+	libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
+	libusb_exit(hid_hotplug_context.context);
+
 	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
 
 	return NULL;
