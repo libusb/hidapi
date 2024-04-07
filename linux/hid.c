@@ -934,7 +934,7 @@ struct hid_hotplug_callback {
 
 static void hid_internal_hotplug_cleanup()
 {
-	if (hid_hotplug_context.hotplug_cbs != NULL) {
+	if (hid_hotplug_context.hotplug_cbs != NULL || hid_hotplug_context.mutex_state != 1) {
 		return;
 	}
 
@@ -1303,8 +1303,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
 	}
 
-	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
-	int was_in_use = (2 == hid_hotplug_context.critical_section_state);
+	/* Mark the mutex as IN USE, to prevent callback removal from inside a callback */
+	int was_in_use = (2 == hid_hotplug_context.mutex_state);
 	hid_hotplug_context.mutex_state = 2;
 	
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
