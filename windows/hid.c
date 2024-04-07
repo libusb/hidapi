@@ -1124,7 +1124,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		if (hotplug_event == HID_API_HOTPLUG_EVENT_DEVICE_LEFT) {
 			free(device);
 		}
-		
+
 		/* Traverse the list of callbacks and check if any were marked for removal */
 		current = &hid_hotplug_context.hotplug_cbs;
 		while (*current) {
@@ -1178,9 +1178,6 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
-	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
-	hid_hotplug_context.critical_section_state = 2;
-
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
 	/* handle the unlikely case of handle overflow */
@@ -1233,6 +1230,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
+	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
+	int was_in_use = (2 == hid_hotplug_context.critical_section_state);
+	hid_hotplug_context.critical_section_state = 2;
+	
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
 		struct hid_device_info* device = hid_hotplug_context.devs;
 		/* Notify about already connected devices, if asked so */
@@ -1245,7 +1246,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	hid_hotplug_context.critical_section_state = 1;
+	if (!was_in_use) {
+		hid_hotplug_context.critical_section_state = 1;
+	}
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return 0;
