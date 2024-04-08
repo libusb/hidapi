@@ -1344,8 +1344,6 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	struct hid_hotplug_callback *hotplug_cb = NULL;
-
 	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG) || !hid_hotplug_context.mutex_state || callback_handle <= 0) {
 		return -1;
 	}
@@ -1356,6 +1354,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		return -1;
 	}
+
+	int result = -1;
 
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
@@ -1377,7 +1377,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
-	return 0;
+	return result;
 }
 
 hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
