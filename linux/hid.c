@@ -1196,6 +1196,19 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	return res;
 }
 
+int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device *dev, const unsigned char *data, size_t length)
+{
+	int res;
+
+	register_device_error(dev, NULL);
+
+	res = ioctl(dev->device_handle, HIDIOCSINPUT(length), data);
+	if (res < 0)
+		register_device_error_format(dev, "ioctl (SOUTPUT): %s", strerror(errno));
+
+	return res;
+}
+
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
