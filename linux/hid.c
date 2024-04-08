@@ -1220,7 +1220,7 @@ static void* hotplug_thread(void* user_data)
 				udev_device_unref(raw_dev);
 
 				/* Traverse the list of callbacks and check if any were marked for removal */
-				struct hid_device_info **current = &hid_hotplug_context.hotplug_cbs;
+				struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 				while (*current) {
 					struct hid_hotplug_callback *callback = *current;
 					if (!callback->events) {

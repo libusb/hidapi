@@ -160,7 +160,7 @@ static struct hid_hotplug_context {
 	hidapi_thread_state callback_thread;
 
 	/* This mutex prevents changes to the callback list */
-	pthread_mutex_t cb_mutex;
+	pthread_mutex_t mutex;
 
 	int mutex_state;
 
@@ -582,7 +582,7 @@ static void hid_internal_hotplug_exit()
 		return;
 	}
 
-	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list */
 	while (*current) {
@@ -591,9 +591,9 @@ static void hid_internal_hotplug_exit()
 		*current = next;
 	}
 	hid_internal_hotplug_cleanup();
-	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 	hid_hotplug_context.mutex_state = 0;
-	pthread_mutex_destroy(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_destroy(&hid_hotplug_context.mutex);
 
 	hidapi_thread_state_destroy(&hid_hotplug_context.callback_thread);
 	hidapi_thread_state_destroy(&hid_hotplug_context.libusb_thread);
@@ -1072,7 +1072,7 @@ static int match_libusb_to_info(libusb_device *device, struct hid_device_info* i
 
 static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotplug_event event)
 {
-	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_hotplug_context.mutex_state = 2;
 
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
@@ -1091,7 +1091,7 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 	}
 
 	hid_hotplug_context.mutex_state = 1;
-	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 }
 
 static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void * user_data)
@@ -1193,9 +1193,9 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 	libusb_unref_device(msg->device);
 
 	/* Clean up if the last callback was removed */
-	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_internal_hotplug_cleanup();
-	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 }
 
 static void* callback_thread(void* user_data)
@@ -1268,7 +1268,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	hid_internal_hotplug_init();
 
 	/* Lock the mutex to avoid race itions */
-	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
@@ -1294,7 +1294,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		/* Fill already connected devices so we can use this info in disconnection notification */
 		if (libusb_init(&hid_hotplug_context.context)) {
 			free(hotplug_cb);
-			pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
 		}
 
@@ -1310,7 +1310,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			libusb_exit(hid_hotplug_context.context);
 			free(hotplug_cb);
 			hid_hotplug_context.hotplug_cbs = NULL;
-			pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
 		}
 
@@ -1337,7 +1337,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 
 	hid_hotplug_context.mutex_state = old_state;
-	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	return 0;
 }
@@ -1350,10 +1350,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 		return -1;
 	}
 
-	pthread_mutex_lock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
 	if (hid_hotplug_context.hotplug_cbs == NULL) {
-		pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		return -1;
 	}
 
@@ -1375,7 +1375,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	hid_internal_hotplug_cleanup();
 
-	pthread_mutex_unlock(&hid_hotplug_context.cb_mutex);
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	return 0;
 }
