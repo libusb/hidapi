@@ -1202,7 +1202,7 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device *dev, const un
 
 	register_device_error(dev, NULL);
 
-	res = ioctl(dev->device_handle, HIDIOCSINPUT(length), data);
+	res = ioctl(dev->device_handle, HIDIOCSOUTPUT(length), data);
 	if (res < 0)
 		register_device_error_format(dev, "ioctl (SOUTPUT): %s", strerror(errno));
 
