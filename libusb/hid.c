@@ -165,7 +165,7 @@ static struct hid_hotplug_context {
 	/* Boolean flags */
 	unsigned char mutex_ready : 1;
 	unsigned char mutex_in_use : 1;
-	unsigned char cb_list_dirty : 1;
+	unsigned char cb_list_dirty : 1=;
 
 	struct hid_hotplug_queue* queue;
 
@@ -1228,7 +1228,7 @@ static void* callback_thread(void* user_data)
 		/* We use this thread's mutex to protect the queue */
 		hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
 		while (hid_hotplug_context.queue) {
-			hid_hotplug_event* cur_event = hid_hotplug_context.queue;
+			struct hid_hotplug_queue *cur_event = hid_hotplug_context.queue;
 			process_hotplug_event(cur_event);
 
 			/* Empty the queue */
