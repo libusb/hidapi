@@ -427,6 +427,18 @@ int HID_API_EXPORT hid_init(void)
 	return 0;
 }
 
+struct hid_hotplug_callback {
+    hid_hotplug_callback_handle handle;
+    unsigned short vendor_id;
+    unsigned short product_id;
+    hid_hotplug_event events;
+    void *user_data;
+    hid_hotplug_callback_fn callback;
+
+    /* Pointer to the next notification */
+    struct hid_hotplug_callback *next;
+};
+
 static void hid_internal_hotplug_remove_postponed()
 {
 	/* Unregister the callbacks whose removal was postponed */
@@ -478,18 +490,6 @@ static void hid_internal_hotplug_cleanup()
 
 	hid_hotplug_context.notify_handle = NULL;
 }
-
-struct hid_hotplug_callback {
-	hid_hotplug_callback_handle handle;
-	unsigned short vendor_id;
-	unsigned short product_id;
-	hid_hotplug_event events;
-	void *user_data;
-	hid_hotplug_callback_fn callback;
-
-	/* Pointer to the next notification */
-	struct hid_hotplug_callback *next;
-};
 
 static void hid_internal_hotplug_exit()
 {
