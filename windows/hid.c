@@ -321,7 +321,7 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 
 	/* Get rid of the CR and LF that FormatMessage() sticks at the
 	   end of the message. Thanks Microsoft! */
-	while(msg[msg_len-1] == L'\r' || msg[msg_len-1] == L'\n' || msg[msg_len-1] == L' ')
+	while (msg[msg_len-1] == L'\r' || msg[msg_len-1] == L'\n' || msg[msg_len-1] == L' ')
 	{
 		msg[msg_len-1] = L'\0';
 		msg_len--;
@@ -404,6 +404,8 @@ static void hid_internal_hotplug_init()
 {
 	if (!hid_hotplug_context.mutex_ready) {
 		InitializeCriticalSection(&hid_hotplug_context.critical_section);
+
+		/* Set state to Ready */
 		hid_hotplug_context.mutex_ready = 1;
 		hid_hotplug_context.mutex_in_use = 0;
 		hid_hotplug_context.cb_list_dirty = 0;
@@ -466,6 +468,10 @@ static void hid_internal_hotplug_remove_postponed()
 
 static void hid_internal_hotplug_cleanup()
 {
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
+		return;
+	}
+
 	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
 	hid_internal_hotplug_remove_postponed();
 
@@ -1298,10 +1304,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
 		if ((*current)->handle == callback_handle) {
 			/* Check if we were already in the critical section, as we are NOT allowed to remove any callbacks if we are */
-			if( hid_hotplug_context.mutex_in_use) {
+			if (hid_hotplug_context.mutex_in_use) {
 				/* If we are not allowed to remove the callback, we mark it as pending removal */
-				hid_hotplug_context.cb_list_dirty = 1;
 				(*current)->events = 0;
+				hid_hotplug_context.cb_list_dirty = 1;
 			} else {
 				struct hid_hotplug_callback *next = (*current)->next;
 				free(*current);
