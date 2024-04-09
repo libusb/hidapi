@@ -165,7 +165,7 @@ static struct hid_hotplug_context {
 	/* Boolean flags */
 	unsigned char mutex_ready : 1;
 	unsigned char mutex_in_use : 1;
-	unsigned char cb_list_dirty : 1=;
+	unsigned char cb_list_dirty : 1;
 
 	struct hid_hotplug_queue* queue;
 
@@ -1363,7 +1363,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 
 	/* Mark the mutex as IN USE, to prevent callback removal from inside a callback */
-	int old_state = hid_hotplug_context.mutex_in_use;
+	unsigned char old_state = hid_hotplug_context.mutex_in_use;
 	hid_hotplug_context.mutex_in_use = 1;
 	
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
