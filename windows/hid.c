@@ -211,9 +211,9 @@ static struct hid_hotplug_context {
 	CRITICAL_SECTION critical_section;
 
 	/* Boolean flags */
-	BOOL mutex_ready;
-	BOOL mutex_in_use;
-	BOOL cb_list_dirty;
+	unsigned char mutex_ready : 1;
+	unsigned char mutex_in_use : 1;
+	unsigned char cb_list_dirty : 1;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;

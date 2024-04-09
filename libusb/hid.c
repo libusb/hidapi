@@ -162,10 +162,10 @@ static struct hid_hotplug_context {
 	/* This mutex prevents changes to the callback list */
 	pthread_mutex_t mutex;
 
-	/* Boolean flags are set to only use 1 bit each */
-	int mutex_ready;
-	int mutex_in_use;
-	int cb_list_dirty;
+	/* Boolean flags */
+	unsigned char mutex_ready : 1;
+	unsigned char mutex_in_use : 1;
+	unsigned char cb_list_dirty : 1;
 
 	struct hid_hotplug_queue* queue;
 
