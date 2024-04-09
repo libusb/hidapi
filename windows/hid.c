@@ -210,8 +210,10 @@ static struct hid_hotplug_context {
 	/* Critical section (faster mutex substitute), for both cached device list and callback list changes */
 	CRITICAL_SECTION critical_section;
 
-	/* Critical section state: 0 = uninitialized, 1 = initialized, 2 = in use (only in functions that call any callbacks, to postpone any callback deregistering) */
-	int critical_section_state;
+	/* Boolean flags are set to only use 1 bit each */
+	BOOL mutex_ready : 1;
+	BOOL mutex_in_use : 1;
+	BOOL cb_list_dirty : 1;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
@@ -223,7 +225,7 @@ static struct hid_hotplug_context {
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.notify_handle = NULL,
-	.critical_section_state = 0,
+	.mutex_ready = 0,
 	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
 	.hotplug_cbs = NULL,
 	.devs = NULL
@@ -400,9 +402,11 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 
 static void hid_internal_hotplug_init()
 {
-	if (!hid_hotplug_context.critical_section_state) {
+	if (!hid_hotplug_context.mutex_ready) {
 		InitializeCriticalSection(&hid_hotplug_context.critical_section);
-		hid_hotplug_context.critical_section_state = 1;
+		hid_hotplug_context.mutex_ready = 1;
+		hid_hotplug_context.mutex_in_use = 0;
+		hid_hotplug_context.cb_list_dirty = 0;
 	}
 }
 
@@ -423,8 +427,36 @@ int HID_API_EXPORT hid_init(void)
 	return 0;
 }
 
+static void hid_internal_hotplug_remove_postponed()
+{
+	/* Unregister the callbacks whose removal was postponed */
+	/* This function is always called inside a locked mutex */
+	/* However, any actions are only allowed if the mutex is NOT in use and if the DIRTY flag is set */
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use || !hid_hotplug_context.cb_list_dirty) {
+		return;
+	}
+	
+	/* Traverse the list of callbacks and check if any were marked for removal */
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
+	while (*current) {
+		struct hid_hotplug_callback *callback = *current;
+		if (!callback->events) {
+			*current = (*current)->next;
+			free(callback);
+			continue;
+		}
+		current = &callback->next;
+	}
+	
+	/* Clear the flag so we don't start the cycle unless necessary */
+	hid_hotplug_context.cb_list_dirty = 0;
+}
+
 static void hid_internal_hotplug_cleanup()
 {
+	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
+	hid_internal_hotplug_remove_postponed();
+
 	/* Unregister the HID device connection notification when removing the last callback */
 	/* This function is always called inside a locked mutex */
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
@@ -461,9 +493,8 @@ struct hid_hotplug_callback {
 
 static void hid_internal_hotplug_exit()
 {
-	if (hid_hotplug_context.critical_section_state != 1) {
-		/* If the critical section is not initialized (0), we are safe to assume nothing else is */
-		/* If the critical section is currently entered (2), we are NOT safe to deinitialize anything */
+	if (!hid_hotplug_context.mutex_ready) {
+		/* If the critical section is not initialized, we are safe to assume nothing else is */
 		return;
 	}
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
@@ -476,7 +507,7 @@ static void hid_internal_hotplug_exit()
 	}
 	hid_internal_hotplug_cleanup();
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
-	hid_hotplug_context.critical_section_state = 0;
+	hid_hotplug_context.mutex_ready = 0;
 	DeleteCriticalSection(&hid_hotplug_context.critical_section);
 }
 
@@ -1047,9 +1078,6 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
-	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
-	hid_hotplug_context.critical_section_state = 2;
-
 	if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL) {
 		HANDLE read_handle;
 
@@ -1061,6 +1089,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		/* Check validity of read_handle. */
 		if (read_handle == INVALID_HANDLE_VALUE) {
 			/* Unable to open the device. */
+			LeaveCriticalSection(&hid_hotplug_context.critical_section);
 			return ERROR_SUCCESS;
 		}
 
@@ -1086,6 +1115,7 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		path = hid_internal_UTF16toUTF8(event_data->u.DeviceInterface.SymbolicLink);
 
 		if (path == NULL) {
+			LeaveCriticalSection(&hid_hotplug_context.critical_section);
 			return ERROR_SUCCESS;
 		}
 
@@ -1104,6 +1134,9 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 	}
 
 	if (device) {
+		/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
+		hid_hotplug_context.mutex_in_use = 1;
+		
 		/* Call the notifications for the device */
 		struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 		while (*current) {
@@ -1115,32 +1148,23 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 				/* We avoid changing the list until we are done calling the callbacks to simplify the process */
 				if (result) {
 					callback->events = 0;
+					hid_hotplug_context.cb_list_dirty = 1;
 				}
 			}
 			current = &callback->next;
 		}
+
+		hid_hotplug_context.mutex_in_use = 0;
 
 		/* Free removed device */
 		if (hotplug_event == HID_API_HOTPLUG_EVENT_DEVICE_LEFT) {
 			free(device);
 		}
 
-		/* Traverse the list of callbacks and check if any were marked for removal */
-		current = &hid_hotplug_context.hotplug_cbs;
-		while (*current) {
-			struct hid_hotplug_callback *callback = *current;
-			if (!callback->events) {
-				*current = (*current)->next;
-				free(callback);
-				continue;
-			}
-			current = &callback->next;
-		}
-
+		/* Remove any callbacks that were marked for removal and stop the notification if none are left */
 		hid_internal_hotplug_cleanup();
 	}
 
-	hid_hotplug_context.critical_section_state = 1;
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return ERROR_SUCCESS;
@@ -1231,8 +1255,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 
 	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
-	int old_state = hid_hotplug_context.critical_section_state;
-	hid_hotplug_context.critical_section_state = 2;
+	BOOL old_state = hid_hotplug_context.mutex_in_use;
+	hid_hotplug_context.mutex_in_use = 1;
 	
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
 		struct hid_device_info* device = hid_hotplug_context.devs;
@@ -1246,7 +1270,11 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	hid_hotplug_context.critical_section_state = old_state;
+	hid_hotplug_context.mutex_in_use = old_state;
+
+	/* Remove any callbacks that were marked for removal and stop the notification if none are left */
+	hid_internal_hotplug_cleanup();
+	
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return 0;
@@ -1254,7 +1282,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	if (callback_handle <= 0 || !hid_hotplug_context.critical_section_state) {
+	if (callback_handle <= 0 || !hid_hotplug_context.mutex_ready) {
 		return -1;
 	}
 
@@ -1270,8 +1298,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
 		if ((*current)->handle == callback_handle) {
 			/* Check if we were already in the critical section, as we are NOT allowed to remove any callbacks if we are */
-			if( hid_hotplug_context.critical_section_state == 2) {
+			if( hid_hotplug_context.mutex_in_use) {
 				/* If we are not allowed to remove the callback, we mark it as pending removal */
+				hid_hotplug_context.cb_list_dirty = 1;
 				(*current)->events = 0;
 			} else {
 				struct hid_hotplug_callback *next = (*current)->next;
