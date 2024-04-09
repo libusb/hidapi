@@ -942,7 +942,7 @@ static void hid_internal_hotplug_remove_postponed()
 	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use || !hid_hotplug_context.cb_list_dirty) {
 		return;
 	}
-	
+
 	/* Traverse the list of callbacks and check if any were marked for removal */
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	while (*current) {
@@ -965,6 +965,7 @@ static void hid_internal_hotplug_cleanup()
 		return;
 	}
 
+	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
 	hid_internal_hotplug_remove_postponed();
 
 	if (hid_hotplug_context.hotplug_cbs != NULL) {

@@ -572,14 +572,12 @@ static void hid_internal_hotplug_cleanup()
 		return;
 	}
 
+	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
 	hid_internal_hotplug_remove_postponed();
 
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
 		return;
 	}
-
-	/* Forcibly wake up the thread so it can shut down immediately */
-	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
 
 	/* Wait for both threads to stop */
 	hidapi_thread_join(&hid_hotplug_context.libusb_thread);
@@ -1205,11 +1203,9 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 	/* Release the libusb device - we are done with it */
 	libusb_unref_device(msg->device);
 
-	/* Clean up if the last callback was removed */
-	/* TODO: make the threads stop immediately if all callbacks are gone */
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	hid_internal_hotplug_remove_postponed();
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	/* Cleanup note: this function is called inside a thread that the clenup function would be waiting to finish */
+	/* Any callbacks that await removal are removed in hid_internal_invoke_callbacks */
+	/* No further cleaning is needed */
 }
 
 static void* callback_thread(void* user_data)
@@ -1224,21 +1220,26 @@ static void* callback_thread(void* user_data)
 
 	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 	
-	/* We use the presence of callbacks as a marker to continue running the thread */
-	/* However, if there are any events left, we keep running even if there are no callbacks left, to empty the queue before the thread stops */
-	while (hid_hotplug_context.hotplug_cbs || hid_hotplug_context.queue) {
+	/* We stop the thread if by the moment there are no events left in the queue there are no callbacks left */
+	while (1) {
+		/* Make the tread fall asleep and wait for a condition to wake it up */
+		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
+
 		/* We use this thread's mutex to protect the queue */
 		hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
 		while (hid_hotplug_context.queue) {
-			process_hotplug_event(hid_hotplug_context.queue);
+			hid_hotplug_event* cur_event = hid_hotplug_context.queue;
+			process_hotplug_event(cur_event);
 
 			/* Empty the queue */
-			hid_hotplug_context.queue = hid_hotplug_context.queue->next;
+			cur_event = cur_event->next;
+			free(hid_hotplug_context.queue);
+			hid_hotplug_context.queue = cur_event;
 		}
 		hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
-
-		/* Make the tread fall asleep and wait for a condition to wake it up */
-		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
+		if (!hid_hotplug_context.hotplug_cbs) {
+			break;
+		}
 	}
 
 	/* Cleanup connected device list */
@@ -1271,7 +1272,11 @@ static void* hotplug_thread(void* user_data)
 	libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
 	libusb_exit(hid_hotplug_context.context);
 
+	/* Forcibly wake up the thread so it can shut down immediately and wait for it to stop */
+	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+
 	hidapi_thread_join(&hid_hotplug_context.callback_thread);
+
 	return NULL;
 }
 
