@@ -210,10 +210,10 @@ static struct hid_hotplug_context {
 	/* Critical section (faster mutex substitute), for both cached device list and callback list changes */
 	CRITICAL_SECTION critical_section;
 
-	/* Boolean flags are set to only use 1 bit each */
-	BOOL mutex_ready : 1;
-	BOOL mutex_in_use : 1;
-	BOOL cb_list_dirty : 1;
+	/* Boolean flags */
+	BOOL mutex_ready;
+	BOOL mutex_in_use;
+	BOOL cb_list_dirty;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;

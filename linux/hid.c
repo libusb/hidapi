@@ -901,9 +901,9 @@ static struct hid_hotplug_context {
 	pthread_mutex_t mutex;
 
 	/* Boolean flags are set to only use 1 bit each */
-	int mutex_ready : 1;
-	int mutex_in_use : 1;
-	int cb_list_dirty : 1;
+	int mutex_ready;
+	int mutex_in_use;
+	int cb_list_dirty;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
