@@ -27,6 +27,7 @@
 	#include <windows.h>
     #include <conio.h>
 #else
+    #include <termios.h>
 	#include <unistd.h>
 #endif
 
@@ -470,7 +471,7 @@ void print_version_check()
 
 void interactive_loop()
 {
-    char command = 0;
+    int command = 0;
 
     print_version_check();
 
