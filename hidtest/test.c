@@ -22,11 +22,12 @@
 
 #include <hidapi.h>
 
-// Headers needed for sleeping.
+// Headers needed for sleeping and console management (wait for a keypress)
 #ifdef _WIN32
 	#include <windows.h>
     #include <conio.h>
 #else
+    #include <fcntl.h>
     #include <termios.h>
 	#include <unistd.h>
 #endif
