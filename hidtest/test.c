@@ -66,6 +66,7 @@ int waitkey()
 #else
     struct termios oldt, newt;
     int ch;
+    int oldf;
 
     tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
