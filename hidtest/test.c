@@ -19,6 +19,7 @@
 #include <wchar.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h> // for "tolower()"
 
 #include <hidapi.h>
 
