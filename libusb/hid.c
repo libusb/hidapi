@@ -1409,6 +1409,11 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 	int report_number;
 	int skipped_report_id = 0;
 
+	if (dev->output_endpoint <= 0) {
+		/* No interrupt out endpoint. Use the Control Endpoint */
+		return hid_send_output_report(dev, data, length);
+	}
+
 	if (!data || (length ==0)) {
 		return -1;
 	}
@@ -1421,42 +1426,21 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 		skipped_report_id = 1;
 	}
 
+	/* Use the interrupt out endpoint */
+	int actual_length;
+	res = libusb_interrupt_transfer(dev->device_handle,
+		dev->output_endpoint,
+		(unsigned char*)data,
+		length,
+		&actual_length, 1000);
 
-	if (dev->output_endpoint <= 0) {
-		/* No interrupt out endpoint. Use the Control Endpoint */
-		res = libusb_control_transfer(dev->device_handle,
-			LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_OUT,
-			0x09/*HID Set_Report*/,
-			(2/*HID output*/ << 8) | report_number,
-			dev->interface,
-			(unsigned char *)data, length,
-			1000/*timeout millis*/);
+	if (res < 0)
+		return -1;
 
-		if (res < 0)
-			return -1;
+	if (skipped_report_id)
+		actual_length++;
 
-		if (skipped_report_id)
-			length++;
-
-		return length;
-	}
-	else {
-		/* Use the interrupt out endpoint */
-		int actual_length;
-		res = libusb_interrupt_transfer(dev->device_handle,
-			dev->output_endpoint,
-			(unsigned char*)data,
-			length,
-			&actual_length, 1000);
-
-		if (res < 0)
-			return -1;
-
-		if (skipped_report_id)
-			actual_length++;
-
-		return actual_length;
-	}
+	return actual_length;
 }
 
 /* Helper function, to simplify hid_read().

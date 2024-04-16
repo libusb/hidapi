@@ -1317,7 +1317,35 @@ int HID_API_EXPORT HID_API_CALL hid_get_feature_report(hid_device *dev, unsigned
 
 int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const unsigned char* data, size_t length)
 {
-	BOOL res = HidD_SetOutputReport(dev->device_handle, (PVOID)data, length);
+	BOOL res = FALSE;
+	unsigned char *buf;
+	size_t length_to_send;
+
+	if (!data || !length) {
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_string_error(dev, NULL);
+
+	/* Windows expects at least caps.OutputeportByteLength bytes passed
+	   to HidD_SetOutputReport(), even if the report is shorter. Any less sent and
+	   the function fails with error ERROR_INVALID_PARAMETER set. Any more
+	   and HidD_SetOutputReport() silently truncates the data sent in the report
+	   to caps.OutputReportByteLength. */
+	if (length >= dev->output_report_length) {
+		buf = (unsigned char *) data;
+		length_to_send = length;
+	} else {
+		if (dev->write_buf == NULL)
+			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+		buf = dev->write_buf;
+		memcpy(buf, data, length);
+		memset(buf + length, 0, dev->output_report_length - length);
+		length_to_send = dev->output_report_length;
+	}
+
+	res = HidD_SetOutputReport(dev->device_handle, (PVOID)buf, (DWORD) length_to_send);
 	if (!res) {
 		register_string_error(dev, L"HidD_SetOutputReport");
 		return -1;

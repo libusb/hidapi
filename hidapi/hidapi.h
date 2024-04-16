@@ -307,9 +307,9 @@ extern "C" {
 			single report), followed by the report data (16 bytes). In
 			this example, the length passed in would be 17.
 
-			hid_write() will send the data on the first OUT endpoint, if
-			one exists. If it does not, it will send the data through
-			the Control Endpoint (Endpoint 0).
+			hid_write() will send the data on the first interrupt OUT 
+			endpoint, if one exists. If it does not the behaviour is as 
+			@ref hid_send_output_report
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
@@ -474,6 +474,8 @@ extern "C" {
 			@returns
 				This function returns the actual number of bytes written and
 				-1 on error.
+
+			@see @ref hid_write
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const unsigned char* data, size_t length);
 
