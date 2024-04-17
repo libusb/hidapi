@@ -1183,8 +1183,7 @@ static void* hotplug_thread(void* user_data)
 {
 	(void) user_data;
 
-	/* Note: we shall enter and leave the cycle with the mutex locked */
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	/* Note: the cleanup sequence is always executed with the mutex locked, so we shoud never lock the mutex without checking if we need to stop */
 
 	while (hid_hotplug_context.monitor_fd > 0) {
 		fd_set fds;
@@ -1192,6 +1191,7 @@ static void* hotplug_thread(void* user_data)
 		int ret;
 
 		/* On every iteration, check if we still have any callbacks left and leave if none are left */
+		/* NOTE: the check is performed UNLOCKED and the value CAN change in the background */
 		if (!hid_hotplug_context.hotplug_cbs) {
 			break;
 		}
@@ -1203,12 +1203,12 @@ static void* hotplug_thread(void* user_data)
 		tv.tv_sec = 0;
 		tv.tv_usec = 5000;
 
-		/* We unlock the mutex as we enter the select call, so other threads can access the list of callbacks while this thread sleeps */
-		pthread_mutex_unlock(&hid_hotplug_context.mutex);
-
 		ret = select(hid_hotplug_context.monitor_fd+1, &fds, NULL, NULL, &tv);
 
-		pthread_mutex_lock(&hid_hotplug_context.mutex);
+		/* An extra check, just in case within those 5msec the thread was told to stop */
+		if (!hid_hotplug_context.hotplug_cbs) {
+			break;
+		}
 
 		/* Check if our file descriptor has received data. */
 		if (ret > 0 && FD_ISSET(hid_hotplug_context.monitor_fd, &fds)) {
@@ -1217,6 +1217,7 @@ static void* hotplug_thread(void* user_data)
 			   select() ensured that this will not block. */
 			struct udev_device *raw_dev = udev_monitor_receive_device(hid_hotplug_context.mon);
 			if (raw_dev) {
+				pthread_mutex_lock(&hid_hotplug_context.mutex);
 				const char* action = udev_device_get_action(raw_dev);
 				if (!strcmp(action, "add")) {
 					// We create a list of all usages on this UDEV device
@@ -1257,6 +1258,7 @@ static void* hotplug_thread(void* user_data)
 					}
 				}
 				udev_device_unref(raw_dev);
+				pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			}
 		}
 	}
@@ -1267,9 +1269,6 @@ static void* hotplug_thread(void* user_data)
 	/* Disarm the udev monitor */
 	udev_monitor_unref(hid_hotplug_context.mon);
 	udev_unref(hid_hotplug_context.udev_ctx);
-	
-	/* Finally unlock the mutex when we are done cleaning up */
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	return NULL;
 }
