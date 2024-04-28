@@ -71,7 +71,7 @@ jobs:
 
 
   coverity-macos:
-    runs-on: macos-latest-large
+    runs-on: macos-13
     needs: [coverity-windows]
 
     steps:
