@@ -61,11 +61,14 @@
 #endif
 
 
-// HIDIOCGINPUT is not defined in Linux kernel headers < 5.11.
-// This definition is from hidraw.h in Linux >= 5.11.
+// HIDIOCGINPUT and HIDIOCSOUTPUT are not defined in Linux kernel headers < 5.11.
+// These definitions are from hidraw.h in Linux >= 5.11.
 // https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f43d3870cafa2a0f3854c1819c8385733db8f9ae
 #ifndef HIDIOCGINPUT
 #define HIDIOCGINPUT(len)    _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x0A, len)
+#endif
+#ifndef HIDIOCSOUTPUT
+#define HIDIOCSOUTPUT(len)   _IOC(_IOC_WRITE|_IOC_READ, 'H', 0x0B, len)
 #endif
 
 struct hid_device_ {
