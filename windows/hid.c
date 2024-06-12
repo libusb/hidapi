@@ -1330,7 +1330,7 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const un
 
 	/* Windows expects at least caps.OutputeportByteLength bytes passed
 	   to HidD_SetOutputReport(), even if the report is shorter. Any less sent and
-	   the function fails with error ERROR_INVALID_PARAMETER set. Any more
+	   the function fails with error ERROR_INVALID_PARAMETER set. Any more 
 	   and HidD_SetOutputReport() silently truncates the data sent in the report
 	   to caps.OutputReportByteLength. */
 	if (length >= dev->output_report_length) {
