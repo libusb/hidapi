@@ -307,9 +307,9 @@ extern "C" {
 			single report), followed by the report data (16 bytes). In
 			this example, the length passed in would be 17.
 
-			hid_write() will send the data on the first OUT endpoint, if
-			one exists. If it does not, it will send the data through
-			the Control Endpoint (Endpoint 0).
+			hid_write() will send the data on the first interrupt OUT 
+			endpoint, if one exists. If it does not the behaviour is as 
+			@ref hid_send_output_report
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
@@ -444,6 +444,40 @@ extern "C" {
 				Call hid_error(dev) to get the failure reason.
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length);
+
+		/** @brief Send a Output report to the device.
+
+			Since version 0.15.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+
+			Output reports are sent over the Control endpoint as a
+			Set_Report transfer.  The first byte of @p data[] must
+			contain the Report ID. For devices which only support a
+			single report, this must be set to 0x0. The remaining bytes
+			contain the report data. Since the Report ID is mandatory,
+			calls to hid_send_output_report() will always contain one
+			more byte than the report contains. For example, if a hid
+			report is 16 bytes long, 17 bytes must be passed to
+			hid_send_output_report(): the Report ID (or 0x0, for
+			devices which do not use numbered reports), followed by the
+			report data (16 bytes). In this example, the length passed
+			in would be 17.
+
+			This function sets the return value of hid_error().
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+			@param data The data to send, including the report number as
+				the first byte.
+			@param length The length in bytes of the data to send, including
+				the report number.
+
+			@returns
+				This function returns the actual number of bytes written and
+				-1 on error.
+
+			@see @ref hid_write
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const unsigned char* data, size_t length);
 
 		/** @brief Get a input report from a HID device.
 

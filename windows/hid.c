@@ -97,6 +97,7 @@ static HidD_GetManufacturerString_ HidD_GetManufacturerString;
 static HidD_GetProductString_ HidD_GetProductString;
 static HidD_SetFeature_ HidD_SetFeature;
 static HidD_GetFeature_ HidD_GetFeature;
+static HidD_SetOutputReport_ HidD_SetOutputReport; 
 static HidD_GetInputReport_ HidD_GetInputReport;
 static HidD_GetIndexedString_ HidD_GetIndexedString;
 static HidD_GetPreparsedData_ HidD_GetPreparsedData;
@@ -150,6 +151,7 @@ static int lookup_functions()
 	RESOLVE(hid_lib_handle, HidD_GetProductString);
 	RESOLVE(hid_lib_handle, HidD_SetFeature);
 	RESOLVE(hid_lib_handle, HidD_GetFeature);
+	RESOLVE(hid_lib_handle, HidD_SetOutputReport);
 	RESOLVE(hid_lib_handle, HidD_GetInputReport);
 	RESOLVE(hid_lib_handle, HidD_GetIndexedString);
 	RESOLVE(hid_lib_handle, HidD_GetPreparsedData);
@@ -1311,6 +1313,45 @@ int HID_API_EXPORT HID_API_CALL hid_get_feature_report(hid_device *dev, unsigned
 {
 	/* We could use HidD_GetFeature() instead, but it doesn't give us an actual length, unfortunately */
 	return hid_get_report(dev, IOCTL_HID_GET_FEATURE, data, length);
+}
+
+int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const unsigned char* data, size_t length)
+{
+	BOOL res = FALSE;
+	unsigned char *buf;
+	size_t length_to_send;
+
+	if (!data || !length) {
+		register_string_error(dev, L"Zero buffer/length");
+		return -1;
+	}
+
+	register_string_error(dev, NULL);
+
+	/* Windows expects at least caps.OutputeportByteLength bytes passed
+	   to HidD_SetOutputReport(), even if the report is shorter. Any less sent and
+	   the function fails with error ERROR_INVALID_PARAMETER set. Any more 
+	   and HidD_SetOutputReport() silently truncates the data sent in the report
+	   to caps.OutputReportByteLength. */
+	if (length >= dev->output_report_length) {
+		buf = (unsigned char *) data;
+		length_to_send = length;
+	} else {
+		if (dev->write_buf == NULL)
+			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+		buf = dev->write_buf;
+		memcpy(buf, data, length);
+		memset(buf + length, 0, dev->output_report_length - length);
+		length_to_send = dev->output_report_length;
+	}
+
+	res = HidD_SetOutputReport(dev->device_handle, (PVOID)buf, (DWORD) length_to_send);
+	if (!res) {
+		register_string_error(dev, L"HidD_SetOutputReport");
+		return -1;
+	}
+
+	return (int) length;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
