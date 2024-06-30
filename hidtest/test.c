@@ -489,10 +489,12 @@ void interactive_loop(void)
 		printf("    Q: Quit\n");
 		printf("Please enter command:");
 
+		/* Printed data might not show on the screen when the command is done - force it out */
+		fflush(stdout);
+
 		command = toupper(waitkey());
 
 		printf("%c\n\n========================================\n\n", command);
-		fflush(stdout);
 
 	// GET COMMAND
 		switch (command) {
@@ -518,7 +520,7 @@ void interactive_loop(void)
 		fflush(stdout);
 
 		printf("\n\n========================================\n\n");
-	} while(command != 'q');
+	} while(command != 'Q');
 }
 
 //
