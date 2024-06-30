@@ -60,7 +60,7 @@
 // Used for immediate response in interactive subroutines
 // Taken from:
 // https://cboard.cprogramming.com/c-programming/63166-kbhit-linux.html
-int waitkey()
+int waitkey(void)
 {
 #ifdef _WIN32
 	return _getch();
@@ -448,7 +448,7 @@ int cb1_func(hid_hotplug_callback_handle callback_handle,
 	return 1;
 }
 
-void test_hotplug_deadlocks()
+void test_hotplug_deadlocks(void)
 {
 	cb_test1_triggered = 0;
 	printf("Starting the Hotplug callbacks deadlocks test\n");
@@ -463,7 +463,7 @@ void test_hotplug_deadlocks()
 //
 // CLI
 
-void print_version_check()
+void print_version_check(void)
 {
 	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
 	if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
@@ -474,7 +474,7 @@ void print_version_check()
 	}
 }
 
-void interactive_loop()
+void interactive_loop(void)
 {
 	int command = 0;
 
