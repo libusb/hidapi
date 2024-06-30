@@ -519,7 +519,7 @@ static struct hid_hotplug_context {
 	.devs = NULL
 };
 
-static void hid_internal_hotplug_remove_postponed()
+static void hid_internal_hotplug_remove_postponed(void)
 {
 	/* Unregister the callbacks whose removal was postponed */
 	/* This function is always called inside a locked mutex */
@@ -544,7 +544,7 @@ static void hid_internal_hotplug_remove_postponed()
 	hid_hotplug_context.cb_list_dirty = 0;
 }
 
-static void hid_internal_hotplug_cleanup()
+static void hid_internal_hotplug_cleanup(void)
 {
 	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
 		return;
@@ -572,7 +572,7 @@ static void hid_internal_hotplug_cleanup()
 	pthread_join(hid_hotplug_context.thread, NULL);
 }
 
-static void hid_internal_hotplug_init()
+static void hid_internal_hotplug_init(void)
 {
 	if (!hid_hotplug_context.mutex_ready) {
 		/* Initialize the mutex as recursive */
@@ -589,7 +589,7 @@ static void hid_internal_hotplug_init()
 	}
 }
 
-static void hid_internal_hotplug_exit()
+static void hid_internal_hotplug_exit(void)
 {
 	if (!hid_hotplug_context.mutex_ready) {
 		return;
@@ -648,7 +648,8 @@ static int hid_internal_match_device_id(unsigned short vendor_id, unsigned short
 	return (expected_vendor_id == 0x0 || vendor_id == expected_vendor_id) && (expected_product_id == 0x0 || product_id == expected_product_id);
 }
 
-static void process_pending_events(void) {
+static void process_pending_events(void)
+{
 	SInt32 res;
 	do {
 		res = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.001, FALSE);
@@ -1086,8 +1087,9 @@ static void hid_internal_hotplug_disconnect_callback(void *context, IOReturn res
 	}
 }
 
-static void hotplug_stop_callback(void *context)
+static void hotplug_stop_callback(void* context)
 {
+	(void) context;
 	CFRunLoopStop(hid_hotplug_context.run_loop);
 }
 
