@@ -360,9 +360,6 @@ int device_callback(
 	printf("(Press Q to exit the test)\n");
 	printf("\n");
 
-	/* Printed data might not show on the screen - force it out */
-	fflush(stdout);
-
 	return 0;
 }
 
@@ -489,12 +486,13 @@ void interactive_loop()
 		printf("    2: Dynamic hotplug test\n");
 		printf("    3: Test specific device [04d8:003f]\n");
 		printf("    4: Test hotplug callback management deadlocking scenario\n");
-		printf("    q: Quit\n");
+		printf("    Q: Quit\n");
 		printf("Please enter command:");
 
-		command = tolower(waitkey());
+		command = toupper(waitkey());
 
-		printf("\n\n========================================\n\n");
+		printf("%c\n\n========================================\n\n", command);
+		fflush(stdout);
 
 	// GET COMMAND
 		switch (command) {
@@ -509,12 +507,16 @@ void interactive_loop()
 			break;
 		case '4':
 			test_hotplug_deadlocks();
-		case 'q':
+		case 'Q':
 			break;
 		default:
 			printf("Command not recognized\n");
 			break;
 		}
+
+		/* Printed data might not show on the screen when the command is done - force it out */
+		fflush(stdout);
+
 		printf("\n\n========================================\n\n");
 	} while(command != 'q');
 }
