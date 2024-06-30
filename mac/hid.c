@@ -1088,8 +1088,7 @@ static void hid_internal_hotplug_disconnect_callback(void *context, IOReturn res
 
 static void hotplug_stop_callback(void *context)
 {
-	hid_device *dev = (hid_device*) context;
-	CFRunLoopStop(dev->run_loop); /*TODO: CFRunLoopGetCurrent()*/
+	CFRunLoopStop(hid_hotplug_context.run_loop);
 }
 
 static void* hotplug_thread(void* user_data)
@@ -1110,7 +1109,7 @@ static void* hotplug_thread(void* user_data)
 	hid_hotplug_context.run_loop = CFRunLoopGetCurrent();
 	
 	/* Create the RunLoopSource which is used to signal the
-	   event loop to stop when hid_close() is called. */
+	   event loop to stop when hid_internal_hotplug_cleanup() is called. */
 	CFRunLoopSourceContext ctx;
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.version = 0;
