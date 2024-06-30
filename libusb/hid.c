@@ -1269,7 +1269,7 @@ static void* hotplug_thread(void* user_data)
 	}
 
 	/* Disarm the libusb listener */
-	libusb_hotplug_deregister_callback(usb_context, hid_hotplug_context.callback_handle);
+	libusb_hotplug_deregister_callback(hid_hotplug_context.context, hid_hotplug_context.callback_handle);
 	libusb_exit(hid_hotplug_context.context);
 
 	/* Forcibly wake up the thread so it can shut down immediately and wait for it to stop */
