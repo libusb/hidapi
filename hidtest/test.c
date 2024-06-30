@@ -170,7 +170,7 @@ void print_devices_with_descriptor(struct hid_device_info *cur_dev) {
 
 //
 // Default static testing
-void test_static()
+void test_static(void)
 {
 	struct hid_device_info *devs;
 
@@ -182,7 +182,7 @@ void test_static()
 
 //
 // Fixed device testing
-void test_device()
+void test_device(void)
 {
 	int res;
 	unsigned char buf[256];
@@ -364,7 +364,7 @@ int device_callback(
 }
 
 
-void test_hotplug()
+void test_hotplug(void)
 {
 	printf("Starting the Hotplug test\n");
 	printf("(Press Q to exit the test)\n");
