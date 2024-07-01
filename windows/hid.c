@@ -519,13 +519,13 @@ static void hid_internal_hotplug_exit()
 
 int HID_API_EXPORT hid_exit(void)
 {
+    hid_internal_hotplug_exit();
+
 #ifndef HIDAPI_USE_DDK
 	free_library_handles();
 	hidapi_initialized = FALSE;
 #endif
 	register_global_error(NULL);
-
-	hid_internal_hotplug_exit();
 
 	return 0;
 }

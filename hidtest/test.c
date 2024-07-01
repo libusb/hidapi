@@ -457,6 +457,9 @@ void test_hotplug_deadlocks(void)
 	hid_hotplug_register_callback(0, 0, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, cb1_func, NULL, &cb1_handle);
 
 	printf("Test finished successfully (at least no deadlocks were found)\n");
+
+    // Intentionally leave a callback registered to test how hid_exit handles it
+    //hid_hotplug_deregister_callback(cb2_handle);
 }
 
 
@@ -508,9 +511,11 @@ void interactive_loop(void)
 			test_device();
 			break;
 		case '4':
-			test_hotplug_deadlocks();
+            test_hotplug_deadlocks();
+            break;
 		case 'Q':
-			break;
+            printf("Quitting.\n");
+            return;
 		default:
 			printf("Command not recognized\n");
 			break;
