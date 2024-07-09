@@ -899,8 +899,11 @@ static struct hid_hotplug_context {
 	pthread_t thread;
 
 	pthread_mutex_t mutex;
-	
-	int mutex_ready;
+
+	/* Boolean flags */
+	unsigned char mutex_ready;
+	unsigned char mutex_in_use;
+	unsigned char cb_list_dirty;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
@@ -931,27 +934,61 @@ struct hid_hotplug_callback {
 	struct hid_hotplug_callback *next;
 };
 
+static void hid_internal_hotplug_remove_postponed()
+{
+	/* Unregister the callbacks whose removal was postponed */
+	/* This function is always called inside a locked mutex */
+	/* However, any actions are only allowed if the mutex is NOT in use and if the DIRTY flag is set */
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use || !hid_hotplug_context.cb_list_dirty) {
+		return;
+	}
+
+	/* Traverse the list of callbacks and check if any were marked for removal */
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
+	while (*current) {
+		struct hid_hotplug_callback *callback = *current;
+		if (!callback->events) {
+			*current = (*current)->next;
+			free(callback);
+			continue;
+		}
+		current = &callback->next;
+	}
+	
+	/* Clear the flag so we don't start the cycle unless necessary */
+	hid_hotplug_context.cb_list_dirty = 0;
+}
+
 static void hid_internal_hotplug_cleanup()
 {
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
+		return;
+	}
+
+	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
+	hid_internal_hotplug_remove_postponed();
+
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
 		return;
 	}
 
 	pthread_join(hid_hotplug_context.thread, NULL);
-
-	/* Cleanup connected device list */
-	hid_free_enumeration(hid_hotplug_context.devs);
-	hid_hotplug_context.devs = NULL;
-	/* Disarm the udev monitor */
-	udev_monitor_unref(hid_hotplug_context.mon);
-	udev_unref(hid_hotplug_context.udev_ctx);
 }
 
 static void hid_internal_hotplug_init()
 {
 	if (!hid_hotplug_context.mutex_ready) {
-		pthread_mutex_init(&hid_hotplug_context.mutex, NULL);
+		/* Initialize the mutex as recursive */
+		pthread_mutexattr_t attr;
+		pthread_mutexattr_init(&attr);
+		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+		pthread_mutex_init(&hid_hotplug_context.mutex, &attr);
+		pthread_mutexattr_destroy(&attr);
+
+		/* Set state to Ready */
 		hid_hotplug_context.mutex_ready = 1;
+		hid_hotplug_context.mutex_in_use = 0;
+		hid_hotplug_context.cb_list_dirty = 0;
 	}
 }
 
@@ -1109,23 +1146,28 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 
 static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotplug_event event)
 {
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	hid_hotplug_context.mutex_in_use = 1;
+
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	while (*current) {
 		struct hid_hotplug_callback *callback = *current;
 		if ((callback->events & event) && hid_internal_match_device_id(info->vendor_id, info->product_id,
 																	   callback->vendor_id, callback->product_id)) {
 			int result = callback->callback(callback->handle, info, event, callback->user_data);
-			/* If the result is non-zero, we remove the callback and proceed */
-			/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
+			/* If the result is non-zero, we mark the callback for removal and proceed */
 			if (result) {
-				struct hid_hotplug_callback *callback = *current;
-				*current = (*current)->next;
-				free(callback);
+				(*current)->events = 0;
+				hid_hotplug_context.cb_list_dirty = 1;
 				continue;
 			}
 		}
 		current = &callback->next;
 	}
+
+	hid_hotplug_context.mutex_in_use = 0;
+	hid_internal_hotplug_remove_postponed();
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 }
 
 static int match_udev_to_info(struct udev_device* raw_dev, struct hid_device_info *info)
@@ -1141,10 +1183,18 @@ static void* hotplug_thread(void* user_data)
 {
 	(void) user_data;
 
+	/* Note: the cleanup sequence is always executed with the mutex locked, so we shoud never lock the mutex without checking if we need to stop */
+
 	while (hid_hotplug_context.monitor_fd > 0) {
 		fd_set fds;
 		struct timeval tv;
 		int ret;
+
+		/* On every iteration, check if we still have any callbacks left and leave if none are left */
+		/* NOTE: the check is performed UNLOCKED and the value CAN change in the background */
+		if (!hid_hotplug_context.hotplug_cbs) {
+			break;
+		}
 
 		FD_ZERO(&fds);
 		FD_SET(hid_hotplug_context.monitor_fd, &fds);
@@ -1155,6 +1205,11 @@ static void* hotplug_thread(void* user_data)
 
 		ret = select(hid_hotplug_context.monitor_fd+1, &fds, NULL, NULL, &tv);
 
+		/* An extra check, just in case within those 5msec the thread was told to stop */
+		if (!hid_hotplug_context.hotplug_cbs) {
+			break;
+		}
+
 		/* Check if our file descriptor has received data. */
 		if (ret > 0 && FD_ISSET(hid_hotplug_context.monitor_fd, &fds)) {
 
@@ -1162,9 +1217,7 @@ static void* hotplug_thread(void* user_data)
 			   select() ensured that this will not block. */
 			struct udev_device *raw_dev = udev_monitor_receive_device(hid_hotplug_context.mon);
 			if (raw_dev) {
-				/* Lock the mutex so callback/device lists don't change elsewhere from here on */
 				pthread_mutex_lock(&hid_hotplug_context.mutex);
-
 				const char* action = udev_device_get_action(raw_dev);
 				if (!strcmp(action, "add")) {
 					// We create a list of all usages on this UDEV device
@@ -1209,6 +1262,14 @@ static void* hotplug_thread(void* user_data)
 			}
 		}
 	}
+
+	/* Cleanup connected device list */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
+	/* Disarm the udev monitor */
+	udev_monitor_unref(hid_hotplug_context.mon);
+	udev_unref(hid_hotplug_context.udev_ctx);
+
 	return NULL;
 }
 
@@ -1268,7 +1329,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	else {
 		// Prepare a UDEV context to run monitoring on
 		hid_hotplug_context.udev_ctx = udev_new();
-		if(!hid_hotplug_context.udev_ctx)
+		if (!hid_hotplug_context.udev_ctx)
 		{
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
@@ -1289,6 +1350,26 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
 	}
 
+	/* Mark the mutex as IN USE, to prevent callback removal from inside a callback */
+	unsigned char old_state = hid_hotplug_context.mutex_in_use;
+	hid_hotplug_context.mutex_in_use = 1;
+	
+	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
+		struct hid_device_info* device = hid_hotplug_context.devs;
+		/* Notify about already connected devices, if asked so */
+		while (device != NULL) {
+			if (hid_internal_match_device_id(device->vendor_id, device->product_id, hotplug_cb->vendor_id, hotplug_cb->product_id)) {
+				(*hotplug_cb->callback)(hotplug_cb->handle, device, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, hotplug_cb->user_data);
+			}
+
+			device = device->next;
+		}
+	}
+
+	hid_hotplug_context.mutex_in_use = old_state;
+
+	hid_internal_hotplug_cleanup();
+
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 	
 	return 0;
@@ -1296,7 +1377,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
-	if (!hid_hotplug_context.mutex_ready) {
+	if (!hid_hotplug_context.mutex_ready || callback_handle <= 0) {
 		return -1;
 	}
 
@@ -1312,9 +1393,15 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
 		if ((*current)->handle == callback_handle) {
-			struct hid_hotplug_callback *next = (*current)->next;
-			free(*current);
-			*current = next;
+			/* Check if we were already in a locked state, as we are NOT allowed to remove any callbacks if we are */
+			if (hid_hotplug_context.mutex_in_use) {
+				(*current)->events = 0;
+				hid_hotplug_context.cb_list_dirty = 1;
+			} else {
+				struct hid_hotplug_callback *next = (*current)->next;
+				free(*current);
+				*current = next;
+			}
 			result = 0;
 			break;
 		}

@@ -19,13 +19,17 @@
 #include <wchar.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h> // for "tolower()"
 
 #include <hidapi.h>
 
-// Headers needed for sleeping.
+// Headers needed for sleeping and console management (wait for a keypress)
 #ifdef _WIN32
 	#include <windows.h>
+	#include <conio.h>
 #else
+	#include <fcntl.h>
+	#include <termios.h>
 	#include <unistd.h>
 #endif
 
@@ -50,8 +54,46 @@
 #if defined(USING_HIDAPI_LIBUSB) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
 #include <hidapi_libusb.h>
 #endif
+
+//
+// A function that waits for a key to be pressed and reports it's code
+// Used for immediate response in interactive subroutines
+// Taken from:
+// https://cboard.cprogramming.com/c-programming/63166-kbhit-linux.html
+int waitkey(void)
+{
+#ifdef _WIN32
+	return _getch();
+#else
+	struct termios oldt, newt;
+	int ch;
+	int oldf;
+
+	tcgetattr(STDIN_FILENO, &oldt);
+	newt = oldt;
+	newt.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+	oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+	fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+	do
+	{
+		usleep(1);
+		ch = getchar();
+	}
+	while (EOF == ch);
+
+	tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+	fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+	return ch;
+#endif
+}
+
 //
 
+//
+// Report Device info
 const char *hid_bus_name(hid_bus_type bus_type) {
 	static const char *const HidBusTypeName[] = {
 		"Unknown",
@@ -126,80 +168,28 @@ void print_devices_with_descriptor(struct hid_device_info *cur_dev) {
 	}
 }
 
-int device_callback(
-	hid_hotplug_callback_handle callback_handle,
-	struct hid_device_info* device,
-	hid_hotplug_event event,
-	void* user_data)
+//
+// Default static testing
+void test_static(void)
 {
-	(void)user_data;
-
-	if (event & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)
-		printf("Handle %d: New device is connected: %s.\n", callback_handle, device->path);
-	else
-		printf("Handle %d: Device was disconnected: %s.\n", callback_handle, device->path);
-
-	printf("type: %04hx %04hx\n  serial_number: %ls", device->vendor_id, device->product_id, device->serial_number);
-	printf("\n");
-	printf("  Manufacturer: %ls\n", device->manufacturer_string);
-	printf("  Product:      %ls\n", device->product_string);
-	printf("  Release:      %hx\n", device->release_number);
-	printf("  Interface:    %d\n", device->interface_number);
-	printf("  Usage (page): 0x%hx (0x%hx)\n", device->usage, device->usage_page);
-	printf("\n");
-
-	/* Printed data might not show on the screen - force it out */
-	fflush(stdout);
-
-	return 0;
-}
-
-int main(int argc, char* argv[])
-{
-	(void)argc;
-	(void)argv;
-
-	int res;
-	unsigned char buf[256];
-	#define MAX_STR 255
-	wchar_t wstr[MAX_STR];
-	hid_device *handle;
-	int i;
-	hid_hotplug_callback_handle token1, token2;
-
 	struct hid_device_info *devs;
-
-	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
-	if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
-		printf("Compile-time version matches runtime version of hidapi.\n\n");
-	}
-	else {
-		printf("Compile-time version is different than runtime version of hidapi.\n]n");
-	}
-
-	if (hid_init())
-		return -1;
-
-#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
-	// To work properly needs to be called before hid_open/hid_open_path after hid_init.
-	// Best/recommended option - call it right after hid_init.
-	hid_darwin_set_open_exclusive(0);
-#endif
 
 	devs = hid_enumerate(0x0, 0x0);
 	print_devices_with_descriptor(devs);
 	hid_free_enumeration(devs);
+}
 
-	hid_hotplug_register_callback(0, 0, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, device_callback, NULL, &token1);
-	hid_hotplug_register_callback(0x054c, 0x0ce6, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, device_callback, NULL, &token2);
 
-	while (1)
-	{
-
-	}
-
-	hid_hotplug_deregister_callback(token2);
-	hid_hotplug_deregister_callback(token1);
+//
+// Fixed device testing
+void test_device(void)
+{
+	int res;
+	unsigned char buf[256];
+#define MAX_STR 255
+	wchar_t wstr[MAX_STR];
+	hid_device *handle;
+	int i;
 
 	// Set up the command buffer.
 	memset(buf,0x00,sizeof(buf));
@@ -213,8 +203,7 @@ int main(int argc, char* argv[])
 	handle = hid_open(0x4d8, 0x3f, NULL);
 	if (!handle) {
 		printf("unable to open device\n");
-		hid_exit();
- 		return 1;
+		return;
 	}
 
 	// Read the Manufacturer String
@@ -344,13 +333,221 @@ int main(int argc, char* argv[])
 	}
 
 	hid_close(handle);
+}
+
+//
+// Normal hotplug testing
+int device_callback(
+	hid_hotplug_callback_handle callback_handle,
+	struct hid_device_info* device,
+	hid_hotplug_event event,
+	void* user_data)
+{
+	(void)user_data;
+
+	if (event & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)
+		printf("Handle %d: New device is connected: %s.\n", callback_handle, device->path);
+	else
+		printf("Handle %d: Device was disconnected: %s.\n", callback_handle, device->path);
+
+	printf("type: %04hx %04hx\n  serial_number: %ls", device->vendor_id, device->product_id, device->serial_number);
+	printf("\n");
+	printf("  Manufacturer: %ls\n", device->manufacturer_string);
+	printf("  Product:      %ls\n", device->product_string);
+	printf("  Release:      %hx\n", device->release_number);
+	printf("  Interface:    %d\n", device->interface_number);
+	printf("  Usage (page): 0x%hx (0x%hx)\n", device->usage, device->usage_page);
+	printf("(Press Q to exit the test)\n");
+	printf("\n");
+
+	return 0;
+}
+
+
+void test_hotplug(void)
+{
+	printf("Starting the Hotplug test\n");
+	printf("(Press Q to exit the test)\n");
+
+	hid_hotplug_callback_handle token1, token2;
+
+	hid_hotplug_register_callback(0, 0, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, device_callback, NULL, &token1);
+	hid_hotplug_register_callback(0x054c, 0x0ce6, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, device_callback, NULL, &token2);
+
+	while (1)
+	{
+		int command = tolower(waitkey());
+		if ('q' == command)
+		{
+			break;
+		}
+	}
+
+	hid_hotplug_deregister_callback(token2);
+	hid_hotplug_deregister_callback(token1);
+
+	printf("\n\nHotplug test stopped\n");
+}
+
+//
+// Stress-testing weird edge cases in hotplugs
+int cb1_handle;
+int cb2_handle;
+int cb_test1_triggered;
+
+int cb2_func(hid_hotplug_callback_handle callback_handle,
+             struct hid_device_info *device,
+             hid_hotplug_event event,
+             void *user_data)
+{
+	(void) callback_handle;
+	(void) device;
+	(void) event;
+	(void) user_data;
+	// TIP: only perform the test once
+	if(cb_test1_triggered)
+	{
+		return 1;
+	}
+
+	printf("Callback 2 fired\n");
+
+	// Deregister the first callback
+	// It should be placed in the list at an index prior to the current one, which will make the pointer to the current one invalid on some implementations
+	hid_hotplug_deregister_callback(cb1_handle);
+
+	cb_test1_triggered = 1;
+
+	// As long as we are inside this callback, nothing goes wrong; however, returning from here will cause a use-after-free error on flawed implementations
+	// as to retrieve the next element (or to check for it's presence) it will look those dereference a pointer located in an already freed area
+	// Undefined behavior
+	return 1;
+}
+
+int cb1_func(hid_hotplug_callback_handle callback_handle,
+             struct hid_device_info *device,
+             hid_hotplug_event event,
+             void *user_data)
+{
+	(void) callback_handle;
+	(void) device;
+	(void) event;
+	(void) user_data;
+
+	// TIP: only perform the test once
+	if(cb_test1_triggered)
+	{
+		return 1;
+	}
+
+	printf("Callback 1 fired\n");
+
+	// Register the second callback and make it be called immediately by enumeration attempt
+	// Will cause a deadlock on Linux immediately
+	hid_hotplug_register_callback(0, 0, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, cb2_func, NULL, &cb2_handle);
+	return 1;
+}
+
+void test_hotplug_deadlocks(void)
+{
+	cb_test1_triggered = 0;
+	printf("Starting the Hotplug callbacks deadlocks test\n");
+	printf("TIP: if you don't see a message that it succeeded, it means the test failed and the system is now deadlocked\n");
+	// Register the first callback and make it be called immediately by enumeration attempt (if at least 1 device is present)
+	hid_hotplug_register_callback(0, 0, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT, HID_API_HOTPLUG_ENUMERATE, cb1_func, NULL, &cb1_handle);
+
+	printf("Test finished successfully (at least no deadlocks were found)\n");
+
+    // Intentionally leave a callback registered to test how hid_exit handles it
+    //hid_hotplug_deregister_callback(cb2_handle);
+}
+
+
+//
+// CLI
+
+void print_version_check(void)
+{
+	printf("hidapi test/example tool. Compiled with hidapi version %s, runtime version %s.\n", HID_API_VERSION_STR, hid_version_str());
+	if (HID_API_VERSION == HID_API_MAKE_VERSION(hid_version()->major, hid_version()->minor, hid_version()->patch)) {
+		printf("Compile-time version matches runtime version of hidapi.\n\n");
+	}
+	else {
+		printf("Compile-time version is different than runtime version of hidapi.\n]n");
+	}
+}
+
+void interactive_loop(void)
+{
+	int command = 0;
+
+	print_version_check();
+
+	do {
+		printf("Interactive HIDAPI testing utility\n");
+		printf("    1: List connected devices\n");
+		printf("    2: Dynamic hotplug test\n");
+		printf("    3: Test specific device [04d8:003f]\n");
+		printf("    4: Test hotplug callback management deadlocking scenario\n");
+		printf("    Q: Quit\n");
+		printf("Please enter command:");
+
+		/* Printed data might not show on the screen when the command is done - force it out */
+		fflush(stdout);
+
+		command = toupper(waitkey());
+
+		printf("%c\n\n========================================\n\n", command);
+
+	// GET COMMAND
+		switch (command) {
+		case '1':
+			test_static();
+			break;
+		case '2':
+			test_hotplug();
+			break;
+		case '3':
+			test_device();
+			break;
+		case '4':
+            test_hotplug_deadlocks();
+            break;
+		case 'Q':
+            printf("Quitting.\n");
+            return;
+		default:
+			printf("Command not recognized\n");
+			break;
+		}
+
+		/* Printed data might not show on the screen when the command is done - force it out */
+		fflush(stdout);
+
+		printf("\n\n========================================\n\n");
+	} while(command != 'Q');
+}
+
+//
+// Main
+int main(int argc, char* argv[])
+{
+	(void)argc;
+	(void)argv;
+
+	if (hid_init())
+		return -1;
+
+#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+	// To work properly needs to be called before hid_open/hid_open_path after hid_init.
+	// Best/recommended option - call it right after hid_init.
+	hid_darwin_set_open_exclusive(0);
+#endif
+
+	interactive_loop();
 
 	/* Free static HIDAPI objects. */
 	hid_exit();
-
-#ifdef _WIN32
-	system("pause");
-#endif
 
 	return 0;
 }
