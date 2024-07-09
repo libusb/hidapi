@@ -498,9 +498,9 @@ static struct hid_hotplug_context {
 	pthread_mutex_t mutex;
 
 	/* Boolean flags */
-	unsigned char mutex_ready : 1;
-	unsigned char mutex_in_use : 1;
-	unsigned char cb_list_dirty : 1;
+	unsigned char mutex_ready;
+	unsigned char mutex_in_use;
+	unsigned char cb_list_dirty;
 
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
