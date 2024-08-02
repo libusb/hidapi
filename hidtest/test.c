@@ -86,7 +86,11 @@ void print_hid_report_descriptor_from_device(hid_device *device) {
 	int res = 0;
 
 	printf("  Report Descriptor: ");
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
 	res = hid_get_report_descriptor(device, descriptor, sizeof(descriptor));
+#else
+	(void)res;
+#endif
 	if (res < 0) {
 		printf("error getting: %ls", hid_error(device));
 	}
@@ -130,6 +134,23 @@ int main(int argc, char* argv[])
 {
 	(void)argc;
 	(void)argv;
+
+	/* --- HIDAPI R&D: this is just to force the compiler to ensure
+	       each of those functions are implemented (even as a stub)
+	       by each backend. --- */
+	(void)&hid_open;
+	(void)&hid_open_path;
+	(void)&hid_read_timeout;
+	(void)&hid_get_input_report;
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+	(void)&hid_send_output_report;
+#endif
+	(void)&hid_get_feature_report;
+	(void)&hid_send_feature_report;
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
+	(void)&hid_get_report_descriptor;
+#endif
+	/* --- */
 
 	int res;
 	unsigned char buf[256];
