@@ -1030,7 +1030,7 @@ static void *read_thread(void *param)
 		dev->device_handle,
 		dev->input_endpoint,
 		buf,
-		length,
+		(int)length,
 		read_callback,
 		dev,
 		5000/*timeout*/);
@@ -1431,7 +1431,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 	res = libusb_interrupt_transfer(dev->device_handle,
 		dev->output_endpoint,
 		(unsigned char*)data,
-		length,
+		(int)length,
 		&actual_length, 1000);
 
 	if (res < 0)
@@ -1456,7 +1456,7 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length)
 	dev->input_reports = rpt->next;
 	free(rpt->data);
 	free(rpt);
-	return len;
+	return (int)len;
 }
 
 static void cleanup_mutex(void *param)
@@ -1589,7 +1589,7 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 	if (skipped_report_id)
 		length++;
 
-	return length;
+	return (int)length;
 }
 
 int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length)
