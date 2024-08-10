@@ -78,6 +78,16 @@ typedef LONG NTSTATUS;
 
 #define MAX_STRING_WCHARS_USB 126
 
+#if defined(__GNUC__)
+#define thread_local __thread
+#elif __STDC_VERSION__ >= 201112L
+#define thread_local _Thread_local
+#elif defined(_MSC_VER)
+#define thread_local __declspec(thread)
+#else
+#error Cannot define thread_local
+#endif
+
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
 	.minor = HID_API_VERSION_MINOR,
@@ -180,6 +190,16 @@ err:
 
 #endif /* HIDAPI_USE_DDK */
 
+struct hid_device_error
+{
+	HANDLE device_handle;
+	wchar_t *last_error_str;
+
+	struct hid_device_error *next;
+};
+
+static thread_local struct hid_device_error *global_device_error = NULL;
+
 struct hid_device_ {
 		HANDLE device_handle;
 		BOOL blocking;
@@ -188,7 +208,6 @@ struct hid_device_ {
 		size_t input_report_length;
 		USHORT feature_report_length;
 		unsigned char *feature_buf;
-		wchar_t *last_error_str;
 		BOOL read_pending;
 		char *read_buf;
 		OVERLAPPED ol;
@@ -211,7 +230,6 @@ static hid_device *new_hid_device()
 	dev->input_report_length = 0;
 	dev->feature_report_length = 0;
 	dev->feature_buf = NULL;
-	dev->last_error_str = NULL;
 	dev->read_pending = FALSE;
 	dev->read_buf = NULL;
 	memset(&dev->ol, 0, sizeof(dev->ol));
@@ -223,13 +241,40 @@ static hid_device *new_hid_device()
 	return dev;
 }
 
+static void free_error_buffer(hid_device *dev)
+{
+	struct hid_device_error *current = global_device_error;
+	struct hid_device_error *prev = NULL;
+
+	while (current)
+	{
+		if (dev->device_handle == current->device_handle)
+		{
+			if (prev)
+			{
+				prev->next = current->next;
+			}
+			else
+			{
+				global_device_error = current->next;
+			}
+
+			free(current->last_error_str);
+			free(current);
+			return;
+		}
+
+		prev = current;
+		current = current->next;
+	}
+}
+
 static void free_hid_device(hid_device *dev)
 {
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->device_handle);
-	free(dev->last_error_str);
-	dev->last_error_str = NULL;
+	free_error_buffer(dev);
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
@@ -316,17 +361,79 @@ static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 # pragma GCC diagnostic pop
 #endif
 
+static wchar_t** get_error_buffer(hid_device *dev)
+{
+	if (dev == NULL)
+	{
+		return NULL;
+	}
+
+	struct hid_device_error *current = global_device_error;
+	struct hid_device_error *prev = NULL;
+
+	while (current)
+	{
+		if (dev->device_handle == current->device_handle)
+		{
+			return &current->last_error_str;
+		}
+
+		prev = current;
+		current = current->next;
+	}
+
+	struct hid_device_error *device_error = (struct hid_device_error*) malloc(sizeof(struct hid_device_error));
+	device_error->device_handle = dev->device_handle;
+	device_error->last_error_str = NULL;
+	device_error->next = NULL;
+
+	if (prev)
+	{
+		prev->next = device_error;
+	}
+	else
+	{
+		global_device_error = device_error;
+	}
+
+	return &device_error->last_error_str;
+}
+
+static wchar_t* get_error_str(hid_device *dev)
+{
+	if (dev == NULL)
+	{
+		return NULL;
+	}
+
+	struct hid_device_error *current = global_device_error;
+
+	while (current)
+	{
+		if (dev->device_handle == current->device_handle)
+		{
+			return current->last_error_str;
+		}
+
+		current = current->next;
+	}
+
+	return NULL;
+}
+
 static void register_winapi_error(hid_device *dev, const WCHAR *op)
 {
-	register_winapi_error_to_buffer(&dev->last_error_str, op);
+	wchar_t **error_buffer = get_error_buffer(dev);
+	register_winapi_error_to_buffer(error_buffer, op);
 }
 
 static void register_string_error(hid_device *dev, const WCHAR *string_error)
 {
-	register_string_error_to_buffer(&dev->last_error_str, string_error);
+	wchar_t **error_buffer = get_error_buffer(dev);
+	register_string_error_to_buffer(error_buffer, string_error);
 }
 
-static wchar_t *last_global_error_str = NULL;
+static thread_local wchar_t *last_global_error_str = NULL;
 
 static void register_global_winapi_error(const WCHAR *op)
 {
@@ -1530,9 +1637,10 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
 	if (dev) {
-		if (dev->last_error_str == NULL)
+		wchar_t *error_str = get_error_str(dev);
+		if (error_str == NULL)
 			return L"Success";
-		return (wchar_t*)dev->last_error_str;
+		return (wchar_t*)error_str;
 	}
 
 	if (last_global_error_str == NULL)
