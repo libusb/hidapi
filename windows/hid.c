@@ -190,15 +190,39 @@ err:
 
 #endif /* HIDAPI_USE_DDK */
 
-struct hid_device_error
+typedef void (*tls_destructor)(void *data, hid_device *dev, BOOLEAN all);
+
+struct tls_allocation
+{
+	void *data;
+	DWORD thread_id;
+	tls_destructor destructor;
+
+	struct tls_allocation *next;
+};
+
+struct device_error
 {
 	HANDLE device_handle;
 	wchar_t *last_error_str;
 
-	struct hid_device_error *next;
+	struct device_error *next;
 };
 
-static thread_local struct hid_device_error *global_device_error = NULL;
+struct tls_context
+{
+	struct tls_allocation *allocated;
+	CRITICAL_SECTION critical_section;
+	BOOLEAN critical_section_ready;
+};
+
+static struct tls_context tls_context = {
+	.allocated = NULL,
+	.critical_section_ready = FALSE
+};
+
+// Use a NULL device handle for the global error
+static thread_local struct device_error *device_error = NULL;
 
 struct hid_device_ {
 		HANDLE device_handle;
@@ -241,14 +265,77 @@ static hid_device *new_hid_device()
 	return dev;
 }
 
-static void free_error_buffer(hid_device *dev)
+static void tls_init()
 {
-	struct hid_device_error *current = global_device_error;
-	struct hid_device_error *prev = NULL;
+	if (!tls_context.critical_section_ready)
+	{
+		InitializeCriticalSection(&tls_context.critical_section);
+		tls_context.critical_section_ready = TRUE;
+	}
+}
+
+static void tls_register(void* data, tls_destructor destructor)
+{
+	if (!tls_context.critical_section_ready)
+	{
+		return;
+	}
+
+	DWORD thread_id = GetCurrentThreadId();
+
+	EnterCriticalSection(&tls_context.critical_section);
+
+	struct tls_allocation *current = tls_context.allocated;
+	struct tls_allocation *prev = NULL;
 
 	while (current)
 	{
-		if (dev->device_handle == current->device_handle)
+		prev = current;
+		current = current->next;
+	}
+
+	struct tls_allocation *tls = (struct tls_allocation*) malloc(sizeof(struct tls_allocation));
+	tls->data = data;
+	tls->thread_id = thread_id;
+	tls->destructor = destructor;
+	tls->next = NULL;
+
+	if (prev)
+	{
+		prev->next = tls;
+	}
+	else
+	{
+		tls_context.allocated = tls;
+	}
+
+	LeaveCriticalSection(&tls_context.critical_section);
+}
+
+static void tls_free(DWORD thread_id, hid_device *dev, BOOLEAN all_devices)
+{
+	if (!tls_context.critical_section_ready)
+	{
+		return;
+	}
+
+	EnterCriticalSection(&tls_context.critical_section);
+
+	struct tls_allocation *current = tls_context.allocated;
+	struct tls_allocation *prev = NULL;
+
+	while (current)
+	{
+		if (thread_id != 0 && thread_id != current->thread_id)
+		{
+			prev = current;
+			current = current->next;
+			continue;
+		}
+
+		current->destructor(&current->data, dev, all_devices);
+
+		if (current->data == NULL)
 		{
 			if (prev)
 			{
@@ -256,16 +343,87 @@ static void free_error_buffer(hid_device *dev)
 			}
 			else
 			{
-				global_device_error = current->next;
+				tls_context.allocated = current->next;
 			}
 
-			free(current->last_error_str);
-			free(current);
-			return;
+			struct tls_allocation *current_tmp = current;
+			current = current->next;
+			free(current_tmp);
+		}
+		else
+		{
+			prev = current;
+			current = current->next;
+		}
+	}
+
+	LeaveCriticalSection(&tls_context.critical_section);
+}
+
+static void tls_free_all_threads(hid_device *dev, BOOLEAN all_devices)
+{
+	tls_free(0, dev, all_devices);
+}
+
+static void tls_exit()
+{
+	if (!tls_context.critical_section_ready)
+	{
+		return;
+	}
+
+	tls_free_all_threads(NULL, TRUE);
+	DeleteCriticalSection(&tls_context.critical_section);
+	tls_context.critical_section_ready = FALSE;
+}
+
+static void free_error_buffer(struct device_error **error, hid_device *dev, BOOLEAN all_devices)
+{
+	if (error == NULL)
+	{
+		return;
+	}
+
+	struct device_error *current = *error;
+
+	if (all_devices)
+	{
+		while (current)
+		{
+			struct device_error *current_tmp = current;
+			current = current->next;
+			free(current_tmp->last_error_str);
+			free(current_tmp);
 		}
 
-		prev = current;
-		current = current->next;
+		*error = NULL;
+	}
+	else
+	{
+		struct device_error *prev = NULL;
+
+		while (current)
+		{
+			if ((dev == NULL && current->device_handle == NULL) ||
+				(dev != NULL && dev->device_handle == current->device_handle))
+			{
+				if (prev)
+				{
+					prev->next = current->next;
+				}
+				else
+				{
+					*error = current->next;
+				}
+
+				free(current->last_error_str);
+				free(current);
+				break;
+			}
+
+			prev = current;
+			current = current->next;
+		}
 	}
 }
 
@@ -274,7 +432,7 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->device_handle);
-	free_error_buffer(dev);
+	tls_free_all_threads(dev, FALSE);
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
@@ -363,17 +521,13 @@ static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 
 static wchar_t** get_error_buffer(hid_device *dev)
 {
-	if (dev == NULL)
-	{
-		return NULL;
-	}
-
-	struct hid_device_error *current = global_device_error;
-	struct hid_device_error *prev = NULL;
+	struct device_error *current = device_error;
+	struct device_error *prev = NULL;
 
 	while (current)
 	{
-		if (dev->device_handle == current->device_handle)
+		if ((dev == NULL && current->device_handle == NULL) ||
+			(dev != NULL && dev->device_handle == current->device_handle))
 		{
 			return &current->last_error_str;
 		}
@@ -382,35 +536,32 @@ static wchar_t** get_error_buffer(hid_device *dev)
 		current = current->next;
 	}
 
-	struct hid_device_error *device_error = (struct hid_device_error*) malloc(sizeof(struct hid_device_error));
-	device_error->device_handle = dev->device_handle;
-	device_error->last_error_str = NULL;
-	device_error->next = NULL;
+	struct device_error *error = (struct device_error*) malloc(sizeof(struct device_error));
+	error->device_handle = dev != NULL ? dev->device_handle : NULL;
+	error->last_error_str = NULL;
+	error->next = NULL;
 
 	if (prev)
 	{
-		prev->next = device_error;
+		prev->next = error;
 	}
 	else
 	{
-		global_device_error = device_error;
+		device_error = error;
+		tls_register(device_error, (tls_destructor)&free_error_buffer);
 	}
 
-	return &device_error->last_error_str;
+	return &error->last_error_str;
 }
 
 static wchar_t* get_error_str(hid_device *dev)
 {
-	if (dev == NULL)
-	{
-		return NULL;
-	}
-
-	struct hid_device_error *current = global_device_error;
+	struct device_error *current = device_error;
 
 	while (current)
 	{
-		if (dev->device_handle == current->device_handle)
+		if ((dev == NULL && current->device_handle == NULL) ||
+			(dev != NULL && dev->device_handle == current->device_handle))
 		{
 			return current->last_error_str;
 		}
@@ -433,16 +584,16 @@ static void register_string_error(hid_device *dev, const WCHAR *string_error)
 	register_string_error_to_buffer(error_buffer, string_error);
 }
 
-static thread_local wchar_t *last_global_error_str = NULL;
-
 static void register_global_winapi_error(const WCHAR *op)
 {
-	register_winapi_error_to_buffer(&last_global_error_str, op);
+	wchar_t **error_buffer = get_error_buffer(NULL);
+	register_winapi_error_to_buffer(error_buffer, op);
 }
 
 static void register_global_error(const WCHAR *string_error)
 {
-	register_string_error_to_buffer(&last_global_error_str, string_error);
+	wchar_t **error_buffer = get_error_buffer(NULL);
+	register_string_error_to_buffer(error_buffer, string_error);
 }
 
 static HANDLE open_device(const wchar_t *path, BOOL open_rw)
@@ -472,8 +623,23 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
+{
+    switch (reason) 
+    { 
+        case DLL_THREAD_DETACH:
+		{
+			DWORD thread_id = GetCurrentThreadId();
+			tls_free(thread_id, NULL, TRUE);
+			break;
+		}
+    }
+    return TRUE;
+}
+
 int HID_API_EXPORT hid_init(void)
 {
+	tls_init();
 	register_global_error(NULL);
 #ifndef HIDAPI_USE_DDK
 	if (!hidapi_initialized) {
@@ -493,7 +659,7 @@ int HID_API_EXPORT hid_exit(void)
 	free_library_handles();
 	hidapi_initialized = FALSE;
 #endif
-	register_global_error(NULL);
+	tls_exit();
 	return 0;
 }
 
@@ -1636,16 +1802,10 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
-	if (dev) {
-		wchar_t *error_str = get_error_str(dev);
-		if (error_str == NULL)
-			return L"Success";
-		return (wchar_t*)error_str;
-	}
-
-	if (last_global_error_str == NULL)
+	wchar_t *error_str = get_error_str(dev);
+	if (error_str == NULL)
 		return L"Success";
-	return last_global_error_str;
+	return error_str;
 }
 
 #ifndef hidapi_winapi_EXPORTS
