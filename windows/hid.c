@@ -1054,25 +1054,22 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		read_handle = open_device(event_data->u.DeviceInterface.SymbolicLink, FALSE);
 
 		/* Check validity of read_handle. */
-		if (read_handle == INVALID_HANDLE_VALUE) {
-			/* Unable to open the device. */
-			return ERROR_SUCCESS;
-		}
+		if (read_handle != INVALID_HANDLE_VALUE) {
+			device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink, read_handle);
 
-		device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink, read_handle);
-
-		/* Append to the end of the device list */
-		if (hid_hotplug_context.devs != NULL) {
-			struct hid_device_info *last = hid_hotplug_context.devs;
-			while (last->next != NULL) {
-				last = last->next;
+			/* Append to the end of the device list */
+			if (hid_hotplug_context.devs != NULL) {
+				struct hid_device_info *last = hid_hotplug_context.devs;
+				while (last->next != NULL) {
+					last = last->next;
+				}
+				last->next = device;
+			} else {
+				hid_hotplug_context.devs = device;
 			}
-			last->next = device;
-		} else {
-			hid_hotplug_context.devs = device;
-		}
 
-		CloseHandle(read_handle);
+			CloseHandle(read_handle);
+		}
 	} else if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL) {
 		char *path;
 
@@ -1080,22 +1077,20 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 
 		path = hid_internal_UTF16toUTF8(event_data->u.DeviceInterface.SymbolicLink);
 
-		if (path == NULL) {
-			return ERROR_SUCCESS;
-		}
-
-		/* Get and remove this device from the device list */
-		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current; current = &(*current)->next) {
-			/* Case-independent path comparison is mandatory */
-			if (_stricmp((*current)->path, path) == 0) {
-				struct hid_device_info *next = (*current)->next;
-				device = *current;
-				*current = next;
-				break;
+		if (path != NULL) {
+			/* Get and remove this device from the device list */
+			for (struct hid_device_info **current = &hid_hotplug_context.devs; *current; current = &(*current)->next) {
+				/* Case-independent path comparison is mandatory */
+				if (_stricmp((*current)->path, path) == 0) {
+					struct hid_device_info *next = (*current)->next;
+					device = *current;
+					*current = next;
+					break;
+				}
 			}
-		}
 
-		free(path);
+			free(path);
+		}
 	}
 
 	if (device) {
