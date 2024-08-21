@@ -262,11 +262,19 @@ static hid_device *new_hid_device()
 	return dev;
 }
 
-static void tls_init()
+static void tls_init_context()
 {
 	if (!tls_context.critical_section_ready) {
 		InitializeCriticalSection(&tls_context.critical_section);
 		tls_context.critical_section_ready = TRUE;
+	}
+}
+
+static void tls_exit_context()
+{
+	if (tls_context.critical_section_ready) {
+		DeleteCriticalSection(&tls_context.critical_section);
+		tls_context.critical_section_ready = FALSE;
 	}
 }
 
@@ -348,17 +356,6 @@ static void tls_free(DWORD thread_id, hid_device *dev, BOOLEAN all_devices)
 static void tls_free_all_threads(hid_device *dev, BOOLEAN all_devices)
 {
 	tls_free(0, dev, all_devices);
-}
-
-static void tls_exit()
-{
-	if (!tls_context.critical_section_ready) {
-		return;
-	}
-
-	tls_free_all_threads(NULL, TRUE);
-	DeleteCriticalSection(&tls_context.critical_section);
-	tls_context.critical_section_ready = FALSE;
 }
 
 static void free_error_buffer(struct device_error **error, hid_device *dev, BOOLEAN all_devices)
@@ -597,18 +594,25 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     switch (reason) { 
-        case DLL_THREAD_DETACH: {
-			DWORD thread_id = GetCurrentThreadId();
-			tls_free(thread_id, NULL, TRUE);
-			break;
-		}
+	case DLL_PROCESS_ATTACH:
+		tls_init_context();
+		break;
+
+	case DLL_PROCESS_DETACH:
+		tls_exit_context();
+		break;
+
+    case DLL_THREAD_DETACH: {
+		DWORD thread_id = GetCurrentThreadId();
+		tls_free(thread_id, NULL, TRUE);
+		break;
+	}
     }
     return TRUE;
 }
 
 int HID_API_EXPORT hid_init(void)
 {
-	tls_init();
 	register_global_error(NULL);
 #ifndef HIDAPI_USE_DDK
 	if (!hidapi_initialized) {
@@ -628,7 +632,7 @@ int HID_API_EXPORT hid_exit(void)
 	free_library_handles();
 	hidapi_initialized = FALSE;
 #endif
-	tls_exit();
+	tls_free_all_threads(NULL, TRUE);
 	return 0;
 }
 
