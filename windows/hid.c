@@ -192,8 +192,7 @@ err:
 
 typedef void (*tls_destructor)(void *data, hid_device *dev, BOOLEAN all);
 
-struct tls_allocation
-{
+struct tls_allocation {
 	void *data;
 	DWORD thread_id;
 	tls_destructor destructor;
@@ -201,16 +200,14 @@ struct tls_allocation
 	struct tls_allocation *next;
 };
 
-struct device_error
-{
+struct device_error {
 	HANDLE device_handle;
 	wchar_t *last_error_str;
 
 	struct device_error *next;
 };
 
-struct tls_context
-{
+struct tls_context {
 	struct tls_allocation *allocated;
 	CRITICAL_SECTION critical_section;
 	BOOLEAN critical_section_ready;
@@ -267,8 +264,7 @@ static hid_device *new_hid_device()
 
 static void tls_init()
 {
-	if (!tls_context.critical_section_ready)
-	{
+	if (!tls_context.critical_section_ready) {
 		InitializeCriticalSection(&tls_context.critical_section);
 		tls_context.critical_section_ready = TRUE;
 	}
@@ -276,8 +272,7 @@ static void tls_init()
 
 static void tls_register(void* data, tls_destructor destructor)
 {
-	if (!tls_context.critical_section_ready)
-	{
+	if (!tls_context.critical_section_ready) {
 		return;
 	}
 
@@ -288,8 +283,7 @@ static void tls_register(void* data, tls_destructor destructor)
 	struct tls_allocation *current = tls_context.allocated;
 	struct tls_allocation *prev = NULL;
 
-	while (current)
-	{
+	while (current)	{
 		prev = current;
 		current = current->next;
 	}
@@ -300,12 +294,10 @@ static void tls_register(void* data, tls_destructor destructor)
 	tls->destructor = destructor;
 	tls->next = NULL;
 
-	if (prev)
-	{
+	if (prev) {
 		prev->next = tls;
 	}
-	else
-	{
+	else {
 		tls_context.allocated = tls;
 	}
 
@@ -314,8 +306,7 @@ static void tls_register(void* data, tls_destructor destructor)
 
 static void tls_free(DWORD thread_id, hid_device *dev, BOOLEAN all_devices)
 {
-	if (!tls_context.critical_section_ready)
-	{
+	if (!tls_context.critical_section_ready) {
 		return;
 	}
 
@@ -324,10 +315,8 @@ static void tls_free(DWORD thread_id, hid_device *dev, BOOLEAN all_devices)
 	struct tls_allocation *current = tls_context.allocated;
 	struct tls_allocation *prev = NULL;
 
-	while (current)
-	{
-		if (thread_id != 0 && thread_id != current->thread_id)
-		{
+	while (current)	{
+		if (thread_id != 0 && thread_id != current->thread_id) {
 			prev = current;
 			current = current->next;
 			continue;
@@ -335,14 +324,11 @@ static void tls_free(DWORD thread_id, hid_device *dev, BOOLEAN all_devices)
 
 		current->destructor(&current->data, dev, all_devices);
 
-		if (current->data == NULL)
-		{
-			if (prev)
-			{
+		if (current->data == NULL) {
+			if (prev) {
 				prev->next = current->next;
 			}
-			else
-			{
+			else {
 				tls_context.allocated = current->next;
 			}
 
@@ -350,8 +336,7 @@ static void tls_free(DWORD thread_id, hid_device *dev, BOOLEAN all_devices)
 			current = current->next;
 			free(current_tmp);
 		}
-		else
-		{
+		else {
 			prev = current;
 			current = current->next;
 		}
@@ -367,8 +352,7 @@ static void tls_free_all_threads(hid_device *dev, BOOLEAN all_devices)
 
 static void tls_exit()
 {
-	if (!tls_context.critical_section_ready)
-	{
+	if (!tls_context.critical_section_ready) {
 		return;
 	}
 
@@ -379,17 +363,14 @@ static void tls_exit()
 
 static void free_error_buffer(struct device_error **error, hid_device *dev, BOOLEAN all_devices)
 {
-	if (error == NULL)
-	{
+	if (error == NULL) {
 		return;
 	}
 
 	struct device_error *current = *error;
 
-	if (all_devices)
-	{
-		while (current)
-		{
+	if (all_devices) {
+		while (current) {
 			struct device_error *current_tmp = current;
 			current = current->next;
 			free(current_tmp->last_error_str);
@@ -402,17 +383,13 @@ static void free_error_buffer(struct device_error **error, hid_device *dev, BOOL
 	{
 		struct device_error *prev = NULL;
 
-		while (current)
-		{
+		while (current)	{
 			if ((dev == NULL && current->device_handle == NULL) ||
-				(dev != NULL && dev->device_handle == current->device_handle))
-			{
-				if (prev)
-				{
+				(dev != NULL && dev->device_handle == current->device_handle)) {
+				if (prev) {
 					prev->next = current->next;
 				}
-				else
-				{
+				else {
 					*error = current->next;
 				}
 
@@ -524,11 +501,9 @@ static wchar_t** get_error_buffer(hid_device *dev)
 	struct device_error *current = device_error;
 	struct device_error *prev = NULL;
 
-	while (current)
-	{
+	while (current) {
 		if ((dev == NULL && current->device_handle == NULL) ||
-			(dev != NULL && dev->device_handle == current->device_handle))
-		{
+			(dev != NULL && dev->device_handle == current->device_handle)) {
 			return &current->last_error_str;
 		}
 
@@ -541,12 +516,10 @@ static wchar_t** get_error_buffer(hid_device *dev)
 	error->last_error_str = NULL;
 	error->next = NULL;
 
-	if (prev)
-	{
+	if (prev) {
 		prev->next = error;
 	}
-	else
-	{
+	else {
 		device_error = error;
 		tls_register(device_error, (tls_destructor)&free_error_buffer);
 	}
@@ -558,11 +531,9 @@ static wchar_t* get_error_str(hid_device *dev)
 {
 	struct device_error *current = device_error;
 
-	while (current)
-	{
+	while (current) {
 		if ((dev == NULL && current->device_handle == NULL) ||
-			(dev != NULL && dev->device_handle == current->device_handle))
-		{
+			(dev != NULL && dev->device_handle == current->device_handle)) {
 			return current->last_error_str;
 		}
 
@@ -625,10 +596,8 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
-    switch (reason) 
-    { 
-        case DLL_THREAD_DETACH:
-		{
+    switch (reason) { 
+        case DLL_THREAD_DETACH: {
 			DWORD thread_id = GetCurrentThreadId();
 			tls_free(thread_id, NULL, TRUE);
 			break;
