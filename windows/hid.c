@@ -593,7 +593,7 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
-    switch (reason) { 
+	switch (reason) { 
 	case DLL_PROCESS_ATTACH:
 		tls_init_context();
 		break;
@@ -602,13 +602,13 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 		tls_exit_context();
 		break;
 
-    case DLL_THREAD_DETACH: {
+	case DLL_THREAD_DETACH: {
 		DWORD thread_id = GetCurrentThreadId();
 		tls_free(thread_id, NULL, TRUE);
 		break;
 	}
-    }
-    return TRUE;
+	}
+	return TRUE;
 }
 
 int HID_API_EXPORT hid_init(void)
