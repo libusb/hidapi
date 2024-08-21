@@ -593,6 +593,9 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
+	(void)instance;
+	(void)reserved;
+
 	switch (reason) { 
 	case DLL_PROCESS_ATTACH:
 		tls_init_context();
