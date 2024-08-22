@@ -190,7 +190,7 @@ err:
 
 #endif /* HIDAPI_USE_DDK */
 
-typedef void (*tls_destructor)(void *data, hid_device *dev, BOOLEAN all);
+typedef void (*tls_destructor)(void **data, hid_device *dev, BOOLEAN all_devices);
 
 struct tls_allocation {
 	void *data;
