@@ -123,6 +123,9 @@ struct hid_device_ {
 #ifdef DETACH_KERNEL_DRIVER
 	int is_driver_detached;
 #endif
+
+	int error;
+	const char *error_context;
 };
 
 static struct hid_api_version api_version = {
@@ -140,6 +143,8 @@ static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
 	dev->blocking = 1;
+	dev->error = LIBUSB_SUCCESS;
+	dev->error_context = NULL;
 
 	hidapi_thread_state_init(&dev->thread_state);
 
