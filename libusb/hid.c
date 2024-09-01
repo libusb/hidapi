@@ -394,6 +394,29 @@ err:
 	return w;
 }
 
+static wchar_t *libusb_error_wchar(int e, const char * (*f)(int))
+{
+	const char *cs;
+	char *s;
+	wchar_t *w;
+
+	cs = f(e);
+	s = strdup(cs);
+	w = utf8_to_wchar(s);
+
+	free(s);
+
+	return w;
+}
+
+static wchar_t *libusb_error_name_wchar(int error) {
+	return libusb_error_wchar(error, libusb_error_name);
+}
+
+static wchar_t *libusb_strerror_wchar(int error) {
+	return libusb_error_wchar(error, libusb_strerror);
+}
+
 
 /* This function returns a newly allocated wide string containing the USB
    device string numbered by the index. The returned string must be freed
