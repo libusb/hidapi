@@ -340,6 +340,60 @@ static int is_language_supported(libusb_device_handle *dev, uint16_t lang)
 	return 0;
 }
 
+static wchar_t *utf8_to_wchar(char *s)
+{
+	wchar_t *w = NULL;
+
+/* we don't use iconv on Android, or when it is explicitly disabled */
+#if defined(__ANDROID__) || defined(NO_ICONV)
+
+	w = wcsdup(L"not implemented");
+
+#else
+	size_t slen = strlen(s);
+	wchar_t *wbuf = malloc((slen + 1) * sizeof(wchar_t));
+	if (!wbuf) { goto err; }
+	/* iconv variables */
+	iconv_t ic;
+	size_t inbytes;
+	size_t outbytes;
+	size_t res;
+	char ** restrict inptr;
+	char *outptr;
+	/* buf does not need to be explicitly NULL-terminated because
+	   it is only passed into iconv() which does not need it. */
+
+	/* Initialize iconv. */
+	ic = iconv_open("WCHAR_T", "UTF-8");
+	if (ic == (iconv_t)-1) {
+		LOG("iconv_open() failed\n");
+		return NULL;
+	}
+
+	/* Convert to native wchar_t (UTF-32 on glibc/BSD systems). */
+	inptr = &s;
+	inbytes = slen;
+	outptr = (char*) wbuf;
+	outbytes = slen * sizeof(wchar_t);
+	res = iconv(ic, inptr, &inbytes, &outptr, &outbytes);
+	if (res == (size_t)-1) {
+		LOG("iconv() failed\n");
+		goto err;
+	}
+
+	/* Write the terminating NULL. */
+	wbuf[slen] = 0;
+
+	w = wbuf;
+
+err:
+	iconv_close(ic);
+
+#endif
+
+	return w;
+}
+
 
 /* This function returns a newly allocated wide string containing the USB
    device string numbered by the index. The returned string must be freed
