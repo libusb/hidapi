@@ -1669,8 +1669,31 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 		(unsigned char *)data, length,
 		1000/*timeout millis*/);
 
-	if (res < 0)
+	if (res < 0) {
+		const char *context = NULL;
+
+		switch (res) {
+		case LIBUSB_ERROR_TIMEOUT:
+			context = "Transfer timed out";
+			break;
+		case LIBUSB_ERROR_PIPE:
+			context = "Control request not supported by device";
+			break;
+		case LIBUSB_ERROR_NO_DEVICE:
+			context = "Device has disconnected";
+			break;
+		case LIBUSB_ERROR_BUSY:
+			context = "Called from event handling context";
+			break;
+		case LIBUSB_ERROR_INVALID_PARAM:
+			context = "Transfer size larger than supported";
+			break;
+		}
+
+		set_error(dev, res, context);
+
 		return -1;
+	}
 
 	/* Account for the report ID */
 	if (skipped_report_id)
