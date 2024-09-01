@@ -422,6 +422,11 @@ static wchar_t *libusb_strerror_wchar(int error) {
 	return libusb_error_wchar(error, libusb_strerror);
 }
 
+static void set_error(hid_device *dev, int error, const char *error_context)
+{
+	dev->error = error;
+	dev->error_context = error_context;
+}
 
 /* This function returns a newly allocated wide string containing the USB
    device string numbered by the index. The returned string must be freed
