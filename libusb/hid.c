@@ -1888,11 +1888,38 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 	return hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
 }
 
-
 HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 {
-	(void)dev;
-	return L"hid_error is not implemented yet";
+	static const char format_simple[] = "%s: %s";
+	static const char format_context[] = "%s: %s (%s)";
+	const char *name, *message, *context, *format;
+	char *buffer;
+	wchar_t *w;
+	size_t len;
+
+	if (dev->error == LIBUSB_SUCCESS) {
+		return NULL;
+	}
+
+	name = libusb_error_name(dev->error);
+	message = libusb_strerror(dev->error);
+	context = dev->error_context;
+	format = context? format_context : format_simple;
+
+	len = 1 + snprintf(NULL, 0, format, name, message, context);
+
+	buffer = malloc(len);
+	if (!buffer) {
+		return NULL;
+	}
+
+	snprintf(buffer, len, format, name, message, context);
+
+	w = utf8_to_wchar(buffer);
+
+	free(buffer);
+
+	return w;
 }
 
 
