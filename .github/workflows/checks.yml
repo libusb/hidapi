@@ -83,7 +83,7 @@ jobs:
     - name: Configure
       run: |
         cmake -B build -S src -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_HIDTEST=ON -DCMAKE_C_COMPILER=clang
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: coverity-logs-windows
         path: build/cov-int
@@ -145,7 +145,7 @@ jobs:
     - name: Configure
       run: |
         cmake -B build -S src -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_HIDTEST=ON -DCMAKE_C_COMPILER=gcc
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
         name: coverity-logs-windows-macos
         path: build/cov-int

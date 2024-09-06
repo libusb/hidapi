@@ -45,7 +45,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: downlod artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: HIDAPI_doxygen_docs
           path: docs
