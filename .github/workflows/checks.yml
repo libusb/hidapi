@@ -63,7 +63,7 @@ jobs:
         cov-build --dir cov-int nmake
         Rename-Item ".\cov-int\emit\$(hostname)" hostname
     - name: Backup Coverity logs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverity-logs-windows
         path: build/cov-int
@@ -123,7 +123,7 @@ jobs:
         cov-build --dir cov-int --append-log ninja
         mv cov-int/emit/$(hostname) cov-int/emit/hostname
     - name: Backup Coverity logs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverity-logs-windows-macos
         path: build/cov-int
@@ -191,7 +191,7 @@ jobs:
           https://scan.coverity.com/builds?project=hidapi
         mv cov-int/emit/$(hostname) cov-int/emit/hostname
     - name: Backup Coverity logs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverity-logs-windows-macos-linux
         path: build/cov-int
