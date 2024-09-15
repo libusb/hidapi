@@ -511,7 +511,7 @@ static int parse_hid_vid_pid_from_uevent_path(const char *uevent_path, unsigned 
 		return 0;
 	}
 
-	char buf[1024];
+	char buf[1024] = {0};
 	res = read(handle, buf, sizeof(buf) - 1); /* -1 for '\0' at the end */
 	close(handle);
 
