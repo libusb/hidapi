@@ -299,7 +299,7 @@ static inline int libusb_get_string_descriptor(libusb_device_handle *dev,
 
 static wchar_t *ctowcdup(const char *s, size_t slen)
 {
-	int i;
+	size_t i;
 
 	size_t wchar_len = slen;
 	wchar_t *wbuf = (wchar_t*) malloc((wchar_len + 1) * sizeof(wchar_t));
@@ -307,7 +307,7 @@ static wchar_t *ctowcdup(const char *s, size_t slen)
 	if (!wbuf)
 		return NULL;
 
-	for (i = 0; i < wchar_len; i++) {
+	for (i = 0u; i < wchar_len; i++) {
 		wbuf[i] = s[i];
 	}
 
@@ -413,7 +413,7 @@ static wchar_t *utf16le_to_wchar(char *utf16, size_t utf16bytes)
 	   and will incorrectly convert any code points which require more
 	   than one UTF-16 character. */
 
-	int i;
+	size_t i;
 
 	size_t wchar_len = utf16bytes / 2;
 	wchar_t *wbuf = (wchar_t*) malloc((wchar_len + 1) * sizeof(wchar_t));
@@ -421,7 +421,7 @@ static wchar_t *utf16le_to_wchar(char *utf16, size_t utf16bytes)
 	if (!wbuf)
 		return NULL;
 
-	for (i = 0; i < wchar_len; i++) {
+	for (i = 0u; i < wchar_len; i++) {
 		wbuf[i] = utf16[i * 2] | (utf16[i * 2 + 1] << 8);
 	}
 
