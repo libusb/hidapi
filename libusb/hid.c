@@ -335,7 +335,7 @@ static void register_string_error(hid_device *dev, const char *error)
 
 
 /* we don't use iconv on Android, or when it is explicitly disabled */
-#if defined(__ANDROID__) || defined(NO_ICONV)
+#if !defined(__ANDROID__) && !defined(NO_ICONV)
 
 /* iconv implementations */
 
@@ -348,6 +348,7 @@ static wchar_t *utf_to_wchar(char *utf, size_t utfbytes, const char *fromcode, s
 	ICONV_CONST char *inptr;
 	char *outptr;
 	wchar_t *wbuf = NULL;
+	size_t wbuf_size;
 
 	/* Initialize iconv. */
 	ic = iconv_open("WCHAR_T", fromcode);
@@ -356,15 +357,16 @@ static wchar_t *utf_to_wchar(char *utf, size_t utfbytes, const char *fromcode, s
 		return NULL;
 	}
 
-	wbuf = malloc((max_expected_wchar + 1) * sizeof(wchar_t));
+	wbuf_size = (max_expected_wchar + 1) * sizeof(wchar_t);
+	wbuf = malloc(wbuf_size);
 	if (!wbuf) {
 		goto end;
 	}
 
-	inptr = s;
-	inbytes = slen;
+	inptr = utf;
+	inbytes = utfbytes;
 	outptr = (char*) wbuf;
-	outbytes = (max_expected_wchar + 1) * sizeof(wchar_t);
+	outbytes = wbuf_size;
 	res = iconv(ic, &inptr, &inbytes, &outptr, &outbytes);
 	if (res == (size_t)-1) {
 		LOG("iconv() failed\n");
@@ -494,7 +496,7 @@ static int is_language_supported(libusb_device_handle *dev, uint16_t lang)
 /* This function returns a newly allocated wide string containing the USB
    device string numbered by the index. The returned string must be freed
    by using free(). */
-static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
+static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx, int *res)
 {
 	char buf[512];
 	int len;
@@ -511,6 +513,7 @@ static wchar_t *get_usb_string(libusb_device_handle *dev, uint8_t idx)
 			lang,
 			(unsigned char*)buf,
 			sizeof(buf));
+	*res = len;
 
 	if (len < 2) /* we always skip first 2 bytes */
 		return NULL;
@@ -682,6 +685,7 @@ static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, lib
  */
 static struct hid_device_info * create_device_info_for_device(libusb_device *device, libusb_device_handle *handle, struct libusb_device_descriptor *desc, int config_number, int interface_num)
 {
+	int res = 0;
 	struct hid_device_info *cur_dev = calloc(1, sizeof(struct hid_device_info));
 	if (cur_dev == NULL) {
 		return NULL;
@@ -704,13 +708,13 @@ static struct hid_device_info * create_device_info_for_device(libusb_device *dev
 	}
 
 	if (desc->iSerialNumber > 0)
-		cur_dev->serial_number = get_usb_string(handle, desc->iSerialNumber);
+		cur_dev->serial_number = get_usb_string(handle, desc->iSerialNumber, &res);
 
 	/* Manufacturer and Product strings */
 	if (desc->iManufacturer > 0)
-		cur_dev->manufacturer_string = get_usb_string(handle, desc->iManufacturer);
+		cur_dev->manufacturer_string = get_usb_string(handle, desc->iManufacturer, &res);
 	if (desc->iProduct > 0)
-		cur_dev->product_string = get_usb_string(handle, desc->iProduct);
+		cur_dev->product_string = get_usb_string(handle, desc->iProduct, &res);
 
 	return cur_dev;
 }
@@ -1499,9 +1503,12 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 		return hid_send_output_report(dev, data, length);
 	}
 
-	if (!data || (length ==0)) {
+	if (!data || !length) {
+		register_string_error(dev, "Zero buffer/length");
 		return -1;
 	}
+
+	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
 
 	report_number = data[0];
 
@@ -1519,8 +1526,10 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 		(int)length,
 		&actual_length, 1000);
 
-	if (res < 0)
+	if (res < 0) {
+		register_libusb_error(dev, res, "hid_write");
 		return -1;
+	}
 
 	if (skipped_report_id)
 		actual_length++;
@@ -1586,7 +1595,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		/* This means the device has been disconnected.
 		   An error code of -1 should be returned. */
 		bytes_read = -1;
-		register_string_error(dev, "Cannot read - device is closing");
+		register_string_error(dev, "hid_read(_timeout): device is closing");
 		goto ret;
 	}
 
@@ -1626,7 +1635,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			else {
 				/* Error. */
 				bytes_read = -1;
-				register_string_error(dev, "hid_read: error waiting for data");
+				register_string_error(dev, "hid_read(_timeout): error waiting for data");
 				break;
 			}
 		}
@@ -1662,6 +1671,11 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 	int skipped_report_id = 0;
 	int report_number = data[0];
 
+	if (!data || !length) {
+		register_string_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
 
 	if (report_number == 0x0) {
@@ -1695,6 +1709,11 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	int res = -1;
 	int skipped_report_id = 0;
 	int report_number = data[0];
+
+	if (!data || !length) {
+		register_string_error(dev, "Zero buffer/length");
+		return -1;
+	}
 
 	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
 
@@ -1730,6 +1749,11 @@ int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *
 	int skipped_report_id = 0;
 	int report_number = data[0];
 
+	if (!data || !length) {
+		register_string_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
 
 	if (report_number == 0x0) {
@@ -1763,6 +1787,11 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 	int res = -1;
 	int skipped_report_id = 0;
 	int report_number = data[0];
+
+	if (!data || !length) {
+		register_string_error(dev, "Zero buffer/length");
+		return -1;
+	}
 
 	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
 
@@ -1851,6 +1880,8 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 }
 
 HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
+	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+
 	if (!dev->device_info) {
 		struct libusb_device_descriptor desc;
 		libusb_device *usb_device = libusb_get_device(dev->device_handle);
@@ -1861,6 +1892,9 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 		if (dev->device_info) {
 			fill_device_info_usage(dev->device_info, dev->device_handle, dev->interface, dev->report_descriptor_size);
 		}
+		else {
+			register_string_error(dev, "hid_get_device_info: failed to allocate device info");
+		}
 	}
 
 	return dev->device_info;
@@ -1869,25 +1903,47 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index, wchar_t *string, size_t maxlen)
 {
 	wchar_t *str;
+	int res = 0;
+
+	if (!string || !maxlen) {
+		register_string_error(dev, "Zero buffer/length");
+		return -1;
+	}
 
 	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
 
-	str = get_usb_string(dev->device_handle, string_index);
+	str = get_usb_string(dev->device_handle, string_index, &res);
 	if (str) {
 		wcsncpy(string, str, maxlen);
 		string[maxlen-1] = L'\0';
 		free(str);
 		return 0;
 	}
-	else
+	else {
+		if (res < 0) {
+			register_libusb_error(dev, res, "hid_get_indexed_string");
+		}
+		else {
+			register_string_error(dev, "hid_get_indexed_string: failed to allocate result string");
+		}
 		return -1;
+	}
 }
 
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
 {
+	int res = 0;
+
+	if (!buf || !buf_size) {
+		register_string_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
-	int res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
+
+	res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
+
 	if (res < 0) {
 		register_libusb_error(dev, res, "hid_get_report_descriptor");
 		return -1;
@@ -1940,7 +1996,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 		return L"Error string memory allocation error";
 	}
 
-	len = snprintf(buffer, len, "%s: (%s) %s", context, name, description);
+	len = snprintf(buffer, len + 1, "%s: (%s) %s", context, name, description);
 
 	if (len <= 0) {
 		free(buffer);
