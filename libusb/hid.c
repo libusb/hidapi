@@ -85,6 +85,18 @@ struct input_report {
 };
 
 
+typedef struct hidapi_error_ctx_ {
+	enum libusb_error error_code;
+	/* designed to hold string literals only - do not free */
+	const char *error_context;
+
+	enum libusb_error last_error_code_cache;
+	const char *last_error_context_cache;
+	/* dynamically allocated */
+	wchar_t *last_error_str;
+} hidapi_error_ctx;
+
+
 struct hid_device_ {
 	/* Handle to the actual device. */
 	libusb_device_handle *device_handle;
@@ -124,14 +136,7 @@ struct hid_device_ {
 	int is_driver_detached;
 #endif
 
-	enum libusb_error error_code;
-	/* designed to hold string literals only - do not free */
-	const char *error_context;
-
-	enum libusb_error last_error_code_cache;
-	const char *last_error_context_cache;
-	/* dynamically allocated */
-	wchar_t *last_error_str;
+	hidapi_error_ctx error;
 };
 
 static struct hid_api_version api_version = {
@@ -155,13 +160,18 @@ static hid_device *new_hid_device(void)
 	return dev;
 }
 
+static void free_hidapi_error(hidapi_error_ctx *err)
+{
+	free(err->last_error_str);
+}
+
 static void free_hid_device(hid_device *dev)
 {
 	/* Clean up the thread objects */
 	hidapi_thread_state_destroy(&dev->thread_state);
 
 	hid_free_enumeration(dev->device_info);
-	free(dev->last_error_str);
+	free_hidapi_error(&dev->error);
 
 	/* Free the device itself */
 	free(dev);
@@ -317,20 +327,20 @@ static wchar_t *ctowcdup(const char *s, size_t slen)
 }
 
 
-static void register_libusb_error(hid_device *dev, enum libusb_error error, const char *error_context)
+static void register_libusb_error(hidapi_error_ctx *err, enum libusb_error error, const char *error_context)
 {
-	dev->error_code = error;
-	dev->error_context = error_context;
+	err->error_code = error;
+	err->error_context = error_context;
 }
 
 
-static void register_string_error(hid_device *dev, const char *error)
+static void register_string_error(hidapi_error_ctx *err, const char *error)
 {
-	free(dev->last_error_str);
+	free(err->last_error_str);
 
-	dev->last_error_str = ctowcdup(error, strlen(error));
-	dev->error_code = dev->last_error_code_cache = 1;
-	dev->error_context = dev->last_error_context_cache = NULL;
+	err->last_error_str = ctowcdup(error, strlen(error));
+	err->error_code = err->last_error_code_cache = 1;
+	err->error_context = err->last_error_context_cache = NULL;
 }
 
 
@@ -1504,11 +1514,11 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 	}
 
 	if (!data || !length) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	report_number = data[0];
 
@@ -1527,7 +1537,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 		&actual_length, 1000);
 
 	if (res < 0) {
-		register_libusb_error(dev, res, "hid_write");
+		register_libusb_error(&dev->error, res, "hid_write");
 		return -1;
 	}
 
@@ -1573,11 +1583,11 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	int bytes_read; /* = -1; */
 
 	if (!data || !length) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	hidapi_thread_mutex_lock(&dev->thread_state);
 	hidapi_thread_cleanup_push(cleanup_mutex, dev);
@@ -1595,7 +1605,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		/* This means the device has been disconnected.
 		   An error code of -1 should be returned. */
 		bytes_read = -1;
-		register_string_error(dev, "hid_read(_timeout): device is closing");
+		register_string_error(&dev->error, "hid_read(_timeout): device is closing");
 		goto ret;
 	}
 
@@ -1635,7 +1645,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			else {
 				/* Error. */
 				bytes_read = -1;
-				register_string_error(dev, "hid_read(_timeout): error waiting for data");
+				register_string_error(&dev->error, "hid_read(_timeout): error waiting for data");
 				break;
 			}
 		}
@@ -1672,11 +1682,11 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 	int report_number = data[0];
 
 	if (!data || !length) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	if (report_number == 0x0) {
 		data++;
@@ -1693,7 +1703,7 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 		1000/*timeout millis*/);
 
 	if (res < 0) {
-		register_libusb_error(dev, res, "hid_send_feature_report");
+		register_libusb_error(&dev->error, res, "hid_send_feature_report");
 		return -1;
 	}
 
@@ -1711,11 +1721,11 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	int report_number = data[0];
 
 	if (!data || !length) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	if (report_number == 0x0) {
 		/* Offset the return buffer by 1, so that the report ID
@@ -1733,7 +1743,7 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 		1000/*timeout millis*/);
 
 	if (res < 0) {
-		register_libusb_error(dev, res, "hid_get_feature_report");
+		register_libusb_error(&dev->error, res, "hid_get_feature_report");
 		return -1;
 	}
 
@@ -1750,11 +1760,11 @@ int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *
 	int report_number = data[0];
 
 	if (!data || !length) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	if (report_number == 0x0) {
 		data++;
@@ -1771,7 +1781,7 @@ int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *
 		1000/*timeout millis*/);
 
 	if (res < 0) {
-		register_libusb_error(dev, res, "hid_send_output_report");
+		register_libusb_error(&dev->error, res, "hid_send_output_report");
 		return -1;
 	}
 
@@ -1789,11 +1799,11 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 	int report_number = data[0];
 
 	if (!data || !length) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	if (report_number == 0x0) {
 		/* Offset the return buffer by 1, so that the report ID
@@ -1811,7 +1821,7 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 		1000/*timeout millis*/);
 
 	if (res < 0) {
-		register_libusb_error(dev, res, "hid_get_input_report");
+		register_libusb_error(&dev->error, res, "hid_get_input_report");
 		return -1;
 	}
 
@@ -1880,7 +1890,7 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 }
 
 HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	if (!dev->device_info) {
 		struct libusb_device_descriptor desc;
@@ -1893,7 +1903,7 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 			fill_device_info_usage(dev->device_info, dev->device_handle, dev->interface, dev->report_descriptor_size);
 		}
 		else {
-			register_string_error(dev, "hid_get_device_info: failed to allocate device info");
+			register_string_error(&dev->error, "hid_get_device_info: failed to allocate device info");
 		}
 	}
 
@@ -1906,11 +1916,11 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	int res = 0;
 
 	if (!string || !maxlen) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	str = get_usb_string(dev->device_handle, string_index, &res);
 	if (str) {
@@ -1921,10 +1931,10 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	}
 	else {
 		if (res < 0) {
-			register_libusb_error(dev, res, "hid_get_indexed_string");
+			register_libusb_error(&dev->error, res, "hid_get_indexed_string");
 		}
 		else {
-			register_string_error(dev, "hid_get_indexed_string: failed to allocate result string");
+			register_string_error(&dev->error, "hid_get_indexed_string: failed to allocate result string");
 		}
 		return -1;
 	}
@@ -1936,16 +1946,16 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 	int res = 0;
 
 	if (!buf || !buf_size) {
-		register_string_error(dev, "Zero buffer/length");
+		register_string_error(&dev->error, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(dev, LIBUSB_SUCCESS, NULL);
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
 	res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
 
 	if (res < 0) {
-		register_libusb_error(dev, res, "hid_get_report_descriptor");
+		register_libusb_error(&dev->error, res, "hid_get_report_descriptor");
 		return -1;
 	}
 
@@ -1957,33 +1967,36 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 	const char *name, *description, *context;
 	char *buffer;
 	size_t len;
+	hidapi_error_ctx *err;
 
 	if (!dev) {
 		/* TODO: have a global error handling */
 		return L"Global hid_error is not implemented yet";
 	}
 
-	if (dev->error_code == LIBUSB_SUCCESS) {
+	err = &dev->error;
+
+	if (err->error_code == LIBUSB_SUCCESS) {
 		return L"Success";
 	}
 
-	if (dev->error_code == dev->last_error_code_cache
-	    && dev->error_context == dev->last_error_context_cache) {
-		if (dev->last_error_str)
-			return dev->last_error_str;
+	if (err->error_code == err->last_error_code_cache
+	    && err->error_context == err->last_error_context_cache) {
+		if (err->last_error_str)
+			return err->last_error_str;
 		else
 			return L"Error string memory allocation error";
 	}
 	else {
-		free(dev->last_error_str);
-		dev->last_error_str = NULL;
-		dev->last_error_code_cache = LIBUSB_SUCCESS;
-		dev->last_error_context_cache = NULL;
+		free(err->last_error_str);
+		err->last_error_str = NULL;
+		err->last_error_code_cache = LIBUSB_SUCCESS;
+		err->last_error_context_cache = NULL;
 	}
 
-	name = libusb_error_name(dev->error_code);
-	description = libusb_strerror(dev->error_code);
-	context = dev->error_context;
+	name = libusb_error_name(err->error_code);
+	description = libusb_strerror(err->error_code);
+	context = err->error_context;
 
 	len = snprintf(NULL, 0, "%s: (%s) %s", context, name, description);
 
@@ -2006,14 +2019,14 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 	buffer[len] = '\0';
 
 
-	dev->last_error_str = utf8_to_wchar(buffer, (size_t)len);
+	err->last_error_str = utf8_to_wchar(buffer, (size_t)len);
 
 	free(buffer);
 
-	if (dev->last_error_str != NULL) {
-		dev->last_error_code_cache = dev->error_code;
-		dev->last_error_context_cache = dev->error_context;
-		return dev->last_error_str;
+	if (err->last_error_str != NULL) {
+		err->last_error_code_cache = err->error_code;
+		err->last_error_context_cache = err->error_context;
+		return err->last_error_str;
 	}
 	else {
 		return L"Error string memory allocation error";
@@ -2028,7 +2041,7 @@ HID_API_EXPORT int HID_API_CALL hid_libusb_error(hid_device *dev)
 		return LIBUSB_SUCCESS;
 	}
 
-	return dev->error_code;
+	return dev->error.error_code;
 }
 
 
