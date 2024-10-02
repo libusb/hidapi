@@ -198,6 +198,10 @@ int main(int argc, char* argv[])
  		return 1;
 	}
 
+#if defined(_WIN32) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+	hid_winapi_set_write_timeout(handle, 5000);
+#endif
+
 	// Read the Manufacturer String
 	wstr[0] = 0x0000;
 	res = hid_get_manufacturer_string(handle, wstr, MAX_STR);
