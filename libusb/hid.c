@@ -1679,7 +1679,7 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 {
 	int res = -1;
 	int skipped_report_id = 0;
-	int report_number = data[0];
+	int report_number;
 
 	if (!data || !length) {
 		register_string_error(&dev->error, "Zero buffer/length");
@@ -1687,6 +1687,8 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 	}
 
 	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		data++;
@@ -1718,7 +1720,7 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 {
 	int res = -1;
 	int skipped_report_id = 0;
-	int report_number = data[0];
+	int report_number;
 
 	if (!data || !length) {
 		register_string_error(&dev->error, "Zero buffer/length");
@@ -1726,6 +1728,8 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 	}
 
 	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		/* Offset the return buffer by 1, so that the report ID
@@ -1757,7 +1761,7 @@ int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *
 {
 	int res = -1;
 	int skipped_report_id = 0;
-	int report_number = data[0];
+	int report_number;
 
 	if (!data || !length) {
 		register_string_error(&dev->error, "Zero buffer/length");
@@ -1765,6 +1769,8 @@ int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *
 	}
 
 	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		data++;
@@ -1796,7 +1802,7 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 {
 	int res = -1;
 	int skipped_report_id = 0;
-	int report_number = data[0];
+	int report_number;
 
 	if (!data || !length) {
 		register_string_error(&dev->error, "Zero buffer/length");
@@ -1804,6 +1810,8 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 	}
 
 	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+
+	report_number = data[0];
 
 	if (report_number == 0x0) {
 		/* Offset the return buffer by 1, so that the report ID
