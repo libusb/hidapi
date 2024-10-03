@@ -194,6 +194,7 @@ struct hid_device_ {
 		OVERLAPPED ol;
 		OVERLAPPED write_ol;
 		struct hid_device_info* device_info;
+		DWORD write_timeout_ms;
 };
 
 static hid_device *new_hid_device()
@@ -219,6 +220,7 @@ static hid_device *new_hid_device()
 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	dev->device_info = NULL;
+	dev->write_timeout_ms = 1000;
 
 	return dev;
 }
@@ -1052,6 +1054,11 @@ end_of_function:
 	return dev;
 }
 
+void HID_API_EXPORT_CALL hid_winapi_set_write_timeout(hid_device *dev, unsigned long timeout)
+{
+	dev->write_timeout_ms = timeout;
+}
+
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
 	DWORD bytes_written = 0;
@@ -1103,7 +1110,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 	if (overlapped) {
 		/* Wait for the transaction to complete. This makes
 		   hid_write() synchronous. */
-		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
+		res = WaitForSingleObject(dev->write_ol.hEvent, dev->write_timeout_ms);
 		if (res != WAIT_OBJECT_0) {
 			/* There was a Timeout. */
 			register_winapi_error(dev, L"hid_write/WaitForSingleObject");
