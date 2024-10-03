@@ -1045,7 +1045,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 
 end_of_function:
 	free(interface_path);
-	CloseHandle(device_handle);
+
+	if (device_handle != INVALID_HANDLE_VALUE) {
+		CloseHandle(device_handle);
+	}
 
 	if (pp_data) {
 		HidD_FreePreparsedData(pp_data);
@@ -1085,8 +1088,15 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		/* The user passed the right number of bytes. Use the buffer as-is. */
 		buf = (unsigned char *) data;
 	} else {
-		if (dev->write_buf == NULL)
+		if (dev->write_buf == NULL) {
 			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+
+			if (dev->write_buf == NULL) {
+				register_string_error(dev, L"hid_write/malloc");
+				goto end_of_function;
+			}
+		}
+
 		buf = dev->write_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->output_report_length - length);
@@ -1253,8 +1263,15 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		buf = (unsigned char *) data;
 		length_to_send = length;
 	} else {
-		if (dev->feature_buf == NULL)
+		if (dev->feature_buf == NULL) {
 			dev->feature_buf = (unsigned char *) malloc(dev->feature_report_length);
+
+			if (dev->feature_buf == NULL) {
+				register_string_error(dev, L"hid_send_feature_report/malloc");
+				return -1;
+			}
+		}
+
 		buf = dev->feature_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->feature_report_length - length);
@@ -1347,8 +1364,15 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const un
 		buf = (unsigned char *) data;
 		length_to_send = length;
 	} else {
-		if (dev->write_buf == NULL)
+		if (dev->write_buf == NULL) {
 			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+
+			if (dev->write_buf == NULL) {
+				register_string_error(dev, L"hid_send_output_report/malloc");
+				return -1;
+			}
+		}
+
 		buf = dev->write_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->output_report_length - length);
