@@ -537,7 +537,10 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			}
 		}
 
+		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
+	    // Windows pp_data are per top-level collection, therefore top level coll end is unique
+		struct rd_main_item_node* node_before_top_level_coll_end = NULL;
 
 		while (list->next != NULL)
 		{
@@ -552,12 +555,20 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 						struct rd_main_item_node *list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
 						rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID] + 1, list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
 					}
+					if (list->ReportID != 0) {
+						devicehasReportIDs = TRUE;
+					}
 					last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
 					last_report_item_lookup[list->MainItemType][list->ReportID] = list;
 				}
 			}
+			if (list->next->MainItemType == rd_collection_end) {
+				// Store the node before the collection end - the last occurence is the end of the top level collection
+				node_before_top_level_coll_end = list;
+			}
 			list = list->next;
 		}
+
 		// Add 8 bit padding at each report end
 		for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 			for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
@@ -566,7 +577,28 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 					if (padding < 8) {
 						// Insert padding item after item referenced in last_report_item_lookup
 						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+						if (last_report_item_lookup[rt_idx][reportid_idx] == node_before_top_level_coll_end) {
+							// If this padding item is at the end of the top level collection, update node_before_top_level_coll_end
+							node_before_top_level_coll_end = last_report_item_lookup[rt_idx][reportid_idx]->next;
+						}
+						last_bit_position[rt_idx][reportid_idx] += padding;
 					}
+				}
+			}
+		}
+
+		// Add full byte padding at the end of the report descriptor (only reconstructable, for devices without Report IDs)
+		for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+			if (!devicehasReportIDs && pp_data->caps_info[rt_idx].NumberOfCaps > 0 && pp_data->caps_info[rt_idx].ReportByteLength > 0) {
+				// ReportID 0 means this device uses not Report IDs
+				// => Maximum one report per type possible, so we can take the size from the buffer size for the report type
+				const unsigned char reportId = 0;
+				// ReportByteLength is the report length in bytes plus the one byte for the optional ReportID
+				int padding = (pp_data->caps_info[rt_idx].ReportByteLength - 1) * 8 - (last_bit_position[rt_idx][reportId] + 1);
+
+				if (padding > 0) {
+					// Insert padding item after item referenced in last_report_item_lookup
+					rd_insert_main_item_node(last_bit_position[rt_idx][reportId] + 1, last_bit_position[rt_idx][reportId] + padding, rd_item_node_padding, -1, 0, (rd_main_items)rt_idx, reportId, &node_before_top_level_coll_end);
 				}
 			}
 		}
@@ -652,13 +684,25 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		else if (main_item_list->TypeOfNode == rd_item_node_padding) {
 			// Padding
 			// The preparsed data doesn't contain any information about padding. Therefore all undefined gaps
-			// in the reports are filled with the same style of constant padding. 
+			// in the reports are filled with the same style of constant bit or byte padding. 
 
-			// Write "Report Size" with number of padding bits
-			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit + 1), &rpt_desc);
+			if ((main_item_list->LastBit - main_item_list->FirstBit + 1) % 8 == 0) {
+				// Padding in full bytes
 
-			// Write "Report Count" for padding always as 1
-			rd_write_short_item(rd_global_report_count, 1, &rpt_desc);
+				// Write "Report Size" for padding bytes is 8
+				rd_write_short_item(rd_global_report_size, 8, &rpt_desc);
+
+				// Write "Report Count" with number of padding bytes
+				rd_write_short_item(rd_global_report_count, (main_item_list->LastBit - main_item_list->FirstBit + 1) / 8, &rpt_desc);
+			} else {
+				// Padding in bits
+
+				// Write "Report Size" with number of padding bits
+				rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit + 1), &rpt_desc);
+
+				// Write "Report Count" for padding bits is 1
+				rd_write_short_item(rd_global_report_count, 1, &rpt_desc);
+			}
 
 			if (rt_idx == HidP_Input) {
 				// Write "Input" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
