@@ -539,7 +539,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 
 		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
-	    // Windows pp_data are per top-level collection, therefore top level coll end is unique
+		// Windows pp_data are per top-level collection, therefore top level coll end is unique
 		struct rd_main_item_node* node_before_top_level_coll_end = NULL;
 
 		while (list->next != NULL)
