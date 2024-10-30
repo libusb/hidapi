@@ -1,0 +1,27 @@
+var searchData=
+[
+  ['hid_5fclose_0',['hid_close',['../group__API.html#ga8d478a5986439ffb838fb1f1ba6ba5ec',1,'hidapi.h']]],
+  ['hid_5fenumerate_1',['hid_enumerate',['../group__API.html#gaae7d1c3e90835556ddc73fabe3a9ca9d',1,'hidapi.h']]],
+  ['hid_5ferror_2',['hid_error',['../group__API.html#gabdb1e88a803bab198333a3c5f131b12e',1,'hidapi.h']]],
+  ['hid_5fexit_3',['hid_exit',['../group__API.html#gacf5da9ce37132eba69fc259f17f13023',1,'hidapi.h']]],
+  ['hid_5ffree_5fenumeration_4',['hid_free_enumeration',['../group__API.html#gafc2d2adf71db3784b783b9a554527aa4',1,'hidapi.h']]],
+  ['hid_5fget_5fdevice_5finfo_5',['hid_get_device_info',['../group__API.html#ga2d8b34ae8cfdd4f4d132814d5b70c128',1,'hidapi.h']]],
+  ['hid_5fget_5ffeature_5freport_6',['hid_get_feature_report',['../group__API.html#gaa537a4b3c49d638c6ec9dedc08c44601',1,'hidapi.h']]],
+  ['hid_5fget_5findexed_5fstring_7',['hid_get_indexed_string',['../group__API.html#ga18546669554746d0f292ca5e23372e06',1,'hidapi.h']]],
+  ['hid_5fget_5finput_5freport_8',['hid_get_input_report',['../group__API.html#ga27ac7d92ea3a8ac58b1d8d865bd0264b',1,'hidapi.h']]],
+  ['hid_5fget_5fmanufacturer_5fstring_9',['hid_get_manufacturer_string',['../group__API.html#ga702f45b42d85599eedd602c05661fde5',1,'hidapi.h']]],
+  ['hid_5fget_5fproduct_5fstring_10',['hid_get_product_string',['../group__API.html#ga648feb765c5e0da3e821ee84aeab9d99',1,'hidapi.h']]],
+  ['hid_5fget_5freport_5fdescriptor_11',['hid_get_report_descriptor',['../group__API.html#gaaa8bc561909c1c6b413f1fcdc16333ef',1,'hidapi.h']]],
+  ['hid_5fget_5fserial_5fnumber_5fstring_12',['hid_get_serial_number_string',['../group__API.html#ga3442db3ece59fe248b0625a4c8fca617',1,'hidapi.h']]],
+  ['hid_5finit_13',['hid_init',['../group__API.html#ga142ffc1b0b7a7fa412d3862b2a17164b',1,'hidapi.h']]],
+  ['hid_5fopen_14',['hid_open',['../group__API.html#ga6946f7e2f5d225d69308611db1e31ede',1,'hidapi.h']]],
+  ['hid_5fopen_5fpath_15',['hid_open_path',['../group__API.html#ga954ecb58b5dfb4a6ef6be3dcd520e42f',1,'hidapi.h']]],
+  ['hid_5fread_16',['hid_read',['../group__API.html#ga2224269e8cd7c789f9fd4864a73f8c95',1,'hidapi.h']]],
+  ['hid_5fread_5ftimeout_17',['hid_read_timeout',['../group__API.html#gaa5c9ed5aa290688ffac03343989ad75a',1,'hidapi.h']]],
+  ['hid_5fsend_5ffeature_5freport_18',['hid_send_feature_report',['../group__API.html#gae99a9ddbb5d9b03fddf40fb4a492cbec',1,'hidapi.h']]],
+  ['hid_5fsend_5foutput_5freport_19',['hid_send_output_report',['../group__API.html#ga6f18ce9abffb0a9e7b1b5bac0e39376f',1,'hidapi.h']]],
+  ['hid_5fset_5fnonblocking_20',['hid_set_nonblocking',['../group__API.html#ga0e9af0d8ed72f5610e9297c90b08e242',1,'hidapi.h']]],
+  ['hid_5fversion_21',['hid_version',['../group__API.html#gaea589e58403a465361a347c0754a3da2',1,'hidapi.h']]],
+  ['hid_5fversion_5fstr_22',['hid_version_str',['../group__API.html#gacbceccb9fd443fd7cb164dee029fbf64',1,'hidapi.h']]],
+  ['hid_5fwrite_23',['hid_write',['../group__API.html#gaa691d2c469b9654128196bf7ef8edd9d',1,'hidapi.h']]]
+];
