@@ -1371,6 +1371,10 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		return NULL;
 
 	dev = new_hid_device();
+	if (!dev) {
+		LOG("hid_open_path failed: Couldn't allocate memory\n");
+		return NULL;
+	}
 
 	libusb_get_device_list(usb_context, &devs);
 	while ((usb_dev = devs[d++]) != NULL && !good_open) {
@@ -1442,6 +1446,10 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 		return NULL;
 
 	dev = new_hid_device();
+	if (!dev) {
+		LOG("libusb_wrap_sys_device failed: Couldn't allocate memory\n");
+		return NULL;
+	}
 
 	res = libusb_wrap_sys_device(usb_context, sys_dev, &dev->device_handle);
 	if (res < 0) {

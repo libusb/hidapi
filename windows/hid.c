@@ -194,6 +194,7 @@ struct hid_device_ {
 		OVERLAPPED ol;
 		OVERLAPPED write_ol;
 		struct hid_device_info* device_info;
+		DWORD write_timeout_ms;
 };
 
 static hid_device *new_hid_device()
@@ -219,6 +220,7 @@ static hid_device *new_hid_device()
 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	dev->device_info = NULL;
+	dev->write_timeout_ms = 1000;
 
 	return dev;
 }
@@ -1043,13 +1045,21 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 
 end_of_function:
 	free(interface_path);
-	CloseHandle(device_handle);
+
+	if (device_handle != INVALID_HANDLE_VALUE) {
+		CloseHandle(device_handle);
+	}
 
 	if (pp_data) {
 		HidD_FreePreparsedData(pp_data);
 	}
 
 	return dev;
+}
+
+void HID_API_EXPORT_CALL hid_winapi_set_write_timeout(hid_device *dev, unsigned long timeout)
+{
+	dev->write_timeout_ms = timeout;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *data, size_t length)
@@ -1078,15 +1088,22 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		/* The user passed the right number of bytes. Use the buffer as-is. */
 		buf = (unsigned char *) data;
 	} else {
-		if (dev->write_buf == NULL)
+		if (dev->write_buf == NULL) {
 			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+
+			if (dev->write_buf == NULL) {
+				register_string_error(dev, L"hid_write/malloc");
+				goto end_of_function;
+			}
+		}
+
 		buf = dev->write_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->output_report_length - length);
 		length = dev->output_report_length;
 	}
 
-	res = WriteFile(dev->device_handle, buf, (DWORD) length, NULL, &dev->write_ol);
+	res = WriteFile(dev->device_handle, buf, (DWORD) length, &bytes_written, &dev->write_ol);
 
 	if (!res) {
 		if (GetLastError() != ERROR_IO_PENDING) {
@@ -1095,12 +1112,15 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 			goto end_of_function;
 		}
 		overlapped = TRUE;
+	} else {
+		/* WriteFile() succeeded synchronously. */
+		function_result = bytes_written;
 	}
 
 	if (overlapped) {
 		/* Wait for the transaction to complete. This makes
 		   hid_write() synchronous. */
-		res = WaitForSingleObject(dev->write_ol.hEvent, 1000);
+		res = WaitForSingleObject(dev->write_ol.hEvent, dev->write_timeout_ms);
 		if (res != WAIT_OBJECT_0) {
 			/* There was a Timeout. */
 			register_winapi_error(dev, L"hid_write/WaitForSingleObject");
@@ -1243,8 +1263,15 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		buf = (unsigned char *) data;
 		length_to_send = length;
 	} else {
-		if (dev->feature_buf == NULL)
+		if (dev->feature_buf == NULL) {
 			dev->feature_buf = (unsigned char *) malloc(dev->feature_report_length);
+
+			if (dev->feature_buf == NULL) {
+				register_string_error(dev, L"hid_send_feature_report/malloc");
+				return -1;
+			}
+		}
+
 		buf = dev->feature_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->feature_report_length - length);
@@ -1337,8 +1364,15 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const un
 		buf = (unsigned char *) data;
 		length_to_send = length;
 	} else {
-		if (dev->write_buf == NULL)
+		if (dev->write_buf == NULL) {
 			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+
+			if (dev->write_buf == NULL) {
+				register_string_error(dev, L"hid_send_output_report/malloc");
+				return -1;
+			}
+		}
+
 		buf = dev->write_buf;
 		memcpy(buf, data, length);
 		memset(buf + length, 0, dev->output_report_length - length);
