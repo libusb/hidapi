@@ -195,6 +195,7 @@ static void free_hid_device(hid_device *dev)
 	if (dev->source)
 		CFRelease(dev->source);
 	free(dev->input_report_buf);
+	free(dev->last_error_str);
 	hid_free_enumeration(dev->device_info);
 
 	/* Clean up the thread objects */
