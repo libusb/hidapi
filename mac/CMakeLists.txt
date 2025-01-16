@@ -21,10 +21,26 @@ set_target_properties(hidapi_darwin
         OUTPUT_NAME "hidapi"
         VERSION ${PROJECT_VERSION}
         SOVERSION ${PROJECT_VERSION_MAJOR}
-        MACHO_COMPATIBILITY_VERSION ${PROJECT_VERSION_MAJOR}
         FRAMEWORK_VERSION ${PROJECT_VERSION_MAJOR}
         PUBLIC_HEADER "${HIDAPI_PUBLIC_HEADERS}"
 )
+
+if(NOT CMAKE_VERSION VERSION_LESS 3.17)
+    option(HIDAPI_USE_LEGACY_COMPATIBILITY_VERSION "Legacy Autotools build system hard-coded 1.0.0 for compatibility version" FALSE)
+    if(HIDAPI_USE_LEGACY_COMPATIBILITY_VERSION)
+        # TODO: v1: remove this workaround
+        set_target_properties(hidapi_darwin
+            PROPERTIES
+                MACHO_COMPATIBILITY_VERSION "1.0.0"
+                MACHO_CURRENT_VERSION "1.0.0"
+        )
+    else()
+        set_target_properties(hidapi_darwin
+            PROPERTIES
+                MACHO_COMPATIBILITY_VERSION ${PROJECT_VERSION_MAJOR}
+        )
+    endif()
+endif()
 
 # compatibility with find_package()
 add_library(hidapi::darwin ALIAS hidapi_darwin)
