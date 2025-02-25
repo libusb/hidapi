@@ -460,7 +460,7 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 {
 	wchar_t *device_id = NULL, *hardware_ids = NULL;
 
-	device_id = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	device_id = (wchar_t *)hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 	if (!device_id)
 		goto end;
 
@@ -478,7 +478,7 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 
 	/* Get the hardware ids from devnode */
-	hardware_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
+	hardware_ids = (wchar_t *)hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_HardwareIds, DEVPROP_TYPE_STRING_LIST);
 	if (!hardware_ids)
 		goto end;
 
@@ -509,7 +509,7 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 
 	/* Try to get USB device manufacturer string if not provided by HidD_GetManufacturerString. */
 	if (wcslen(dev->manufacturer_string) == 0) {
-		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_Manufacturer, DEVPROP_TYPE_STRING);
+		wchar_t* manufacturer_string = (wchar_t *)hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_Manufacturer, DEVPROP_TYPE_STRING);
 		if (manufacturer_string) {
 			free(dev->manufacturer_string);
 			dev->manufacturer_string = manufacturer_string;
@@ -529,7 +529,7 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 
 		/* Get the device id of the USB device. */
 		free(device_id);
-		device_id = hid_internal_get_devnode_property(usb_dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+		device_id = (wchar_t *)hid_internal_get_devnode_property(usb_dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 		if (!device_id)
 			goto end;
 
@@ -568,7 +568,7 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 {
 	if (wcslen(dev->manufacturer_string) == 0) {
 		/* Manufacturer Name String (UUID: 0x2A29) */
-		wchar_t* manufacturer_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
+		wchar_t* manufacturer_string = (wchar_t *)hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
 		if (manufacturer_string) {
 			free(dev->manufacturer_string);
 			dev->manufacturer_string = manufacturer_string;
@@ -577,7 +577,7 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 
 	if (wcslen(dev->serial_number) == 0) {
 		/* Serial Number String (UUID: 0x2A25) */
-		wchar_t* serial_number = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
+		wchar_t* serial_number = (wchar_t *)hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
 		if (serial_number) {
 			free(dev->serial_number);
 			dev->serial_number = serial_number;
@@ -586,13 +586,13 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 
 	if (wcslen(dev->product_string) == 0) {
 		/* Model Number String (UUID: 0x2A24) */
-		wchar_t* product_string = hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
+		wchar_t* product_string = (wchar_t *)hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
 		if (!product_string) {
 			DEVINST parent_dev_node = 0;
 			/* Fallback: Get devnode grandparent to reach out Bluetooth LE device node */
 			if (CM_Get_Parent(&parent_dev_node, dev_node, 0) == CR_SUCCESS) {
 				/* Device Name (UUID: 0x2A00) */
-				product_string = hid_internal_get_devnode_property(parent_dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
+				product_string = (wchar_t *)hid_internal_get_devnode_property(parent_dev_node, &DEVPKEY_NAME, DEVPROP_TYPE_STRING);
 			}
 		}
 
@@ -621,7 +621,7 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 	hid_internal_detect_bus_type_result result = { 0 };
 
 	/* Get the device id from interface path */
-	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	device_id = (wchar_t *)hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 	if (!device_id)
 		goto end;
 
@@ -636,7 +636,7 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 		goto end;
 
 	/* Get the compatible ids from parent devnode */
-	compatible_ids = hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_CompatibleIds, DEVPROP_TYPE_STRING_LIST);
+	compatible_ids = (wchar_t *)hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_CompatibleIds, DEVPROP_TYPE_STRING_LIST);
 	if (!compatible_ids)
 		goto end;
 
@@ -1515,7 +1515,7 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 	}
 
 	/* Get the device id from interface path */
-	device_id = hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
+	device_id = (wchar_t *)hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 	if (!device_id) {
 		register_string_error(dev, L"Failed to get device interface property InstanceId");
 		goto end;
