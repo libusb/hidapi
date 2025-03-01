@@ -245,6 +245,13 @@ int main(int argc, char* argv[])
 	// Try to read from the device. There should be no
 	// data here, but execution should not block.
 	res = hid_read(handle, buf, 17);
+	if (res < 0) {
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+		printf("Unable to read from device: %ls\n", hid_read_error(handle));
+#else
+		printf("Unable to read from device: %ls\n", hid_error(handle));
+#endif
+	}
 
 	// Send a Feature Report to the device
 	buf[0] = 0x2;
@@ -254,7 +261,7 @@ int main(int argc, char* argv[])
 	buf[4] = 0x00;
 	res = hid_send_feature_report(handle, buf, 17);
 	if (res < 0) {
-		printf("Unable to send a feature report.\n");
+		printf("Unable to send a feature report: %ls\n", hid_error(handle));
 	}
 
 	memset(buf,0,sizeof(buf));
