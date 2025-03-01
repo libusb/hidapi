@@ -375,6 +375,8 @@ extern "C" {
 
 		/** @brief Get a string describing the last error which occurred during hid_read/hid_read_timeout.
 
+			Since version 0.15.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+
 			This function is intended for logging/debugging purposes.
 
 			This function guarantees to never return NULL.
