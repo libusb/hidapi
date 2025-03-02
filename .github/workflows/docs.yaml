@@ -10,20 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-
-      - name: Install Doxygen static libclang deps
-        run: sudo apt-get install libclang1-18 libclang-cpp18
-
-      - name: Install Doxygen from SF binary archives
-        env:
-          DOXYGEN_VERSION: '1.9.6'
-        run: |
-          mkdir .doxygen && cd .doxygen
-          curl -L https://sourceforge.net/projects/doxygen/files/rel-$DOXYGEN_VERSION/doxygen-$DOXYGEN_VERSION.linux.bin.tar.gz > doxygen.tar.gz
-          gunzip doxygen.tar.gz
-          tar xf doxygen.tar
-          cd doxygen-$DOXYGEN_VERSION
-          sudo make install
+      - name: Install Doxygen
+        run: sudo apt satisfy "doxygen (>= 1.9.6)"
 
       - uses: actions/checkout@v4
 
