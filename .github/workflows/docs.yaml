@@ -8,24 +8,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
+      - name: Install Doxygen
+        run: sudo apt satisfy "doxygen (>= 1.9.6)"
 
-      - name: Install Doxygen static libclang deps
-        run: sudo apt-get install libclang1-12 libclang-cpp12
-
-      - name: Install Doxygen from SF binary archives
-        env:
-          DOXYGEN_VERSION: '1.9.6'
-        run: |
-          mkdir .doxygen && cd .doxygen
-          curl -L https://sourceforge.net/projects/doxygen/files/rel-$DOXYGEN_VERSION/doxygen-$DOXYGEN_VERSION.linux.bin.tar.gz > doxygen.tar.gz
-          gunzip doxygen.tar.gz
-          tar xf doxygen.tar
-          cd doxygen-$DOXYGEN_VERSION
-          sudo make install
-
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - run: doxygen
         working-directory: doxygen
@@ -37,7 +25,7 @@ jobs:
           path: ${{ github.workspace }}/doxygen/html
 
   deploy-docs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [build]
     if: github.ref_type == 'branch' && github.ref_name == 'master'
     concurrency:
@@ -51,7 +39,7 @@ jobs:
           path: docs
 
       - name: upload to github pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
