@@ -142,6 +142,7 @@ struct hid_device_ {
 	pthread_barrier_t shutdown_barrier; /* Ensures correct shutdown sequence */
 	int shutdown_thread;
 	wchar_t *last_error_str;
+	wchar_t *last_read_error_str;
 };
 
 static hid_device *new_hid_device(void)
@@ -163,6 +164,7 @@ static hid_device *new_hid_device(void)
 	dev->device_info = NULL;
 	dev->shutdown_thread = 0;
 	dev->last_error_str = NULL;
+	dev->last_read_error_str = NULL;
 
 	/* Thread objects */
 	pthread_mutex_init(&dev->mutex, NULL);
@@ -196,6 +198,7 @@ static void free_hid_device(hid_device *dev)
 		CFRelease(dev->source);
 	free(dev->input_report_buf);
 	free(dev->last_error_str);
+	free(dev->last_read_error_str);
 	hid_free_enumeration(dev->device_info);
 
 	/* Clean up the thread objects */
@@ -1244,6 +1247,8 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 {
 	int bytes_read = -1;
 
+	register_error_str(&dev->last_read_error_str, NULL);
+
 	/* Lock the access to the report list. */
 	pthread_mutex_lock(&dev->mutex);
 
@@ -1257,7 +1262,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Return if the device has been disconnected. */
 	if (dev->disconnected) {
 		bytes_read = -1;
-		register_device_error(dev, "hid_read_timeout: device disconnected");
+		register_error_str(&dev->last_read_error_str, "hid_read_timeout: device disconnected");
 		goto ret;
 	}
 
@@ -1266,7 +1271,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		   has been an error. An error code of -1 should
 		   be returned. */
 		bytes_read = -1;
-		register_device_error(dev, "hid_read_timeout: thread shutdown");
+		register_error_str(&dev->last_read_error_str, "hid_read_timeout: thread shutdown");
 		goto ret;
 	}
 
@@ -1280,7 +1285,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			bytes_read = return_data(dev, data, length);
 		else {
 			/* There was an error, or a device disconnection. */
-			register_device_error(dev, "hid_read_timeout: error waiting for more data");
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: error waiting for more data");
 			bytes_read = -1;
 		}
 	}
@@ -1304,7 +1309,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		} else if (res == ETIMEDOUT) {
 			bytes_read = 0;
 		} else {
-			register_device_error(dev, "hid_read_timeout:  error waiting for more data");
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: error waiting for more data");
 			bytes_read = -1;
 		}
 	}
@@ -1322,6 +1327,13 @@ ret:
 int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
 	return hid_read_timeout(dev, data, length, (dev->blocking)? -1: 0);
+}
+
+HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
+{
+	if (dev->last_read_error_str == NULL)
+		return L"Success";
+	return dev->last_read_error_str;
 }
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
