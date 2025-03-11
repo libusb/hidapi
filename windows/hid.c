@@ -1580,7 +1580,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		register_string_error(dev, NULL);
 	}
 	else {
-		register_string_error(dev, "Failed to reconstruct descriptor from PREPARSED_DATA");
+		register_string_error(dev, L"Failed to reconstruct descriptor from PREPARSED_DATA");
 	}
 
 	return res;
