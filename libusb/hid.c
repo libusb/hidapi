@@ -1607,10 +1607,19 @@ ret:
 	return bytes_read;
 }
 
+
 int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
 	return hid_read_timeout(dev, data, length, dev->blocking ? -1 : 0);
 }
+
+
+HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
+{
+	(void)dev;
+	return L"hid_read_error is not implemented yet";
+}
+
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 {

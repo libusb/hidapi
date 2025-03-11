@@ -75,6 +75,7 @@ struct hid_device_ {
 	int device_handle;
 	int blocking;
 	wchar_t *last_error_str;
+	wchar_t *last_read_error_str;
 	struct hid_device_info* device_info;
 };
 
@@ -97,6 +98,7 @@ static hid_device *new_hid_device(void)
 	dev->device_handle = -1;
 	dev->blocking = 1;
 	dev->last_error_str = NULL;
+	dev->last_read_error_str = NULL;
 	dev->device_info = NULL;
 
 	return dev;
@@ -1151,7 +1153,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	}
 
 	/* Set device error to none */
-	register_device_error(dev, NULL);
+	register_error_str(&dev->last_read_error_str, NULL);
 
 	int bytes_read;
 
@@ -1175,7 +1177,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		}
 		if (ret == -1) {
 			/* Error */
-			register_device_error(dev, strerror(errno));
+			register_error_str(&dev->last_read_error_str, strerror(errno));
 			return ret;
 		}
 		else {
@@ -1183,7 +1185,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			   indicate a device disconnection. */
 			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
 				// We cannot use strerror() here as no -1 was returned from poll().
-				register_device_error(dev, "hid_read_timeout: unexpected poll error (device disconnected)");
+				register_error_str(&dev->last_read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
 				return -1;
 			}
 		}
@@ -1194,7 +1196,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		if (errno == EAGAIN || errno == EINPROGRESS)
 			bytes_read = 0;
 		else
-			register_device_error(dev, strerror(errno));
+			register_error_str(&dev->last_read_error_str, strerror(errno));
 	}
 
 	return bytes_read;
@@ -1208,6 +1210,13 @@ int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 	}
 
 	return hid_read_timeout(dev, data, length, (dev->blocking)? -1: 0);
+}
+
+HID_API_EXPORT const wchar_t * HID_API_CALL  hid_read_error(hid_device *dev)
+{
+	if (dev->last_read_error_str == NULL)
+		return L"Success";
+	return dev->last_read_error_str;
 }
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
@@ -1305,8 +1314,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	close(dev->device_handle);
 
-	/* Free the device error message */
-	register_device_error(dev, NULL);
+	free(dev->last_error_str);
+	free(dev->last_read_error_str);
 
 	hid_free_enumeration(dev->device_info);
 

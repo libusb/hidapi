@@ -45,6 +45,7 @@ struct hid_device_ {
 	int device_handle;
 	int blocking;
 	wchar_t *last_error_str;
+	wchar_t *last_read_error_str;
 	struct hid_device_info *device_info;
 	size_t poll_handles_length;
 	struct pollfd poll_handles[256];
@@ -143,6 +144,18 @@ static void register_device_error_format(hid_device *dev, const char *format, ..
 	va_end(args);
 }
 
+static void register_device_read_error(hid_device *dev, const char *msg)
+{
+	register_error_str(&dev->last_read_error_str, msg);
+}
+
+static void register_device_read_error_format(hid_device *dev, const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	register_error_str_vformat(&dev->last_read_error_str, format, args);
+	va_end(args);
+}
 
 /*
  * Gets the size of the HID item at the given position
@@ -878,9 +891,11 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	struct pollfd *ph;
 	ssize_t n;
 
+	register_device_read_error(dev, NULL);
+
 	res = poll(dev->poll_handles, dev->poll_handles_length, milliseconds);
 	if (res == -1) {
-		register_device_error_format(dev, "error while polling: %s", strerror(errno));
+		register_device_read_error_format(dev, "error while polling: %s", strerror(errno));
 		return -1;
 	}
 
@@ -891,7 +906,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 		ph = &dev->poll_handles[i];
 
 		if (ph->revents & (POLLERR | POLLHUP | POLLNVAL)) {
-			register_device_error(dev, "device IO error while polling");
+			register_device_read_error(dev, "device IO error while polling");
 			return -1;
 		}
 
@@ -907,7 +922,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 		if (errno == EAGAIN || errno == EINPROGRESS)
 			n = 0;
 		else
-			register_device_error_format(dev, "error while reading: %s", strerror(errno));
+			register_device_read_error_format(dev, "error while reading: %s", strerror(errno));
 	}
 
 	return n;
@@ -916,6 +931,13 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 int HID_API_EXPORT HID_API_CALL hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
 	return hid_read_timeout(dev, data, length, (dev->blocking) ? -1 : 0);
+}
+
+HID_API_EXPORT const wchar_t* HID_API_CALL hid_read_error(hid_device *dev)
+{
+	if (dev->last_read_error_str == NULL)
+		return L"Success";
+	return dev->last_read_error_str;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)
@@ -949,8 +971,8 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	/* Free the device error message */
-	register_device_error(dev, NULL);
+	free(dev->last_error_str);
+	free(dev->last_read_error_str);
 
 	hid_free_enumeration(dev->device_info);
 
