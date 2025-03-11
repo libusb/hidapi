@@ -151,9 +151,6 @@ static hid_device *new_hid_device(void)
 
 static void free_hid_device(hid_device *dev)
 {
-	if (!dev)
-		return;
-
 	/* Clean up the thread objects */
 	hidapi_thread_state_destroy(&dev->thread_state);
 

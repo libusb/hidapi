@@ -229,9 +229,6 @@ static hid_device *new_hid_device()
 
 static void free_hid_device(hid_device *dev)
 {
-	if (!dev)
-		return;
-
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->device_handle);
