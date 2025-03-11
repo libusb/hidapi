@@ -189,6 +189,7 @@ struct hid_device_ {
 		USHORT feature_report_length;
 		unsigned char *feature_buf;
 		wchar_t *last_error_str;
+		wchar_t *last_read_error_str;
 		BOOL read_pending;
 		char *read_buf;
 		OVERLAPPED ol;
@@ -213,6 +214,7 @@ static hid_device *new_hid_device()
 	dev->feature_report_length = 0;
 	dev->feature_buf = NULL;
 	dev->last_error_str = NULL;
+	dev->last_read_error_str = NULL;
 	dev->read_pending = FALSE;
 	dev->read_buf = NULL;
 	memset(&dev->ol, 0, sizeof(dev->ol));
@@ -231,7 +233,9 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->device_handle);
 	free(dev->last_error_str);
+	free(dev->last_read_error_str);
 	dev->last_error_str = NULL;
+	dev->last_read_error_str = NULL;
 	free(dev->write_buf);
 	free(dev->feature_buf);
 	free(dev->read_buf);
@@ -1152,11 +1156,11 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	BOOL overlapped = FALSE;
 
 	if (!data || !length) {
-		register_string_error(dev, L"Zero buffer/length");
+		register_string_error_to_buffer(&dev->last_read_error_str, L"Zero buffer/length");
 		return -1;
 	}
 
-	register_string_error(dev, NULL);
+	register_string_error_to_buffer(&dev->last_read_error_str, NULL);
 
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
@@ -1172,7 +1176,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 			if (GetLastError() != ERROR_IO_PENDING) {
 				/* ReadFile() has failed.
 				   Clean up and return error. */
-				register_winapi_error(dev, L"ReadFile");
+				register_winapi_error_to_buffer(&dev->last_read_error_str, L"ReadFile");
 				CancelIo(dev->device_handle);
 				dev->read_pending = FALSE;
 				goto end_of_function;
@@ -1219,7 +1223,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 		}
 	}
 	if (!res) {
-		register_winapi_error(dev, L"hid_read_timeout/GetOverlappedResult");
+		register_winapi_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout/GetOverlappedResult");
 	}
 
 end_of_function:
@@ -1233,6 +1237,13 @@ end_of_function:
 int HID_API_EXPORT HID_API_CALL hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
 	return hid_read_timeout(dev, data, length, (dev->blocking)? -1: 0);
+}
+
+HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
+{
+	if (dev->last_read_error_str == NULL)
+		return L"Success";
+	return dev->last_read_error_str;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)

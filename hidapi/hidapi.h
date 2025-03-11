@@ -341,9 +341,11 @@ extern "C" {
 			@returns
 				This function returns the actual number of bytes read and
 				-1 on error.
-				Call hid_error(dev) to get the failure reason.
+				Call hid_read_error(dev) to get the failure reason.
 				If no packet was available to be read within
 				the timeout period, this function returns 0.
+
+			@note This function doesn't change the buffer returned by the hid_error(dev).
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds);
 
@@ -363,11 +365,39 @@ extern "C" {
 			@returns
 				This function returns the actual number of bytes read and
 				-1 on error.
-				Call hid_error(dev) to get the failure reason.
+				Call hid_read_error(dev) to get the failure reason.
 				If no packet was available to be read and
 				the handle is in non-blocking mode, this function returns 0.
+
+			@note This function doesn't change the buffer returned by the hid_error(dev).
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_read(hid_device *dev, unsigned char *data, size_t length);
+
+		/** @brief Get a string describing the last error which occurred during hid_read/hid_read_timeout.
+
+			Since version 0.15.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+
+			This function is intended for logging/debugging purposes.
+
+			This function guarantees to never return NULL.
+			If there was no error in the last call to hid_read/hid_read_error -
+			the returned string clearly indicates that.
+
+			Any HIDAPI function that can explicitly indicate an execution failure
+			(e.g. by an error code, or by returning NULL) - may set the error string,
+			to be returned by this function.
+
+			Strings returned from hid_read_error() must not be freed by the user,
+			i.e. owned by HIDAPI library.
+			Device-specific error string may remain allocated at most until hid_close() is called.
+
+			@ingroup API
+			@param dev A device handle. Shall never be NULL.
+
+			@returns
+				A string describing the hid_read/hid_read_timeout error (if any).
+		*/
+		HID_API_EXPORT const wchar_t* HID_API_CALL hid_read_error(hid_device *dev);
 
 		/** @brief Set the device handle to be non-blocking.
 
