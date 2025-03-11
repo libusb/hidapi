@@ -286,9 +286,6 @@ static void register_device_error(hid_device *dev, const char *msg)
 /* Similar to register_device_error, but you can pass a format string into this function. */
 static void register_device_error_format(hid_device *dev, const char *format, ...)
 {
-	if (!dev)
-		return;
-
 	va_list args;
 	va_start(args, format);
 	register_error_str_vformat(&dev->last_error_str, format, args);
@@ -875,9 +872,6 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
                          IOHIDReportType report_type, uint32_t report_id,
                          uint8_t *report, CFIndex report_length)
 {
-	if (!context)
-		return;
-
 	(void) result;
 	(void) sender;
 	(void) report_type;
@@ -931,18 +925,12 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
    hid_close(), and serves to stop the read_thread's run loop. */
 static void perform_signal_callback(void *context)
 {
-	if (!context)
-		return;
-
 	hid_device *dev = (hid_device*) context;
 	CFRunLoopStop(dev->run_loop); /*TODO: CFRunLoopGetCurrent()*/
 }
 
 static void *read_thread(void *param)
 {
-	if (!param)
-		return NULL;
-
 	hid_device *dev = (hid_device*) param;
 	SInt32 code;
 
@@ -1112,11 +1100,6 @@ return_error:
 
 static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char *data, size_t length)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
-
 	const unsigned char *data_to_send = data;
 	CFIndex length_to_send = length;
 	IOReturn res;
@@ -1125,7 +1108,7 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 	register_device_error(dev, NULL);
 
 	if (!data || (length == 0)) {
-		register_device_error(dev, strerror(EINVAL));
+		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
@@ -1159,22 +1142,17 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 
 static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data, size_t length)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
-
-	if (!data) {
-		register_device_error(dev, "Data is NULL");
-		return -1;
-	}
-
 	unsigned char *report = data;
 	CFIndex report_length = length;
 	IOReturn res = kIOReturnSuccess;
 	const unsigned char report_id = data[0];
 
 	register_device_error(dev, NULL);
+
+	if (!data || (length == 0)) {
+		register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
 
 	if (report_id == 0x0) {
 		/* Not using numbered Reports.
@@ -1214,9 +1192,6 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 /* Helper function, so that this isn't duplicated in hid_read(). */
 static int return_data(hid_device *dev, unsigned char *data, size_t length)
 {
-	if (!dev || !data)
-		return -1;
-
 	/* Copy the data out of the linked list item (rpt) into the
 	   return buffer (data), and delete the liked list item. */
 	struct input_report *rpt = dev->input_reports;
@@ -1232,9 +1207,6 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length)
 
 static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
-	if (!dev)
-		return -1;
-
 	while (!dev->input_reports) {
 		int res = pthread_cond_wait(cond, mutex);
 		if (res != 0)
@@ -1256,9 +1228,6 @@ static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mut
 
 static int cond_timedwait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime)
 {
-	if (!dev)
-		return -1;
-
 	while (!dev->input_reports) {
 		int res = pthread_cond_timedwait(cond, mutex, abstime);
 		if (res != 0)
@@ -1281,6 +1250,11 @@ static int cond_timedwait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t
 int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds)
 {
 	int bytes_read = -1;
+
+	if (!data || (length == 0)) {
+		register_error_str(&dev->last_read_error_str, "Zero buffer/length");
+		return -1;
+	}
 
 	register_error_str(&dev->last_read_error_str, NULL);
 
@@ -1361,11 +1335,6 @@ ret:
 
 int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
-
 	return hid_read_timeout(dev, data, length, (dev->blocking)? -1: 0);
 }
 
@@ -1378,11 +1347,6 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
-
 	/* All Nonblocking operation is handled by the library. */
 	dev->blocking = !nonblock;
 
@@ -1523,12 +1487,10 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 }
 
 HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return NULL;
+	if (dev->device_info) {
+		register_device_error(dev, NULL);
 	}
-
-	if (!dev->device_info) {
+	else {
 		dev->device_info = create_device_info(dev->device_handle);
 		if (!dev->device_info) {
 			register_device_error(dev, "Failed to create hid_device_info");
@@ -1551,15 +1513,12 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 
 int HID_API_EXPORT_CALL hid_darwin_get_location_id(hid_device *dev, uint32_t *location_id)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
-
 	if (!location_id) {
 		register_device_error(dev, "Location ID is NULL");
 		return -1;
 	}
+
+	register_device_error(dev, NULL);
 
 	int res = get_int_property(dev->device_handle, CFSTR(kIOHIDLocationIDKey));
 	if (res != 0) {
@@ -1583,25 +1542,17 @@ int HID_API_EXPORT_CALL hid_darwin_get_open_exclusive(void)
 
 int HID_API_EXPORT_CALL hid_darwin_is_device_open_exclusive(hid_device *dev)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
-
 	return (dev->open_options == kIOHIDOptionsTypeSeizeDevice) ? 1 : 0;
 }
 
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
+	if (!buf || !buf_size) {
+		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
-	if (!buf) {
-		register_device_error(dev, "Buffer is NULL");
-		return -1;
-	}
+	register_device_error(dev, NULL);
 
 	CFTypeRef ref = IOHIDDeviceGetProperty(dev->device_handle, CFSTR(kIOHIDReportDescriptorKey));
 	if (ref != NULL && CFGetTypeID(ref) == CFDataGetTypeID()) {
@@ -1611,7 +1562,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		size_t copy_len = (size_t) descriptor_buf_len;
 
 		if (descriptor_buf == NULL || descriptor_buf_len < 0) {
-			register_device_error(dev, "Zero buffer/length");
+			register_device_error(dev, "Zero descriptor from device");
 			return -1;
 		}
 
