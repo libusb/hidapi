@@ -1145,7 +1145,7 @@ static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data
 	unsigned char *report = data;
 	CFIndex report_length = length;
 	IOReturn res = kIOReturnSuccess;
-	const unsigned char report_id;
+	unsigned char report_id;
 
 	if (!data || (length == 0)) {
 		register_device_error(dev, "Zero buffer/length");
