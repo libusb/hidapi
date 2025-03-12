@@ -1105,12 +1105,12 @@ static int set_report(hid_device *dev, IOHIDReportType type, const unsigned char
 	IOReturn res;
 	unsigned char report_id;
 
-	register_device_error(dev, NULL);
-
 	if (!data || (length == 0)) {
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
+
+	register_device_error(dev, NULL);
 
 	report_id = data[0];
 
@@ -1145,14 +1145,16 @@ static int get_report(hid_device *dev, IOHIDReportType type, unsigned char *data
 	unsigned char *report = data;
 	CFIndex report_length = length;
 	IOReturn res = kIOReturnSuccess;
-	const unsigned char report_id = data[0];
-
-	register_device_error(dev, NULL);
+	const unsigned char report_id;
 
 	if (!data || (length == 0)) {
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
+
+	register_device_error(dev, NULL);
+
+	report_id = data[0];
 
 	if (report_id == 0x0) {
 		/* Not using numbered Reports.
