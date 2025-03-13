@@ -139,6 +139,9 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length);
 static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
+	if (!dev)
+		return NULL;
+
 	dev->blocking = 1;
 
 	hidapi_thread_state_init(&dev->thread_state);

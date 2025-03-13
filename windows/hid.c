@@ -1474,12 +1474,15 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 	return 0;
 }
 
-HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev) {
+HID_API_EXPORT struct hid_device_info * HID_API_CALL hid_get_device_info(hid_device *dev)
+{
 	if (!dev->device_info)
 	{
 		register_string_error(dev, L"NULL device info");
 		return NULL;
 	}
+
+	register_string_error(dev, NULL);
 
 	return dev->device_info;
 }
@@ -1565,9 +1568,17 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		return -1;
 	}
 
+
 	int res = hid_winapi_descriptor_reconstruct_pp_data(pp_data, buf, buf_size);
 
 	HidD_FreePreparsedData(pp_data);
+
+	if (res == 0) {
+		register_string_error(dev, NULL);
+	}
+	else {
+		register_string_error(dev, L"Failed to reconstruct descriptor from PREPARSED_DATA");
+	}
 
 	return res;
 }
