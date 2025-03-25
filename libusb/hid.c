@@ -95,6 +95,8 @@ struct hid_device_ {
 	int interface;
 
 	uint16_t report_descriptor_size;
+	/* Includes report number. */
+	size_t max_input_report_size;
 
 	/* Endpoint information */
 	int input_endpoint;
@@ -135,6 +137,7 @@ static libusb_context *usb_context = NULL;
 
 uint16_t get_usb_code_for_current_locale(void);
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
+static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size, unsigned char *buf, size_t buf_size);
 
 static hid_device *new_hid_device(void)
 {
@@ -274,6 +277,74 @@ static int get_usage(uint8_t *report_descriptor, size_t size,
 	}
 
 	return -1; /* failure */
+}
+
+/* Retrieves the largest input report size (in bytes) from the report descriptor.
+
+   Requires an opened device with *claimed interface*.
+
+   The return value is the size on success and -1 on failure. */
+static size_t get_max_input_report_size(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size)
+{
+	int i = 0;
+	int size_code;
+	int data_len, key_size;
+
+	int64_t report_size = 0, report_count = 0;
+	ssize_t max_size = -1;
+
+	unsigned char report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+
+	int desc_size = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, report_descriptor, sizeof(report_descriptor));
+	if (desc_size < 0) {
+		return -1;
+	}
+
+	while (i < desc_size) {
+		int key = report_descriptor[i];
+		int key_cmd = key & 0xfc;
+
+		if ((key & 0xf0) == 0xf0) {
+			/* This is a Long Item. The next byte contains the
+			   length of the data section (value) for this key.
+			   See the HID specification, version 1.11, section
+			   6.2.2.3, titled "Long Items." */
+			if (i+1 < desc_size)
+				data_len = report_descriptor[i+1];
+			else
+				data_len = 0; /* malformed report */
+			key_size = 3;
+		} else {
+			/* This is a Short Item. The bottom two bits of the
+			   key contain the size code for the data section
+			   (value) for this key.  Refer to the HID
+			   specification, version 1.11, section 6.2.2.2,
+			   titled "Short Items." */
+			size_code = key & 0x3;
+			data_len = (size_code < 3) ? size_code : 4;
+			key_size = 1;
+		}
+
+		if (key_cmd == 0x94) {
+			report_count = get_bytes(report_descriptor, desc_size, data_len, i);
+		}
+		if (key_cmd == 0x74) {
+			report_size = get_bytes(report_descriptor, desc_size, data_len, i);
+		}
+		if (key_cmd == 0x80) { // Input
+			/* report_size is in bits. Determine the total size (count * size),
+			   convert to bytes (rounded up), and add one byte for the report
+			   number. */
+			ssize_t size = (((report_count * report_size) + 7) / 8) + 1;
+			if (size > max_size)
+				max_size = size;
+		}
+
+		/* Skip over this key and it's associated data */
+		i += data_len + key_size;
+	}
+
+	return max_size;
 }
 
 #if defined(__FreeBSD__) && __FreeBSD__ < 10
@@ -1024,7 +1095,14 @@ static void *read_thread(void *param)
 	int res;
 	hid_device *dev = param;
 	uint8_t *buf;
-	const size_t length = dev->input_ep_max_packet_size;
+	size_t length;
+	if (dev->max_input_report_size > 0) {
+		length = dev->max_input_report_size;
+	} else {
+		/* If we were unable to reliably determine the maximum input size, fall back
+		   to the max packet size. */
+		length = dev->input_ep_max_packet_size;
+	}
 
 	/* Set up the transfer object. */
 	buf = (uint8_t*) malloc(length);
@@ -1216,6 +1294,7 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	dev->interface = intf_desc->bInterfaceNumber;
 
 	dev->report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
+	dev->max_input_report_size = get_max_input_report_size(dev->device_handle, dev->interface, dev->report_descriptor_size);
 
 	dev->input_endpoint = 0;
 	dev->input_ep_max_packet_size = 0;
