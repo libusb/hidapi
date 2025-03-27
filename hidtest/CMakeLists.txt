@@ -17,7 +17,7 @@ else()
 endif()
 
 set(HIDAPI_HIDTEST_TARGETS)
-if(NOT WIN32 AND NOT APPLE AND CMAKE_SYSTEM_NAME MATCHES "Linux")
+if(NOT WIN32 AND NOT APPLE AND (CMAKE_SYSTEM_NAME MATCHES "Linux" OR CMAKE_SYSTEM_NAME MATCHES "FreeBSD"))
     if(TARGET hidapi::hidraw)
         add_executable(hidtest_hidraw test.c)
         target_link_libraries(hidtest_hidraw hidapi::hidraw)
