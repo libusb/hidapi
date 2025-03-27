@@ -7,7 +7,13 @@
 
 #include "../hid.c"
 
-static ssize_t parse_max_input_report_size(const char * filename)
+struct max_report_sizes {
+    size_t input;
+    size_t output;
+    size_t feature;
+};
+
+static int parse_max_input_report_size(const char * filename, struct max_report_sizes * sizes)
 {
 	FILE* file = fopen(filename, "r");
 	if (file == NULL) {
@@ -20,16 +26,20 @@ static ssize_t parse_max_input_report_size(const char * filename)
 		while (fgets(line, sizeof(line), file) != NULL) {
 			unsigned short temp_ushort;
 			if (sscanf(line, "pp_data->caps_info[0]->ReportByteLength   = %hu\n", &temp_ushort) == 1) {
-				fclose(file);
-				return (ssize_t)temp_ushort;
+				sizes->input = (size_t)temp_ushort;
+			}
+			if (sscanf(line, "pp_data->caps_info[1]->ReportByteLength   = %hu\n", &temp_ushort) == 1) {
+				sizes->output = (size_t)temp_ushort;
+			}
+			if (sscanf(line, "pp_data->caps_info[2]->ReportByteLength   = %hu\n", &temp_ushort) == 1) {
+				sizes->feature = (size_t)temp_ushort;
 			}
 		}
 	}
 
-	fprintf(stderr, "Unable to find pp_data->caps_info[0]->ReportByteLength in %s\n", filename);
 	fclose(file);
 
-	return -1;
+	return 0;
 }
 
 static bool read_hex_data_from_text_file(const char *filename, unsigned char *data_out, size_t data_size, size_t *actual_read)
@@ -97,19 +107,36 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	ssize_t expected = parse_max_input_report_size(argv[1]);
-	if (expected < 0) {
-		fprintf(stderr, "Unable to expected max input report size from %s\n", argv[1]);
+        struct max_report_sizes expected;
+	if (parse_max_input_report_size(argv[1], &expected) < 0) {
+		fprintf(stderr, "Unable to get expected max report sizes from %s\n", argv[1]);
 		return EXIT_FAILURE;
 	}
 
-	ssize_t res = (ssize_t)get_max_input_report_size(report_descriptor, report_descriptor_size);
+	struct max_report_sizes computed = {
+		.input = (size_t)get_max_report_size(report_descriptor, report_descriptor_size, REPORT_DESCR_INPUT),
+		.output = (size_t)get_max_report_size(report_descriptor, report_descriptor_size, REPORT_DESCR_OUTPUT),
+		.feature = (size_t)get_max_report_size(report_descriptor, report_descriptor_size, REPORT_DESCR_FEATURE)
+	};
 
-	if (res != expected) {
-		fprintf(stderr, "Failed to properly compute size. Got %zd, expected %zd\n", res, expected);
-		return EXIT_FAILURE;
-	} else {
-		printf("Properly computed size: %zd\n", res);
-		return EXIT_SUCCESS;
+	int ret = EXIT_SUCCESS;
+
+	if (expected.input != computed.input) {
+		fprintf(stderr, "Failed to properly compute input size. Got %zu, expected %zu\n", computed.input, expected.input);
+		ret = EXIT_FAILURE;
 	}
+	if (expected.output != computed.output) {
+		fprintf(stderr, "Failed to properly compute output size. Got %zu, expected %zu\n", computed.output, expected.output);
+		ret = EXIT_FAILURE;
+	}
+	if (expected.feature != computed.feature) {
+		fprintf(stderr, "Failed to properly compute feature size. Got %zu, expected %zu\n", computed.feature, expected.feature);
+		ret = EXIT_FAILURE;
+	}
+
+	if (ret == EXIT_SUCCESS) {
+		printf("Properly computed sizes: %zu, %zu, %zu\n", computed.input, computed.output, computed.feature);
+	}
+
+	return ret;
 }
