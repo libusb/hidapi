@@ -286,7 +286,7 @@ static int get_usage(uint8_t *report_descriptor, size_t size,
 }
 
 /* Retrieves the largest report size (in bytes) from the passed in report descriptor.
-   The return value is the size on success and -1 on failure. */
+   The return value is the size on success and 0 on failure. */
 static size_t get_max_report_size(uint8_t * report_descriptor, int desc_size, enum report_descr_type report_type)
 {
 	int i = 0;
@@ -1314,7 +1314,7 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	if (desc_size > 0) {
 		dev->max_input_report_size = get_max_report_size(report_descriptor, desc_size, REPORT_DESCR_INPUT);
 	} else {
-		dev->max_input_report_size = -1;
+		dev->max_input_report_size = 0;
 	}
 
 	dev->input_endpoint = 0;
