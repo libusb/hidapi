@@ -279,26 +279,17 @@ static int get_usage(uint8_t *report_descriptor, size_t size,
 	return -1; /* failure */
 }
 
-/* Retrieves the largest input report size (in bytes) from the report descriptor.
-
-   Requires an opened device with *claimed interface*.
-
+/* Retrieves the largest input report size (in bytes) from the passed in report descriptor.
    The return value is the size on success and -1 on failure. */
-static size_t get_max_input_report_size(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size)
+static size_t get_max_input_report_size(uint8_t * report_descriptor, int desc_size)
 {
 	int i = 0;
 	int size_code;
 	int data_len, key_size;
 
-	int64_t report_size = 0, report_count = 0;
+	int64_t report_size = -1, report_count = -1;
+	ssize_t cur_size = 0;
 	ssize_t max_size = -1;
-
-	unsigned char report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
-
-	int desc_size = hid_get_report_descriptor_libusb(handle, interface_num, expected_report_descriptor_size, report_descriptor, sizeof(report_descriptor));
-	if (desc_size < 0) {
-		return -1;
-	}
 
 	while (i < desc_size) {
 		int key = report_descriptor[i];
@@ -325,26 +316,41 @@ static size_t get_max_input_report_size(libusb_device_handle *handle, int interf
 			key_size = 1;
 		}
 
-		if (key_cmd == 0x94) {
+		if (key_cmd == 0x94) { /* Report Count */
 			report_count = get_bytes(report_descriptor, desc_size, data_len, i);
 		}
-		if (key_cmd == 0x74) {
+		if (key_cmd == 0x74) { /* Report Size */
 			report_size = get_bytes(report_descriptor, desc_size, data_len, i);
 		}
-		if (key_cmd == 0x80) { // Input
-			/* report_size is in bits. Determine the total size (count * size),
-			   convert to bytes (rounded up), and add one byte for the report
-			   number. */
-			ssize_t size = (((report_count * report_size) + 7) / 8) + 1;
-			if (size > max_size)
-				max_size = size;
+		if (key_cmd == 0x80) { /* Input */
+			if (report_count < 0 || report_size < 0) {
+				/* We are missing size or count. That isn't good. */
+				return 0;
+			}
+			cur_size += (report_count * report_size);
+		}
+		if (key_cmd == 0x84) { /* Report ID */
+			if (cur_size > max_size) {
+				max_size = cur_size;
+			}
+			cur_size = 0;
 		}
 
 		/* Skip over this key and it's associated data */
 		i += data_len + key_size;
 	}
 
-	return max_size;
+	if (cur_size > max_size) {
+		max_size = cur_size;
+	}
+
+	if (max_size < 0) {
+		return -1;
+	}
+
+	/* report_size is in bits. Determine the total size convert to bytes
+	   (rounded up), and add one byte for the report number. */
+	return ((max_size + 7) / 8) + 1;
 }
 
 #if defined(__FreeBSD__) && __FreeBSD__ < 10
@@ -1294,7 +1300,15 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	dev->interface = intf_desc->bInterfaceNumber;
 
 	dev->report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
-	dev->max_input_report_size = get_max_input_report_size(dev->device_handle, dev->interface, dev->report_descriptor_size);
+
+	unsigned char report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+
+	int desc_size = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, report_descriptor, sizeof(report_descriptor));
+	if (desc_size > 0) {
+		dev->max_input_report_size = get_max_input_report_size(report_descriptor, desc_size);
+	} else {
+		dev->max_input_report_size = -1;
+	}
 
 	dev->input_endpoint = 0;
 	dev->input_ep_max_packet_size = 0;
