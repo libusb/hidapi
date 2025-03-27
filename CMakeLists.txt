@@ -70,8 +70,8 @@ if(HIDAPI_ENABLE_ASAN)
     endif()
 endif()
 
-if(WIN32)
-    # so far only Windows has tests
+if(WIN32 OR HIDAPI_WITH_LIBUSB)
+    # so far only Windows and LibUSB have tests
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
 else()
     set(HIDAPI_WITH_TESTS OFF)
