@@ -367,7 +367,7 @@ jobs:
       with:
         path: hidapisrc
     - name: Install dependencies
-      run: sudo dnf install -y autoconf automake libtool mingw64-gcc cmake ninja-build make
+      run: sudo dnf install -y autoconf automake libtool gawk mingw64-gcc cmake ninja-build make
     - name: Configure CMake
       run: |
         rm -rf build install
