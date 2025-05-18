@@ -80,7 +80,7 @@ case $host in
 	AC_MSG_RESULT([ (FreeBSD back-end)])
 	AC_DEFINE(OS_FREEBSD, 1, [FreeBSD implementation])
 	AC_SUBST(OS_FREEBSD)
-	backend="libusb"
+	backend="freebsd"
 	os="freebsd"
 	threads="pthreads"
 
@@ -88,6 +88,10 @@ case $host in
 	LDFLAGS="$LDFLAGS -L/usr/local/lib"
 	LIBS="${LIBS}"
 	PKG_CHECK_MODULES([libusb], [libusb-1.0 >= 1.0.9], true, [hidapi_lib_error libusb-1.0])
+	# HIDAPI/hidraw libs
+	LIBS_HIDRAW_PR="${LIBS_HIDRAW_PR} $libusb_LIBS"
+	CFLAGS_HIDRAW="${CFLAGS_HIDRAW} $libusb_CFLAGS"
+	# HIDAPI/libusb libs
 	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} $libusb_LIBS"
 	CFLAGS_LIBUSB="${CFLAGS_LIBUSB} $libusb_CFLAGS"
 	AC_CHECK_LIB([iconv], [iconv_open], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -liconv"], [hidapi_lib_error libiconv])
@@ -237,7 +241,7 @@ AM_CONDITIONAL(OS_WINDOWS, test "x$os" = xwindows)
 
 AC_CONFIG_HEADERS([config.h])
 
-if test "x$os" = "xlinux"; then
+if test "x$os" = xlinux; then
 	AC_CONFIG_FILES([pc/hidapi-hidraw.pc])
 	AC_CONFIG_FILES([pc/hidapi-libusb.pc])
 else
@@ -250,6 +254,7 @@ AC_CONFIG_FILES([Makefile \
 	hidtest/Makefile \
 	libusb/Makefile \
 	linux/Makefile \
+	freebsd/Makefile \
 	mac/Makefile \
 	testgui/Makefile \
 	windows/Makefile])
