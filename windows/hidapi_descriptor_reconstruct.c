@@ -140,7 +140,7 @@ static struct rd_main_item_node * rd_append_main_item_node(int first_bit, int la
 		list = &(*list)->next;
 	}
 
-	new_list_node = malloc(sizeof(*new_list_node)); // Create new list entry
+	new_list_node = (struct rd_main_item_node *)malloc(sizeof(*new_list_node)); // Create new list entry
 	new_list_node->FirstBit = first_bit;
 	new_list_node->LastBit = last_bit;
 	new_list_node->TypeOfNode = type_of_node;
@@ -203,13 +203,13 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	
 	// Allocate memory and initialize lookup table
 	rd_bit_range ****coll_bit_range;
-	coll_bit_range = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
+	coll_bit_range = (rd_bit_range ****)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
-		coll_bit_range[collection_node_idx] = malloc(256 * sizeof(*coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
+		coll_bit_range[collection_node_idx] = (rd_bit_range ***)malloc(256 * sizeof(*coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-			coll_bit_range[collection_node_idx][reportid_idx] = malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(*coll_bit_range[0][0]));
-			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
-				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = malloc(sizeof(rd_bit_range));
+			coll_bit_range[collection_node_idx][reportid_idx] = (rd_bit_range **)malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(*coll_bit_range[0][0]));
+			for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = (rd_bit_range *)malloc(sizeof(rd_bit_range));
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit = -1;
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->LastBit = -1;
 			}
@@ -217,7 +217,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	}
 
 	// Fill the lookup table where caps exist
-	for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+	for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 		for (USHORT caps_idx = pp_data->caps_info[rt_idx].FirstCap; caps_idx < pp_data->caps_info[rt_idx].LastCap; caps_idx++) {
 			int first_bit, last_bit;
 			first_bit = (pp_data->caps[caps_idx].BytePosition - 1) * 8
@@ -241,8 +241,8 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	//  coll_number_of_direct_childs[COLLECTION_INDEX]
 	// *************************************************************************
 	int max_coll_level = 0;
-	int *coll_levels = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
-	int *coll_number_of_direct_childs = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
+	int *coll_levels = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
+	int *coll_number_of_direct_childs = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		coll_levels[collection_node_idx] = -1;
 		coll_number_of_direct_childs[collection_node_idx] = 0;
@@ -286,7 +286,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				USHORT child_idx = link_collection_nodes[collection_node_idx].FirstChild;
 				while (child_idx) {
 					for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-						for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+						for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 							// Merge bit range from childs
 							if ((coll_bit_range[child_idx][reportid_idx][rt_idx]->FirstBit != -1) &&
 								(coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit > coll_bit_range[child_idx][reportid_idx][rt_idx]->FirstBit)) {
@@ -307,11 +307,9 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// Determine child collection order of the whole hierarchy, based on previously determined bit ranges
 	// and store it this index coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
 	// **************************************************************************************************
-	USHORT **coll_child_order;
-	coll_child_order = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
+	USHORT **coll_child_order = (USHORT **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
 	{
-		BOOLEAN *coll_parsed_flag;
-		coll_parsed_flag = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_parsed_flag[0]));
+		BOOLEAN *coll_parsed_flag = (BOOLEAN *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_parsed_flag[0]));
 		for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 			coll_parsed_flag[collection_node_idx] = FALSE;
 		}
@@ -321,7 +319,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			if ((coll_number_of_direct_childs[collection_node_idx] != 0) &&
 				(coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] == FALSE)) {
 				coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] = TRUE;
-				coll_child_order[collection_node_idx] = malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(*coll_child_order[0]));
+				coll_child_order[collection_node_idx] = (USHORT *)malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(*coll_child_order[0]));
 
 				{
 					// Create list of child collection indices
@@ -339,7 +337,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 
 				if (coll_number_of_direct_childs[collection_node_idx] > 1) {
 					// Sort child collections indices by bit positions
-					for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+					for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 						for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 							for (int child_idx = 1; child_idx < coll_number_of_direct_childs[collection_node_idx]; child_idx++) {
 								// since the coll_bit_range array is not sorted, we need to reference the collection index in 
@@ -380,10 +378,10 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// ***************************************************************************************
 	struct rd_main_item_node *main_item_list = NULL; // List root
 	// Lookup table to find the Collection items in the list by index
-	struct rd_main_item_node **coll_begin_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
-	struct rd_main_item_node **coll_end_lookup = malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
+	struct rd_main_item_node **coll_begin_lookup = (struct rd_main_item_node **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
+	struct rd_main_item_node **coll_end_lookup = (struct rd_main_item_node **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
 	{
-		int *coll_last_written_child = malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
+		int *coll_last_written_child = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
 		for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 			coll_last_written_child[collection_node_idx] = -1;
 		}
@@ -467,7 +465,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// Inserted Input/Output/Feature main items into the main_item_list
 	// in order of reconstructed bit positions
 	// ****************************************************************
-	for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+	for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 		// Add all value caps to node list
 		struct rd_main_item_node *firstDelimiterNode = NULL;
 		struct rd_main_item_node *delimiterCloseNode = NULL;
@@ -530,14 +528,17 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	{
 		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
 		struct rd_main_item_node *last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
-		for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+		for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 			for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 				last_bit_position[rt_idx][reportid_idx] = -1;
 				last_report_item_lookup[rt_idx][reportid_idx] = NULL;
 			}
 		}
 
+		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
+		// Windows pp_data are per top-level collection, therefore top level coll end is unique
+		struct rd_main_item_node* node_before_top_level_coll_end = NULL;
 
 		while (list->next != NULL)
 		{
@@ -552,21 +553,50 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 						struct rd_main_item_node *list_node = rd_search_main_item_list_for_bit_position(last_bit_position[list->MainItemType][list->ReportID], list->MainItemType, list->ReportID, &last_report_item_lookup[list->MainItemType][list->ReportID]);
 						rd_insert_main_item_node(last_bit_position[list->MainItemType][list->ReportID] + 1, list->FirstBit - 1, rd_item_node_padding, -1, 0, list->MainItemType, list->ReportID, &list_node);
 					}
+					if (list->ReportID != 0) {
+						devicehasReportIDs = TRUE;
+					}
 					last_bit_position[list->MainItemType][list->ReportID] = list->LastBit;
 					last_report_item_lookup[list->MainItemType][list->ReportID] = list;
 				}
 			}
+			if (list->next->MainItemType == rd_collection_end) {
+				// Store the node before the collection end - the last occurence is the end of the top level collection
+				node_before_top_level_coll_end = list;
+			}
 			list = list->next;
 		}
+
 		// Add 8 bit padding at each report end
-		for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+		for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 			for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 				if (last_bit_position[rt_idx][reportid_idx] != -1) {
 					int padding = 8 - ((last_bit_position[rt_idx][reportid_idx] + 1) % 8);
 					if (padding < 8) {
 						// Insert padding item after item referenced in last_report_item_lookup
 						rd_insert_main_item_node(last_bit_position[rt_idx][reportid_idx] + 1, last_bit_position[rt_idx][reportid_idx] + padding, rd_item_node_padding, -1, 0, (rd_main_items) rt_idx, (unsigned char) reportid_idx, &last_report_item_lookup[rt_idx][reportid_idx]);
+						if (last_report_item_lookup[rt_idx][reportid_idx] == node_before_top_level_coll_end) {
+							// If this padding item is at the end of the top level collection, update node_before_top_level_coll_end
+							node_before_top_level_coll_end = last_report_item_lookup[rt_idx][reportid_idx]->next;
+						}
+						last_bit_position[rt_idx][reportid_idx] += padding;
 					}
+				}
+			}
+		}
+
+		// Add full byte padding at the end of the report descriptor (only reconstructable, for devices without Report IDs)
+		for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+			if (!devicehasReportIDs && pp_data->caps_info[rt_idx].NumberOfCaps > 0 && pp_data->caps_info[rt_idx].ReportByteLength > 0) {
+				// ReportID 0 means this device uses not Report IDs
+				// => Maximum one report per type possible, so we can take the size from the buffer size for the report type
+				const unsigned char reportId = 0;
+				// ReportByteLength is the report length in bytes plus the one byte for the optional ReportID
+				int padding = (pp_data->caps_info[rt_idx].ReportByteLength - 1) * 8 - (last_bit_position[rt_idx][reportId] + 1);
+
+				if (padding > 0) {
+					// Insert padding item after item referenced in last_report_item_lookup
+					rd_insert_main_item_node(last_bit_position[rt_idx][reportId] + 1, last_bit_position[rt_idx][reportId] + padding, rd_item_node_padding, -1, 0, (rd_main_items)rt_idx, reportId, &node_before_top_level_coll_end);
 				}
 			}
 		}
@@ -652,13 +682,25 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		else if (main_item_list->TypeOfNode == rd_item_node_padding) {
 			// Padding
 			// The preparsed data doesn't contain any information about padding. Therefore all undefined gaps
-			// in the reports are filled with the same style of constant padding. 
+			// in the reports are filled with the same style of constant bit or byte padding. 
 
-			// Write "Report Size" with number of padding bits
-			rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit + 1), &rpt_desc);
+			if ((main_item_list->LastBit - main_item_list->FirstBit + 1) % 8 == 0) {
+				// Padding in full bytes
 
-			// Write "Report Count" for padding always as 1
-			rd_write_short_item(rd_global_report_count, 1, &rpt_desc);
+				// Write "Report Size" for padding bytes is 8
+				rd_write_short_item(rd_global_report_size, 8, &rpt_desc);
+
+				// Write "Report Count" with number of padding bytes
+				rd_write_short_item(rd_global_report_count, (main_item_list->LastBit - main_item_list->FirstBit + 1) / 8, &rpt_desc);
+			} else {
+				// Padding in bits
+
+				// Write "Report Size" with number of padding bits
+				rd_write_short_item(rd_global_report_size, (main_item_list->LastBit - main_item_list->FirstBit + 1), &rpt_desc);
+
+				// Write "Report Count" for padding bits is 1
+				rd_write_short_item(rd_global_report_count, 1, &rpt_desc);
+			}
 
 			if (rt_idx == HidP_Input) {
 				// Write "Input" main item - We know it's Constant - We can only guess the other bits, but they don't matter in case of const
@@ -966,7 +1008,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// Free multidimensionable array: coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-			for (HIDP_REPORT_TYPE rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
+			for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
 				free(coll_bit_range[collection_node_idx][reportid_idx][rt_idx]);
 			}
 			free(coll_bit_range[collection_node_idx][reportid_idx]);

@@ -128,7 +128,11 @@ void print_hid_report_descriptor_from_device(hid_device *device) {
 	int res = 0;
 
 	printf("  Report Descriptor: ");
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
 	res = hid_get_report_descriptor(device, descriptor, sizeof(descriptor));
+#else
+	(void)res;
+#endif
 	if (res < 0) {
 		printf("error getting: %ls", hid_error(device));
 	}
@@ -206,6 +210,10 @@ void test_device(void)
 		return;
 	}
 
+#if defined(_WIN32) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+	hid_winapi_set_write_timeout(handle, 5000);
+#endif
+
 	// Read the Manufacturer String
 	wstr[0] = 0x0000;
 	res = hid_get_manufacturer_string(handle, wstr, MAX_STR);
@@ -249,6 +257,13 @@ void test_device(void)
 	// Try to read from the device. There should be no
 	// data here, but execution should not block.
 	res = hid_read(handle, buf, 17);
+	if (res < 0) {
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+		printf("Unable to read from device: %ls\n", hid_read_error(handle));
+#else
+		printf("Unable to read from device: %ls\n", hid_error(handle));
+#endif
+	}
 
 	// Send a Feature Report to the device
 	buf[0] = 0x2;
@@ -258,7 +273,7 @@ void test_device(void)
 	buf[4] = 0x00;
 	res = hid_send_feature_report(handle, buf, 17);
 	if (res < 0) {
-		printf("Unable to send a feature report.\n");
+		printf("Unable to send a feature report: %ls\n", hid_error(handle));
 	}
 
 	memset(buf,0,sizeof(buf));
@@ -511,11 +526,11 @@ void interactive_loop(void)
 			test_device();
 			break;
 		case '4':
-            test_hotplug_deadlocks();
-            break;
+			test_hotplug_deadlocks();
+			break;
 		case 'Q':
-            printf("Quitting.\n");
-            return;
+			printf("Quitting.\n");
+			return;
 		default:
 			printf("Command not recognized\n");
 			break;
@@ -534,6 +549,23 @@ int main(int argc, char* argv[])
 {
 	(void)argc;
 	(void)argv;
+
+	/* --- HIDAPI R&D: this is just to force the compiler to ensure
+	       each of those functions are implemented (even as a stub)
+	       by each backend. --- */
+	(void)&hid_open;
+	(void)&hid_open_path;
+	(void)&hid_read_timeout;
+	(void)&hid_get_input_report;
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+	(void)&hid_send_output_report;
+#endif
+	(void)&hid_get_feature_report;
+	(void)&hid_send_feature_report;
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
+	(void)&hid_get_report_descriptor;
+#endif
+	/* --- */
 
 	if (hid_init())
 		return -1;
