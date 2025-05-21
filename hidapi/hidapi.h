@@ -382,13 +382,9 @@ extern "C" {
 
 			This function is intended for logging/debugging purposes.
 
-			This function guarantees to never return NULL.
+			This function guarantees to never return NULL for a valid @ref dev.
 			If there was no error in the last call to hid_read/hid_read_error -
 			the returned string clearly indicates that.
-
-			Any HIDAPI function that can explicitly indicate an execution failure
-			(e.g. by an error code, or by returning NULL) - may set the error string,
-			to be returned by this function.
 
 			Strings returned from hid_read_error() must not be freed by the user,
 			i.e. owned by HIDAPI library.
