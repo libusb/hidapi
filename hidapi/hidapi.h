@@ -144,6 +144,9 @@ extern "C" {
 			   Specifications:
 			   https://www.microsoft.com/download/details.aspx?id=103325 */
 			HID_API_BUS_SPI = 0x04,
+
+			/** Virtual bus */
+			HID_API_BUS_VIRTUAL = 0x05,
 		} hid_bus_type;
 
 		/** hidapi info structure */
