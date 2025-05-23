@@ -52,7 +52,7 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 15
+#define HID_API_VERSION_MINOR 16
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
