@@ -146,7 +146,10 @@ extern "C" {
 			HID_API_BUS_SPI = 0x04,
 
 			/** Virtual device
-			    E.g.: https://elixir.bootlin.com/linux/v4.0/source/include/uapi/linux/input.h#L955 */
+			    E.g.: https://elixir.bootlin.com/linux/v4.0/source/include/uapi/linux/input.h#L955 
+			    
+			    Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+			    */
 			HID_API_BUS_VIRTUAL = 0x05,
 		} hid_bus_type;
 
