@@ -55,6 +55,10 @@
 #endif
 #include HIDAPI_THREAD_MODEL_INCLUDE
 
+/* The value of the first callback handle to be given upon registration */
+/* Can be any arbitrary positive integer */
+#define FIRST_HOTPLUG_CALLBACK_HANDLE 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -132,6 +136,51 @@ static struct hid_api_version api_version = {
 };
 
 static libusb_context *usb_context = NULL;
+
+struct hid_hotplug_queue {
+	libusb_device* device;
+	int event; /* Arrived or removed */
+	struct hid_hotplug_queue* next;
+};
+
+static struct hid_hotplug_context {
+	/* A separate libusb context for hotplug events: helps avoid mutual blocking with read_thread's */
+	libusb_context * context;
+
+	/* libusb callback handle */
+	libusb_hotplug_callback_handle callback_handle;
+
+	/* HIDAPI unique callback handle counter */
+	hid_hotplug_callback_handle next_handle;
+
+	/* A thread that fills the event queue */
+	hidapi_thread_state libusb_thread;
+
+	/* A separate thread which processes hidapi's internal event queue */
+	hidapi_thread_state callback_thread;
+
+	/* This mutex prevents changes to the callback list */
+	pthread_mutex_t mutex;
+
+	/* Boolean flags */
+	unsigned char mutex_ready;
+	unsigned char mutex_in_use;
+	unsigned char cb_list_dirty;
+
+	struct hid_hotplug_queue* queue;
+
+	/* Linked list of the hotplug callbacks */
+	struct hid_hotplug_callback *hotplug_cbs;
+
+	/* Linked list of the device infos (mandatory when the device is disconnected) */
+	struct hid_device_info *devs;
+} hid_hotplug_context = {
+	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
+	.mutex_ready = 0,
+	.queue = NULL,
+	.hotplug_cbs = NULL,
+	.devs = NULL,
+};
 
 uint16_t get_usb_code_for_current_locale(void);
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
@@ -483,6 +532,103 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+struct hid_hotplug_callback
+{
+	unsigned short vendor_id;
+	unsigned short product_id;
+	hid_hotplug_callback_fn callback;
+	void* user_data;
+	int events;
+	struct hid_hotplug_callback* next;
+
+	hid_hotplug_callback_handle handle;
+};
+
+static void hid_internal_hotplug_remove_postponed()
+{
+	/* Unregister the callbacks whose removal was postponed */
+	/* This function is always called inside a locked mutex */
+	/* However, any actions are only allowed if the mutex is NOT in use and if the DIRTY flag is set */
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use || !hid_hotplug_context.cb_list_dirty) {
+		return;
+	}
+	
+	/* Traverse the list of callbacks and check if any were marked for removal */
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
+	while (*current) {
+		struct hid_hotplug_callback *callback = *current;
+		if (!callback->events) {
+			*current = (*current)->next;
+			free(callback);
+			continue;
+		}
+		current = &callback->next;
+	}
+	
+	/* Clear the flag so we don't start the cycle unless necessary */
+	hid_hotplug_context.cb_list_dirty = 0;
+}
+
+static void hid_internal_hotplug_cleanup()
+{
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
+		return;
+	}
+
+	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
+	hid_internal_hotplug_remove_postponed();
+
+	if (hid_hotplug_context.hotplug_cbs != NULL) {
+		return;
+	}
+
+	/* Wait for both threads to stop */
+	hidapi_thread_join(&hid_hotplug_context.libusb_thread);
+}
+
+static void hid_internal_hotplug_init()
+{
+	if (!hid_hotplug_context.mutex_ready) {
+		hidapi_thread_state_init(&hid_hotplug_context.libusb_thread);
+		hidapi_thread_state_init(&hid_hotplug_context.callback_thread);
+
+		/* Initialize the mutex as recursive */
+		pthread_mutexattr_t attr;
+		pthread_mutexattr_init(&attr);
+		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+		pthread_mutex_init(&hid_hotplug_context.mutex, &attr);
+		pthread_mutexattr_destroy(&attr);
+
+		/* Set state to Ready */
+		hid_hotplug_context.mutex_ready = 1;
+		hid_hotplug_context.mutex_in_use = 0;
+		hid_hotplug_context.cb_list_dirty = 0;
+	}
+}
+
+static void hid_internal_hotplug_exit()
+{
+	if (!hid_hotplug_context.mutex_ready) {
+		return;
+	}
+
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
+	/* Remove all callbacks from the list */
+	while (*current) {
+		struct hid_hotplug_callback* next = (*current)->next;
+		free(*current);
+		*current = next;
+	}
+	hid_internal_hotplug_cleanup();
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	hid_hotplug_context.mutex_ready = 0;
+	pthread_mutex_destroy(&hid_hotplug_context.mutex);
+
+	hidapi_thread_state_destroy(&hid_hotplug_context.callback_thread);
+	hidapi_thread_state_destroy(&hid_hotplug_context.libusb_thread);
+}
+
 int HID_API_EXPORT hid_init(void)
 {
 	if (!usb_context) {
@@ -506,9 +652,15 @@ int HID_API_EXPORT hid_exit(void)
 	if (usb_context) {
 		libusb_exit(usb_context);
 		usb_context = NULL;
+		hid_internal_hotplug_exit();
 	}
 
 	return 0;
+}
+
+static int hid_internal_match_device_id(unsigned short vendor_id, unsigned short product_id, unsigned short expected_vendor_id, unsigned short expected_product_id)
+{
+	return (expected_vendor_id == 0x0 || vendor_id == expected_vendor_id) && (expected_product_id == 0x0 || product_id == expected_product_id);
 }
 
 static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size, unsigned char *buf, size_t buf_size)
@@ -787,112 +939,134 @@ static int should_enumerate_interface(unsigned short vendor_id, const struct lib
 	return 0;
 }
 
-struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
+static struct hid_device_info* hid_enumerate_from_libusb(libusb_device *dev, unsigned short vendor_id, unsigned short product_id)
+{
+	struct hid_device_info *root = NULL; /* return object */
+	struct hid_device_info *cur_dev = NULL;
+	struct libusb_device_descriptor desc;
+	struct libusb_config_descriptor *conf_desc = NULL;
+	libusb_device_handle *handle = NULL;
+	int j, k;
+
+	int res = libusb_get_device_descriptor(dev, &desc);
+	if (res < 0)
+		return NULL;
+
+	unsigned short dev_vid = desc.idVendor;
+	unsigned short dev_pid = desc.idProduct;
+
+	if ((vendor_id != 0x0 && vendor_id != dev_vid) ||
+		(product_id != 0x0 && product_id != dev_pid)) {
+		return NULL;
+	}
+
+	res = libusb_get_active_config_descriptor(dev, &conf_desc);
+	if (res < 0)
+		libusb_get_config_descriptor(dev, 0, &conf_desc);
+	if (conf_desc) {
+		for (j = 0; j < conf_desc->bNumInterfaces; j++) {
+			const struct libusb_interface *intf = &conf_desc->interface[j];
+			for (k = 0; k < intf->num_altsetting; k++) {
+				const struct libusb_interface_descriptor *intf_desc;
+				intf_desc = &intf->altsetting[k];
+				if (should_enumerate_interface(dev_vid, intf_desc)) {
+					struct hid_device_info *tmp;
+
+					res = libusb_open(dev, &handle);
+
+#ifdef __ANDROID__
+					if (handle) {
+						/* There is (a potential) libusb Android backend, in which
+						   device descriptor is not accurate up until the device is opened.
+						   https://github.com/libusb/libusb/pull/874#discussion_r632801373
+						   A workaround is to re-read the descriptor again.
+						   Even if it is not going to be accepted into libusb master,
+						   having it here won't do any harm, since reading the device descriptor
+						   is as cheap as copy 18 bytes of data. */
+						libusb_get_device_descriptor(dev, &desc);
+					}
+#endif
+
+					tmp = create_device_info_for_device(dev, handle, &desc, conf_desc->bConfigurationValue, intf_desc->bInterfaceNumber);
+					if (tmp) {
+#ifdef INVASIVE_GET_USAGE
+						/* TODO: have a runtime check for this section. */
+
+						/*
+						This section is removed because it is too
+						invasive on the system. Getting a Usage Page
+						and Usage requires parsing the HID Report
+						descriptor. Getting a HID Report descriptor
+						involves claiming the interface. Claiming the
+						interface involves detaching the kernel driver.
+						Detaching the kernel driver is hard on the system
+						because it will unclaim interfaces (if another
+						app has them claimed) and the re-attachment of
+						the driver will sometimes change /dev entry names.
+						It is for these reasons that this section is
+						optional. For composite devices, use the interface
+						field in the hid_device_info struct to distinguish
+						between interfaces. */
+						if (handle) {
+							uint16_t report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
+
+							invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber, report_descriptor_size);
+						}
+#endif /* INVASIVE_GET_USAGE */
+
+						if (cur_dev) {
+							cur_dev->next = tmp;
+						}
+						else {
+							root = tmp;
+						}
+						cur_dev = tmp;
+					}
+
+					if (res >= 0) {
+						libusb_close(handle);
+						handle = NULL;
+					}
+					break;
+				}
+			} /* altsettings */
+		} /* interfaces */
+		libusb_free_config_descriptor(conf_desc);
+	}
+	return root;
+}
+
+struct hid_device_info HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
 	libusb_device **devs;
 	libusb_device *dev;
-	libusb_device_handle *handle = NULL;
 	ssize_t num_devs;
 	int i = 0;
 
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 
-	if(hid_init() < 0)
+	if (hid_init() < 0)
 		return NULL;
 
 	num_devs = libusb_get_device_list(usb_context, &devs);
 	if (num_devs < 0)
 		return NULL;
+
 	while ((dev = devs[i++]) != NULL) {
-		struct libusb_device_descriptor desc;
-		struct libusb_config_descriptor *conf_desc = NULL;
-		int j, k;
-
-		int res = libusb_get_device_descriptor(dev, &desc);
-		if (res < 0)
-			continue;
-
-		unsigned short dev_vid = desc.idVendor;
-		unsigned short dev_pid = desc.idProduct;
-
-		if ((vendor_id != 0x0 && vendor_id != dev_vid) ||
-		    (product_id != 0x0 && product_id != dev_pid)) {
-			continue;
+		struct hid_device_info *tmp = hid_enumerate_from_libusb(dev, vendor_id, product_id);
+		if (cur_dev) {
+			cur_dev->next = tmp;
 		}
-
-		res = libusb_get_active_config_descriptor(dev, &conf_desc);
-		if (res < 0)
-			libusb_get_config_descriptor(dev, 0, &conf_desc);
-		if (conf_desc) {
-			for (j = 0; j < conf_desc->bNumInterfaces; j++) {
-				const struct libusb_interface *intf = &conf_desc->interface[j];
-				for (k = 0; k < intf->num_altsetting; k++) {
-					const struct libusb_interface_descriptor *intf_desc;
-					intf_desc = &intf->altsetting[k];
-					if (should_enumerate_interface(dev_vid, intf_desc)) {
-						struct hid_device_info *tmp;
-
-						res = libusb_open(dev, &handle);
-
-#ifdef __ANDROID__
-						if (handle) {
-							/* There is (a potential) libusb Android backend, in which
-							   device descriptor is not accurate up until the device is opened.
-							   https://github.com/libusb/libusb/pull/874#discussion_r632801373
-							   A workaround is to re-read the descriptor again.
-							   Even if it is not going to be accepted into libusb master,
-							   having it here won't do any harm, since reading the device descriptor
-							   is as cheap as copy 18 bytes of data. */
-							libusb_get_device_descriptor(dev, &desc);
-						}
-#endif
-
-						tmp = create_device_info_for_device(dev, handle, &desc, conf_desc->bConfigurationValue, intf_desc->bInterfaceNumber);
-						if (tmp) {
-#ifdef INVASIVE_GET_USAGE
-							/* TODO: have a runtime check for this section. */
-
-							/*
-							This section is removed because it is too
-							invasive on the system. Getting a Usage Page
-							and Usage requires parsing the HID Report
-							descriptor. Getting a HID Report descriptor
-							involves claiming the interface. Claiming the
-							interface involves detaching the kernel driver.
-							Detaching the kernel driver is hard on the system
-							because it will unclaim interfaces (if another
-							app has them claimed) and the re-attachment of
-							the driver will sometimes change /dev entry names.
-							It is for these reasons that this section is
-							optional. For composite devices, use the interface
-							field in the hid_device_info struct to distinguish
-							between interfaces. */
-							if (handle) {
-								uint16_t report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
-
-								invasive_fill_device_info_usage(tmp, handle, intf_desc->bInterfaceNumber, report_descriptor_size);
-							}
-#endif /* INVASIVE_GET_USAGE */
-
-							if (cur_dev) {
-								cur_dev->next = tmp;
-							}
-							else {
-								root = tmp;
-							}
-							cur_dev = tmp;
-						}
-
-						if (res >= 0) {
-							libusb_close(handle);
-							handle = NULL;
-						}
-						break;
-					}
-				} /* altsettings */
-			} /* interfaces */
-			libusb_free_config_descriptor(conf_desc);
+		else {
+			root = tmp;
+			cur_dev = tmp;
+		}
+		/* Traverse to the end of newly attached tail */
+		if (cur_dev) {
+			while (cur_dev->next) {
+				cur_dev = cur_dev->next;
+			}
 		}
 	}
 
@@ -913,6 +1087,346 @@ void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
 		free(d);
 		d = next;
 	}
+}
+
+static int match_libusb_to_info(libusb_device *device, struct hid_device_info* info)
+{
+	/* make a path from this libusb device, but leave the last 2 fields as 0 */
+	char pseudo_path[64];
+	get_path(&pseudo_path, device, 0, 0);
+	int len = strlen(pseudo_path) - sizeof("0.0");
+	/* If the path on this HID device matches the template, aside from the last 2 fields, */
+	/* we assume the HID device is located on this libusb device */
+	return !strncmp(info->path, pseudo_path, len);
+}
+
+static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotplug_event event)
+{
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	hid_hotplug_context.mutex_in_use = 1;
+
+	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
+	while (*current) {
+		struct hid_hotplug_callback *callback = *current;
+		if ((callback->events & event) && hid_internal_match_device_id(info->vendor_id, info->product_id, callback->vendor_id, callback->product_id)) {
+			int result = callback->callback(callback->handle, info, event, callback->user_data);
+			/* If the result is non-zero, we mark the callback for removal and proceed */
+			if (result) {
+				(*current)->events = 0;
+				hid_hotplug_context.cb_list_dirty = 1;
+				continue;
+			}
+		}
+		current = &callback->next;
+	}
+
+	hid_hotplug_context.mutex_in_use = 0;
+	hid_internal_hotplug_remove_postponed();
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+}
+
+static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *device, libusb_hotplug_event event, void * user_data)
+{
+	(void)ctx;
+	(void)user_data;
+
+	/* Make sure we HOLD the device until we are done with it - otherwise libusb would delete it the moment we exit this function */
+	libusb_ref_device(device);
+
+	struct hid_hotplug_queue* msg = calloc(1, sizeof(struct hid_hotplug_queue));
+	if (NULL == msg) {
+		return 0;
+	}
+
+	msg->device = device;
+	msg->event = event;
+	msg->next = NULL;
+
+	/* We use this thread's mutex to protect the queue */
+	hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
+	struct hid_hotplug_queue* end = hid_hotplug_context.queue;
+	if (end) {
+		while (end->next) {
+			end = end->next;
+		}
+		end->next = msg;
+	} else {
+		hid_hotplug_context.queue = msg;
+	}
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
+
+	/* Wake up the other thread so it can react to the new message immediately */
+	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+
+	return 0;
+}
+
+static void process_hotplug_event(struct hid_hotplug_queue* msg)
+{
+	if (msg->event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
+		struct hid_device_info* info = hid_enumerate_from_libusb(msg->device, 0, 0);
+		struct hid_device_info* info_cur = info;
+		while (info_cur) {
+			/* For each device, call all matching callbacks */
+			/* TODO: possibly make the `next` field NULL to match the behavior on other systems */
+			hid_internal_invoke_callbacks(info_cur, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED);
+			info_cur = info_cur->next;
+		}
+
+		/* Append all we got to the end of the device list */
+		if (info) {
+			if (hid_hotplug_context.devs != NULL) {
+				struct hid_device_info* last = hid_hotplug_context.devs;
+				while (last->next != NULL) {
+					last = last->next;
+				}
+				last->next = info;
+			}
+			else {
+				hid_hotplug_context.devs = info;
+			}
+		}
+	}
+	else if (msg->event == LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT) {
+		for (struct hid_device_info **current = &hid_hotplug_context.devs; *current;) {
+			struct hid_device_info* info = *current;
+			if (match_libusb_to_info(msg->device, *current)) {
+				/* If the libusb device that's left matches this HID device, we detach it from the list */
+				*current = (*current)->next;
+				info->next = NULL;
+				hid_internal_invoke_callbacks(info, HID_API_HOTPLUG_EVENT_DEVICE_LEFT);
+				/* Free every removed device */
+				free(info);
+			} else {
+				current = &info->next;
+			}
+		}
+	}
+
+	/* Release the libusb device - we are done with it */
+	libusb_unref_device(msg->device);
+
+	/* Cleanup note: this function is called inside a thread that the clenup function would be waiting to finish */
+	/* Any callbacks that await removal are removed in hid_internal_invoke_callbacks */
+	/* No further cleaning is needed */
+}
+
+static void* callback_thread(void* user_data)
+{
+	(void) user_data;
+
+	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
+	/* This timeout only affects how much time it takes to stop the thread */
+	hidapi_timespec ts;
+	ts.tv_sec = 0;
+	ts.tv_nsec = 5000000;
+
+	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
+	
+	/* We stop the thread if by the moment there are no events left in the queue there are no callbacks left */
+	while (1) {
+		/* Make the tread fall asleep and wait for a condition to wake it up */
+		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
+
+		/* We use this thread's mutex to protect the queue */
+		hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
+		while (hid_hotplug_context.queue) {
+			struct hid_hotplug_queue *cur_event = hid_hotplug_context.queue;
+			process_hotplug_event(cur_event);
+
+			/* Empty the queue */
+			cur_event = cur_event->next;
+			free(hid_hotplug_context.queue);
+			hid_hotplug_context.queue = cur_event;
+		}
+		hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
+		if (!hid_hotplug_context.hotplug_cbs) {
+			break;
+		}
+	}
+
+	/* Cleanup connected device list */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
+
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
+
+	return NULL;
+}
+
+static void* hotplug_thread(void* user_data)
+{
+	(void) user_data;
+
+	hidapi_thread_create(&hid_hotplug_context.callback_thread, callback_thread, NULL);
+
+	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
+	/* This timeout only affects how much time it takes to stop the thread */
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 5000;
+
+	while (hid_hotplug_context.hotplug_cbs) {
+		/* This will allow libusb to call the callbacks, which will fill up the queue */
+		libusb_handle_events_timeout_completed(hid_hotplug_context.context, &tv, NULL);
+	}
+
+	/* Disarm the libusb listener */
+	libusb_hotplug_deregister_callback(hid_hotplug_context.context, hid_hotplug_context.callback_handle);
+	libusb_exit(hid_hotplug_context.context);
+
+	/* Forcibly wake up the thread so it can shut down immediately and wait for it to stop */
+	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+
+	hidapi_thread_join(&hid_hotplug_context.callback_thread);
+
+	return NULL;
+}
+
+int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short vendor_id, unsigned short product_id, int events, int flags, hid_hotplug_callback_fn callback, void *user_data, hid_hotplug_callback_handle *callback_handle)
+{
+	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
+		return -1;
+	}
+
+	/* Check params */
+	if (events == 0
+		|| (events & ~(HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT))
+		|| (flags & ~(HID_API_HOTPLUG_ENUMERATE))
+		|| callback == NULL) {
+		return -1;
+	}
+
+	struct hid_hotplug_callback* hotplug_cb = (struct hid_hotplug_callback*)calloc(1, sizeof(struct hid_hotplug_callback));
+
+	if (hotplug_cb == NULL) {
+		return -1;
+	}
+
+	/* Fill out the record */
+	hotplug_cb->next = NULL;
+	hotplug_cb->vendor_id = vendor_id;
+	hotplug_cb->product_id = product_id;
+	hotplug_cb->events = events;
+	hotplug_cb->user_data = user_data;
+	hotplug_cb->callback = callback;
+
+	/* Ensure we are ready to actually use the mutex */
+	hid_internal_hotplug_init();
+
+	/* Lock the mutex to avoid race itions */
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+
+	hotplug_cb->handle = hid_hotplug_context.next_handle++;
+
+	/* handle the unlikely case of handle overflow */
+	if (hid_hotplug_context.next_handle < 0)
+	{
+		hid_hotplug_context.next_handle = 1;
+	}
+
+	/* Return allocated handle */
+	if (callback_handle != NULL) {
+		*callback_handle = hotplug_cb->handle;
+	}
+	/* Append a new callback to the end */
+	if (hid_hotplug_context.hotplug_cbs != NULL) {
+		struct hid_hotplug_callback *last = hid_hotplug_context.hotplug_cbs;
+		while (last->next != NULL) {
+			last = last->next;
+		}
+		last->next = hotplug_cb;
+	}
+	else {
+		/* Fill already connected devices so we can use this info in disconnection notification */
+		if (libusb_init(&hid_hotplug_context.context)) {
+			free(hotplug_cb);
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			return -1;
+		}
+
+		hid_hotplug_context.devs = hid_enumerate(0, 0);
+		hid_hotplug_context.hotplug_cbs = hotplug_cb;
+
+		/* Arm a global callback to receive ALL notifications for HID class devices */
+		if (libusb_hotplug_register_callback(hid_hotplug_context.context,
+											LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+											0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, &hid_libusb_hotplug_callback, NULL,
+											&hid_hotplug_context.callback_handle)) {
+			/* Major malfunction, failed to register a callback */
+			libusb_exit(hid_hotplug_context.context);
+			free(hotplug_cb);
+			hid_hotplug_context.hotplug_cbs = NULL;
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			return -1;
+		}
+
+		/* Initialization succeeded! We run the threads now */
+		hidapi_thread_create(&hid_hotplug_context.libusb_thread, hotplug_thread, NULL);
+	}
+
+	/* Mark the mutex as IN USE, to prevent callback removal from inside a callback */
+	unsigned char old_state = hid_hotplug_context.mutex_in_use;
+	hid_hotplug_context.mutex_in_use = 1;
+	
+	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
+		struct hid_device_info* device = hid_hotplug_context.devs;
+		/* Notify about already connected devices, if asked so */
+		while (device != NULL) {
+			if (hid_internal_match_device_id(device->vendor_id, device->product_id, hotplug_cb->vendor_id, hotplug_cb->product_id)) {
+				(*hotplug_cb->callback)(hotplug_cb->handle, device, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, hotplug_cb->user_data);
+			}
+
+			device = device->next;
+		}
+	}
+
+	hid_hotplug_context.mutex_in_use = old_state;
+
+	hid_internal_hotplug_cleanup();
+
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+
+	return 0;
+}
+
+int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
+{
+	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG) || !hid_hotplug_context.mutex_ready || callback_handle <= 0) {
+		return -1;
+	}
+
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+
+	if (hid_hotplug_context.hotplug_cbs == NULL) {
+		pthread_mutex_unlock(&hid_hotplug_context.mutex);
+		return -1;
+	}
+
+	int result = -1;
+
+	/* Remove this notification */
+	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
+		if ((*current)->handle == callback_handle) {
+			/* Check if we were already in a locked state, as we are NOT allowed to remove any callbacks if we are */
+			if (hid_hotplug_context.mutex_in_use) {
+				(*current)->events = 0;
+				hid_hotplug_context.cb_list_dirty = 1;
+			} else {
+				struct hid_hotplug_callback *next = (*current)->next;
+				free(*current);
+				*current = next;
+			}
+			result = 0;
+			break;
+		}
+	}
+
+	hid_internal_hotplug_cleanup();
+
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+
+	return result;
 }
 
 hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
@@ -1041,10 +1555,10 @@ static void *read_thread(void *param)
 	/* Make the first submission. Further submissions are made
 	   from inside read_callback() */
 	res = libusb_submit_transfer(dev->transfer);
-	if(res < 0) {
-                LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
-                dev->shutdown_thread = 1;
-                dev->transfer_loop_finished = 1;
+	if (res < 0) {
+		LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
+		dev->shutdown_thread = 1;
+		dev->transfer_loop_finished = 1;
 	}
 
 	/* Notify the main thread that the read thread is up and running. */
@@ -1106,7 +1620,7 @@ static void init_xbox360(libusb_device_handle *device_handle, unsigned short idV
 		/* The HORIPAD FPS for Nintendo Switch requires this to enable input reports.
 		   This VID/PID is also shared with other HORI controllers, but they all seem
 		   to be fine with this as well.
-		 */
+		*/
 		memset(data, 0, sizeof(data));
 		libusb_control_transfer(device_handle, 0xC1, 0x01, 0x100, 0x0, data, sizeof(data), 100);
 	}
@@ -1132,7 +1646,7 @@ static void init_xboxone(libusb_device_handle *device_handle, unsigned short idV
 
 				/* Newer Microsoft Xbox One controllers have a high speed alternate setting */
 				if (idVendor == vendor_microsoft &&
-				    intf_desc->bInterfaceNumber == 0 && intf_desc->bAlternateSetting == 1) {
+					intf_desc->bInterfaceNumber == 0 && intf_desc->bAlternateSetting == 1) {
 					bSetAlternateSetting = 1;
 				} else if (intf_desc->bInterfaceNumber != 0 && intf_desc->bAlternateSetting == 0) {
 					bSetAlternateSetting = 1;
@@ -1231,13 +1745,13 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 		   endpoint. */
 		int is_interrupt =
 			(ep->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK)
-		      == LIBUSB_TRANSFER_TYPE_INTERRUPT;
+			  == LIBUSB_TRANSFER_TYPE_INTERRUPT;
 		int is_output =
 			(ep->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK)
-		      == LIBUSB_ENDPOINT_OUT;
+			  == LIBUSB_ENDPOINT_OUT;
 		int is_input =
 			(ep->bEndpointAddress & LIBUSB_ENDPOINT_DIR_MASK)
-		      == LIBUSB_ENDPOINT_IN;
+			  == LIBUSB_ENDPOINT_IN;
 
 		/* Decide whether to use it for input or output. */
 		if (dev->input_endpoint == 0 &&
@@ -1271,7 +1785,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	int d = 0;
 	int good_open = 0;
 
-	if(hid_init() < 0)
+	if (hid_init() < 0)
 		return NULL;
 
 	dev = new_hid_device();
@@ -1346,7 +1860,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 	int res = 0;
 	int j = 0, k = 0;
 
-	if(hid_init() < 0)
+	if (hid_init() < 0)
 		return NULL;
 
 	dev = new_hid_device();
