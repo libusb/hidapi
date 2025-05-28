@@ -347,7 +347,7 @@ struct hid_usage_iterator {
  * 1 when finished processing descriptor.
  * -1 on a malformed report.
  */
-static int get_next_hid_usage(const __u8 *report_descriptor, __u32 size, struct hid_usage_iterator *ctx, unsigned short *usage_page, unsigned short *usage)
+static int get_next_hid_usage(const __u8 *report_descriptor, __u32 size, struct hid_usage_iterator *ctx, unsigned short *usage_page, unsigned short *usage, unsigned char *report_id)
 {
 	int data_len, key_size;
 	int initial = ctx->pos == 0; /* Used to handle case where no top-level application collection is defined */
@@ -379,6 +379,10 @@ static int get_next_hid_usage(const __u8 *report_descriptor, __u32 size, struct 
 				*usage = get_hid_report_bytes(report_descriptor, size, data_len, ctx->pos);
 				usage_found = 1;
 			}
+			break;
+
+		case 0x84: /* Report ID 6.2.2.7 (Global) */
+			*report_id = get_hid_report_bytes(report_descriptor, size, data_len, ctx->pos);
 			break;
 
 		case 0xa0: /* Collection 6.2.2.4 (Main) */
@@ -805,6 +809,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 
 	if (result >= 0) {
 		unsigned short page = 0, usage = 0;
+		unsigned char report_id = 0;
 		struct hid_usage_iterator usage_iterator;
 		memset(&usage_iterator, 0, sizeof(usage_iterator));
 
@@ -812,16 +817,17 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 		 * Parse the first usage and usage page
 		 * out of the report descriptor.
 		 */
-		if (!get_next_hid_usage(report_desc.value, report_desc.size, &usage_iterator, &page, &usage)) {
+		if (!get_next_hid_usage(report_desc.value, report_desc.size, &usage_iterator, &page, &usage, &report_id)) {
 			cur_dev->usage_page = page;
 			cur_dev->usage = usage;
+			cur_dev->report_id = report_id;
 		}
 
 		/*
 		 * Parse any additional usage and usage pages
 		 * out of the report descriptor.
 		 */
-		while (!get_next_hid_usage(report_desc.value, report_desc.size, &usage_iterator, &page, &usage)) {
+		while (!get_next_hid_usage(report_desc.value, report_desc.size, &usage_iterator, &page, &usage, &report_id)) {
 			/* Create new record for additional usage pairs */
 			struct hid_device_info *tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
 			struct hid_device_info *prev_dev = cur_dev;
@@ -842,6 +848,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			cur_dev->product_string = prev_dev->product_string? wcsdup(prev_dev->product_string): NULL;
 			cur_dev->usage_page = page;
 			cur_dev->usage = usage;
+			cur_dev->report_id = report_id;
 			cur_dev->bus_type = prev_dev->bus_type;
 		}
 	}

@@ -176,6 +176,9 @@ extern "C" {
 			/** Usage for this Device/Interface
 			    (Windows/Mac/hidraw only) */
 			unsigned short usage;
+			/** Report ID for this Device/Interface
+			    (hidraw only) */
+			unsigned char report_id;
 			/** The USB interface which this logical device
 			    represents.
 
