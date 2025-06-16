@@ -804,6 +804,7 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	case HID_API_BUS_UNKNOWN:
 	case HID_API_BUS_SPI:
 	case HID_API_BUS_I2C:
+	case HID_API_BUS_VIRTUAL:
 		/* shut down -Wswitch */
 		break;
 	}
