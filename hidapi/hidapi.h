@@ -52,7 +52,7 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 15
+#define HID_API_VERSION_MINOR 16
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
@@ -144,6 +144,13 @@ extern "C" {
 			   Specifications:
 			   https://www.microsoft.com/download/details.aspx?id=103325 */
 			HID_API_BUS_SPI = 0x04,
+
+			/** Virtual device
+			    E.g.: https://elixir.bootlin.com/linux/v4.0/source/include/uapi/linux/input.h#L955 
+			    
+			    Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+			*/
+			HID_API_BUS_VIRTUAL = 0x05,
 		} hid_bus_type;
 
 		/** hidapi info structure */
@@ -379,13 +386,9 @@ extern "C" {
 
 			This function is intended for logging/debugging purposes.
 
-			This function guarantees to never return NULL.
+			This function guarantees to never return NULL for a valid @ref dev.
 			If there was no error in the last call to hid_read/hid_read_error -
 			the returned string clearly indicates that.
-
-			Any HIDAPI function that can explicitly indicate an execution failure
-			(e.g. by an error code, or by returning NULL) - may set the error string,
-			to be returned by this function.
 
 			Strings returned from hid_read_error() must not be freed by the user,
 			i.e. owned by HIDAPI library.
