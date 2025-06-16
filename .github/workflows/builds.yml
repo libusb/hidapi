@@ -562,7 +562,7 @@ jobs:
           -GNinja \
           -B build/shared_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/shared-cmake \
+          -Dhidapi_ROOT=$(pwd)/install/shared-cmake \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
           "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
         cd build/shared_test
@@ -573,7 +573,7 @@ jobs:
           -GNinja \
           -B build/static_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/static-cmake \
+          -Dhidapi_ROOT=$(pwd)/install/static-cmake \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
           "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
         cd build/static_test
