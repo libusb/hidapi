@@ -36,7 +36,7 @@ static int parse_max_input_report_size(const char * filename, struct max_report_
 			if (sscanf(line, "pp_data->caps_info[2]->ReportByteLength   = %hu\n", &temp_ushort) == 1) {
 				sizes->feature = (size_t)temp_ushort;
 			}
-			if (sscanf(line, "pp_data->cap[%*hu]->ReportID                     = 0x%hu\n", &temp_ushort) == 1) {
+			if (sscanf(line, "pp_data->cap[%*u]->ReportID                     = 0x%hu\n", &temp_ushort) == 1) {
 				if (temp_ushort) {
 					has_report_id = 1;
 				}

@@ -330,7 +330,7 @@ static size_t get_max_report_size(uint8_t * report_descriptor, int desc_size, en
 		if (key_cmd == 0x74) { /* Report Size */
 			report_size = get_bytes(report_descriptor, desc_size, data_len, i);
 		}
-		if (key_cmd == report_type) { /* Input / Output / Feature */
+		if (key_cmd == (int)report_type) { /* Input / Output / Feature */
 			if (report_count < 0 || report_size < 0) {
 				/* We are missing size or count. That isn't good. */
 				return 0;
