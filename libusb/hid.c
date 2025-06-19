@@ -297,6 +297,8 @@ static size_t get_max_report_size(uint8_t * report_descriptor, int desc_size, en
 	size_t cur_size = 0;
 	size_t max_size = 0;
 
+	int report_id_used = 0;
+
 	while (i < desc_size) {
 		int key = report_descriptor[i];
 		int key_cmd = key & 0xfc;
@@ -336,6 +338,7 @@ static size_t get_max_report_size(uint8_t * report_descriptor, int desc_size, en
 			cur_size += (report_count * report_size);
 		}
 		if (key_cmd == 0x84) { /* Report ID */
+			report_id_used = 1;
 			if (cur_size > max_size) {
 				max_size = cur_size;
 			}
@@ -355,8 +358,8 @@ static size_t get_max_report_size(uint8_t * report_descriptor, int desc_size, en
 		return 0;
 	} else {
 		/* report_size is in bits. Determine the total size convert to bytes
-		(rounded up), and add one byte for the report number. */
-		return ((max_size + 7) / 8) + 1;
+		(rounded up), and add one byte for the report number (if used). */
+		return ((max_size + 7) / 8) + report_id_used;
 	}
 }
 

@@ -21,6 +21,8 @@ static int parse_max_input_report_size(const char * filename, struct max_report_
 		return -1;
 	}
 
+	int has_report_id = 0;
+
 	char line[256];
 	{
 		while (fgets(line, sizeof(line), file) != NULL) {
@@ -34,10 +36,30 @@ static int parse_max_input_report_size(const char * filename, struct max_report_
 			if (sscanf(line, "pp_data->caps_info[2]->ReportByteLength   = %hu\n", &temp_ushort) == 1) {
 				sizes->feature = (size_t)temp_ushort;
 			}
+			if (sscanf(line, "pp_data->cap[%*hu]->ReportID                     = 0x%hu\n", &temp_ushort) == 1) {
+				if (temp_ushort) {
+					has_report_id = 1;
+				}
+			}
 		}
 	}
 
 	fclose(file);
+
+        // Windows includes ReportID byte in descriptor size even when it is not
+        // used. Our libusb calculation does not include it, so remove one byte
+        // from the sizes to make it match.
+        if (!has_report_id) {
+		if (sizes->input) {
+			sizes->input--;
+		}
+		if (sizes->output) {
+			sizes->output--;
+		}
+		if (sizes->feature) {
+			sizes->feature--;
+		}
+	}
 
 	return 0;
 }
