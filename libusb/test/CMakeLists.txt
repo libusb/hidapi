@@ -64,6 +64,5 @@ foreach(TEST_CASE ${HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES})
      add_test(NAME "LibUsbHidMaxInputReportSizeTest_${TEST_CASE}"
           COMMAND max_input_report_size_test "${TEST_PP_DATA}" "${TEST_EXPECTED_DESCRIPTOR}"
           WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
-          #WORKING_DIRECTORY "$<TARGET_FILE_DIR:hidapi_winapi>"
      )
 endforeach()
