@@ -755,6 +755,28 @@ void HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *de
 	}
 }
 
+int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short vendor_id, unsigned short product_id, int events, int flags, hid_hotplug_callback_fn callback, void *user_data, hid_hotplug_callback_handle *callback_handle)
+{
+	/* Stub */
+	(void)vendor_id;
+	(void)product_id;
+	(void)events;
+	(void)flags;
+	(void)callback;
+	(void)user_data;
+	(void)callback_handle;
+
+	return -1;
+}
+
+int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
+{
+	/* Stub */
+	(void)callback_handle;
+
+	return -1;
+}
+
 HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
 {
 	struct hid_device_info *devs;
