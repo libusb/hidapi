@@ -637,7 +637,7 @@ next_line:
 }
 
 
-static struct hid_device_info * create_device_info_for_device(struct udev_device *raw_dev)
+static struct hid_device_info * create_device_info_for_device(struct udev_device *raw_dev, long report_timeout_msec)
 {
 	struct hid_device_info *root = NULL;
 	struct hid_device_info *cur_dev = NULL;
@@ -792,8 +792,29 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 
 	/* Usage Page and Usage */
 
-	if (sysfs_path) {
-		result = get_hid_report_descriptor_from_sysfs(sysfs_path, &report_desc);
+    if (sysfs_path) {
+        struct timeval tv_start;
+        struct timezone tz;
+        long time_diff_usec = -1;
+        result = -1;
+
+        gettimeofday(&tv_start, &tz);
+        long report_timeout_usec = report_timeout_msec * 1000L;
+
+        while(time_diff_usec < report_timeout_usec && result < 0)
+        {
+            result = get_hid_report_descriptor_from_sysfs(sysfs_path, &report_desc);
+
+            struct timeval tv_end;
+            gettimeofday(&tv_end, &tz);
+            time_diff_usec = (tv_end.tv_sec - tv_start.tv_sec) * 1000000L + (tv_end.tv_usec - tv_start.tv_usec);
+
+            if((result < 0) && (report_timeout_usec > 0L))
+            {
+                // Make a short sleep before retrying (1 millisecond is ok)
+                usleep(1000);
+            }
+        }
 	}
 	else {
 		result = -1;
@@ -876,7 +897,7 @@ static struct hid_device_info * create_device_info_for_hid_device(hid_device *de
 	/* Open a udev device from the dev_t. 'c' means character device. */
 	udev_dev = udev_device_new_from_devnum(udev, 'c', s.st_rdev);
 	if (udev_dev) {
-		root = create_device_info_for_device(udev_dev);
+        root = create_device_info_for_device(udev_dev, 0);
 	}
 
 	if (!root) {
@@ -1113,7 +1134,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 		if (!raw_dev)
 			continue;
 
-		tmp = create_device_info_for_device(raw_dev);
+        tmp = create_device_info_for_device(raw_dev, 0);
 		if (tmp) {
 			if (cur_dev) {
 				cur_dev->next = tmp;
@@ -1237,7 +1258,9 @@ static void* hotplug_thread(void* user_data)
 				const char* action = udev_device_get_action(raw_dev);
 				if (!strcmp(action, "add")) {
 					// We create a list of all usages on this UDEV device
-					struct hid_device_info *info = create_device_info_for_device(raw_dev);
+                    // NOTE: The device may not be ready to work immediately when the event is received
+                    // We let the device up to 4 seconds to become ready to provide the descriptor
+                    struct hid_device_info *info = create_device_info_for_device(raw_dev, 4000L);
 					struct hid_device_info *info_cur = info;
 					while (info_cur) {
 						/* For each device, call all matching callbacks */
