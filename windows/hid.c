@@ -30,6 +30,11 @@
 extern "C" {
 #endif
 
+#ifndef WIN32_LEAN_AND_MEAN
+/* Reduces the overhead from windows.h */
+#define WIN32_LEAN_AND_MEAN
+#endif
+
 #include "hidapi_winapi.h"
 
 #include <windows.h>
