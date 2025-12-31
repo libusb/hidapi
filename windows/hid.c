@@ -30,6 +30,11 @@
 extern "C" {
 #endif
 
+#ifdef WIN32_LEAN_AND_MEAN
+/* This define may be set by IDE/project and it breaks compilation */
+#undef WIN32_LEAN_AND_MEAN
+#endif
+
 #include "hidapi_winapi.h"
 
 #include <windows.h>
