@@ -287,7 +287,7 @@ static __u32 get_hid_report_bytes(const __u8 *rpt, size_t len, size_t num_bytes,
  * Skips all nested Collection, i.e. iterates until the end of current level Collection.
  *
  * The return value is non-0 when an end of current Collection is found,
- * 0 when error is occured (broken Descriptor, end of a Collection is found before its begin,
+ * 0 when error is occurred (broken Descriptor, end of a Collection is found before its begin,
  *  or no Collection is found at all).
  */
 static int hid_iterate_over_collection(const __u8 *report_descriptor, __u32 size, unsigned int *pos, int *data_len, int *key_size)
@@ -688,6 +688,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 		case BUS_I2C:
 		case BUS_USB:
 		case BUS_SPI:
+		case BUS_VIRTUAL:
 			break;
 
 		default:
@@ -781,6 +782,14 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
 
 			cur_dev->bus_type = HID_API_BUS_SPI;
+
+			break;
+
+		case BUS_VIRTUAL:
+			cur_dev->manufacturer_string = wcsdup(L"");
+			cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
+
+			cur_dev->bus_type = HID_API_BUS_VIRTUAL;
 
 			break;
 

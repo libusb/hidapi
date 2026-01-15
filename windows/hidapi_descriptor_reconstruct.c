@@ -400,11 +400,11 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				collection_node_idx = coll_child_order[collection_node_idx][0];
 
 				// In a HID Report Descriptor, the first usage declared is the most preferred usage for the control.
-				// While the order in the WIN32 capabiliy strutures is the opposite:
+				// While the order in the WIN32 capabiliy structures is the opposite:
 				// Here the preferred usage is the last aliased usage in the sequence.
 
 				if (link_collection_nodes[collection_node_idx].IsAlias && (firstDelimiterNode == NULL)) {
-					// Alliased Collection (First node in link_collection_nodes -> Last entry in report descriptor output)
+					// Aliased Collection (First node in link_collection_nodes -> Last entry in report descriptor output)
 					firstDelimiterNode = main_item_list;
 					coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_usage, 0, &main_item_list);
 					coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_close, 0, &main_item_list);
@@ -430,7 +430,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				collection_node_idx = coll_child_order[collection_node_idx][nextChild];
 												
 				if (link_collection_nodes[collection_node_idx].IsAlias && (firstDelimiterNode == NULL)) {
-					// Alliased Collection (First node in link_collection_nodes -> Last entry in report descriptor output)
+					// Aliased Collection (First node in link_collection_nodes -> Last entry in report descriptor output)
 					firstDelimiterNode = main_item_list;
 					coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_usage, 0, &main_item_list);
 					coll_begin_lookup[collection_node_idx] = rd_append_main_item_node(0, 0, rd_item_node_collection, 0, collection_node_idx, rd_delimiter_close, 0, &main_item_list);
@@ -490,11 +490,11 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			list_node = rd_search_main_item_list_for_bit_position(first_bit, (rd_main_items) rt_idx, pp_data->caps[caps_idx].ReportID, &coll_begin);
 
 			// In a HID Report Descriptor, the first usage declared is the most preferred usage for the control.
-			// While the order in the WIN32 capabiliy strutures is the opposite:
+			// While the order in the WIN32 capabiliy structures is the opposite:
 			// Here the preferred usage is the last aliased usage in the sequence.
 
 			if (pp_data->caps[caps_idx].IsAlias && (firstDelimiterNode == NULL)) {
-				// Alliased Usage (First node in pp_data->caps -> Last entry in report descriptor output)
+				// Aliased Usage (First node in pp_data->caps -> Last entry in report descriptor output)
 				firstDelimiterNode = list_node;
 				rd_insert_main_item_node(first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rd_delimiter_usage, pp_data->caps[caps_idx].ReportID, &list_node);
 				rd_insert_main_item_node(first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rd_delimiter_close, pp_data->caps[caps_idx].ReportID, &list_node);
@@ -503,7 +503,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				rd_insert_main_item_node(first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rd_delimiter_usage, pp_data->caps[caps_idx].ReportID, &list_node);
 			}
 			else if (!pp_data->caps[caps_idx].IsAlias && (firstDelimiterNode != NULL)) {
-				// Alliased Collection (Last node in pp_data->caps -> First entry in report descriptor output)
+				// Aliased Collection (Last node in pp_data->caps -> First entry in report descriptor output)
 				rd_insert_main_item_node(first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rd_delimiter_usage, pp_data->caps[caps_idx].ReportID, &list_node);
 				rd_insert_main_item_node(first_bit, last_bit, rd_item_node_cap, caps_idx, pp_data->caps[caps_idx].LinkCollection, rd_delimiter_open, pp_data->caps[caps_idx].ReportID, &list_node);
 				firstDelimiterNode = NULL;
@@ -561,7 +561,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				}
 			}
 			if (list->next->MainItemType == rd_collection_end) {
-				// Store the node before the collection end - the last occurence is the end of the top level collection
+				// Store the node before the collection end - the last occurrence is the end of the top level collection
 				node_before_top_level_coll_end = list;
 			}
 			list = list->next;
