@@ -585,7 +585,8 @@ static int get_hid_report_descriptor_from_hidraw(hid_device *dev, struct hidraw_
  */
 static int parse_uevent_info(const char *uevent, unsigned *bus_type,
 	unsigned short *vendor_id, unsigned short *product_id,
-	char **serial_number_utf8, char **product_name_utf8)
+	char **serial_number_utf8, char **product_name_utf8,
+	unsigned short *version)
 {
 	char tmp[1024];
 
@@ -638,6 +639,11 @@ static int parse_uevent_info(const char *uevent, unsigned *bus_type,
 			free(*serial_number_utf8);
 			*serial_number_utf8 = strdup(value);
 			found_serial = 1;
+		} else if (strcmp(key, "HID_FIRMWARE_VERSION") == 0) {
+			/* Available since Linux 7.1 when supplied by the kernel driver:
+			 * https://git.kernel.org/torvalds/c/6ca9029c823b7853e980585e757343e0e84227cd
+			 */
+			*version = (unsigned short)strtol(value, NULL, 16);
 		}
 
 next_line:
@@ -664,6 +670,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 	char *serial_number_utf8 = NULL;
 	char *product_name_utf8 = NULL;
 	unsigned bus_type;
+	unsigned short hid_version = 0;
 	int result;
 	struct hidraw_report_descriptor report_desc;
 
@@ -686,7 +693,8 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 		&dev_vid,
 		&dev_pid,
 		&serial_number_utf8,
-		&product_name_utf8);
+		&product_name_utf8,
+		&hid_version);
 
 	if (!result) {
 		/* parse_uevent_info() failed for at least one field. */
@@ -725,7 +733,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 	cur_dev->serial_number = utf8_to_wchar_t(serial_number_utf8);
 
 	/* Release Number */
-	cur_dev->release_number = 0x0;
+	cur_dev->release_number = hid_version;
 
 	/* Interface Number */
 	cur_dev->interface_number = -1;
