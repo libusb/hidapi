@@ -138,11 +138,13 @@ static int lookup_functions()
 		goto err;
 	}
 
-#if defined(__GNUC__)
-# pragma GCC diagnostic push
-# pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-#define RESOLVE(lib_handle, x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) goto err;
+/* Avoid direct function-pointer cast from FARPROC to typed callback pointer.
+   Using memcpy keeps this warning-free regardless of the compiler and compiler settings. */
+#define RESOLVE(lib_handle, x) do { \
+	FARPROC proc_addr = GetProcAddress(lib_handle, #x); \
+	if (!proc_addr) goto err; \
+	memcpy(&x, &proc_addr, sizeof(x)); \
+} while (0)
 
 	RESOLVE(hid_lib_handle, HidD_GetHidGuid);
 	RESOLVE(hid_lib_handle, HidD_GetAttributes);
@@ -167,9 +169,6 @@ static int lookup_functions()
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_ListW);
 
 #undef RESOLVE
-#if defined(__GNUC__)
-# pragma GCC diagnostic pop
-#endif
 
 	return 0;
 
