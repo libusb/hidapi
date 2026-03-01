@@ -31,7 +31,8 @@ extern "C" {
 #endif
 
 #ifdef WIN32_LEAN_AND_MEAN
-/* This define may be set by IDE/project and it breaks compilation */
+/* It may be set by IDE/project and apparently HIDAPI relies
+ * on certain Windows headers being included by default. */
 #undef WIN32_LEAN_AND_MEAN
 #endif
 
