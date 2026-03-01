@@ -9,13 +9,40 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(_MSC_VER) && (_MSC_VER >= 1400)
+#define HIDAPI_SSCANF sscanf_s
+#define HIDAPI_FSCANF fscanf_s
+#define HIDAPI_SCANSET_SIZE(buf) , (unsigned)_countof(buf)
+#else
+#define HIDAPI_SSCANF sscanf
+#define HIDAPI_FSCANF fscanf
+#define HIDAPI_SCANSET_SIZE(buf)
+#endif
+
+#define sscanf HIDAPI_SSCANF
+
+static const char* hidapi_strerror_compat(int errnum, char* buf, size_t buf_size)
+{
+#if defined(_MSC_VER) && (_MSC_VER >= 1400)
+	if (strerror_s(buf, buf_size, errnum) == 0) {
+		return buf;
+	}
+	return "Unknown error";
+#else
+	(void)buf;
+	(void)buf_size;
+	return strerror(errnum);
+#endif
+}
+
 static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 {
 	FILE* file;
 	errno_t err = fopen_s(&file, filename, "r");
 
 	if (err != 0) {
-		fprintf(stderr, "ERROR: Couldn't open file '%s' for reading: %s\n", filename, strerror(err));
+		char err_buf[128];
+		fprintf(stderr, "ERROR: Couldn't open file '%s' for reading: %s\n", filename, hidapi_strerror_compat((int)err, err_buf, sizeof(err_buf)));
 		return NULL;
 	}
 
@@ -49,8 +76,8 @@ static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 			if (sscanf(line, "dev->product_id          = 0x%04hX\n", &product_id)) continue;
 			if (sscanf(line, "dev->usage_page          = 0x%04hX\n", &usage_page)) continue;
 			if (sscanf(line, "dev->usage               = 0x%04hX\n", &usage)) continue;
-			if (sscanf(line, "dev->manufacturer_string = \"%127[^\"\n]", manufacturer_string)) continue;
-			if (sscanf(line, "dev->product_string      = \"%127[^\"\n]", product_string)) continue;
+			if (sscanf(line, "dev->manufacturer_string = \"%127[^\"\n]", manufacturer_string HIDAPI_SCANSET_SIZE(manufacturer_string))) continue;
+			if (sscanf(line, "dev->product_string      = \"%127[^\"\n]", product_string HIDAPI_SCANSET_SIZE(product_string))) continue;
 			if (sscanf(line, "dev->release_number      = 0x%04hX\n", &release_number)) continue;
 			if (sscanf(line, "dev->interface_number    = %d\n", &interface_number)) continue;
 			// if (sscanf(line, "dev->path                = \"%127[^\"]\n", path)) continue;
@@ -456,14 +483,15 @@ static BOOLEAN read_hex_data_from_text_file(const char *filename, unsigned char 
 	FILE* file = NULL;
 	errno_t err = fopen_s(&file, filename, "r");
 	if (err != 0) {
-		fprintf(stderr, "ERROR: Couldn't open file '%s' for reading: %s\n", filename, strerror(err));
+		char err_buf[128];
+		fprintf(stderr, "ERROR: Couldn't open file '%s' for reading: %s\n", filename, hidapi_strerror_compat((int)err, err_buf, sizeof(err_buf)));
 		return FALSE;
 	}
 
 	BOOLEAN result = TRUE;
 	unsigned int val;
 	char buf[16];
-	while (fscanf(file, "%15s", buf) == 1) {
+	while (HIDAPI_FSCANF(file, "%15s", buf HIDAPI_SCANSET_SIZE(buf)) == 1) {
 		if (sscanf(buf, "0x%X", &val) != 1) {
 			fprintf(stderr, "Invalid HEX text ('%s') file, got %s\n", filename, buf);
 			result = FALSE;
