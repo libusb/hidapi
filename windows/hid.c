@@ -24,6 +24,12 @@
 extern "C" {
 #endif
 
+#ifdef WIN32_LEAN_AND_MEAN
+/* It may be set by IDE/project and apparently HIDAPI relies
+ * on certain Windows headers being included by default. */
+#undef WIN32_LEAN_AND_MEAN
+#endif
+
 #include "hidapi_winapi.h"
 
 #include <windows.h>
