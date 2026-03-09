@@ -123,6 +123,11 @@ static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 
 		if (FirstByteOfLinkCollectionArray != 0 && NumberLinkCollectionNodes != 0) {
 			size_t size_of_preparsed_data = offsetof(hidp_preparsed_data, caps) + FirstByteOfLinkCollectionArray + (NumberLinkCollectionNodes * sizeof(hid_pp_link_collection_node));
+			if (size_of_preparsed_data > 1024 * 1024) {
+				fprintf(stderr, "Error: preparsed data size too large: %zu\n", size_of_preparsed_data);
+				fclose(file);
+				return NULL;
+			}
 			pp_data->FirstByteOfLinkCollectionArray = FirstByteOfLinkCollectionArray;
 			pp_data->NumberLinkCollectionNodes = NumberLinkCollectionNodes;
 			FirstByteOfLinkCollectionArray = 0;
