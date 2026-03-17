@@ -30,6 +30,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <iconv.h>
+#ifndef ICONV_CONST
+#define ICONV_CONST
+#endif
+
 #include <poll.h>
 
 /* NetBSD */
@@ -1087,7 +1091,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	struct usb_string_desc usd;
 	usb_string_descriptor_t *str;
 	iconv_t ic;
-	const char *src;
+	ICONV_CONST char *src;
 	size_t srcleft;
 	char *dst;
 	size_t dstleft;
@@ -1131,7 +1135,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 		return -1;
 	}
 
-	src = (const char *) str->bString;
+	src = (ICONV_CONST char *)str->bString;
 	srcleft = str->bLength - 2;
 	dst = (char *) string;
 	dstleft = sizeof(wchar_t[maxlen]);
