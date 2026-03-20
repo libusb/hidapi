@@ -439,7 +439,7 @@ jobs:
     - name: Install dependencies
       run: |
         pacman -Sy
-        pacman -S --noconfirm glibc lib32-glibc gcc pkg-config autoconf automake libtool libusb libudev0 cmake make
+        pacman -S --noconfirm glibc lib32-glibc gcc pkg-config autoconf automake libtool libusb cmake make
     - name: Configure CMake
       run: |
         rm -rf build install
