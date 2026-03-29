@@ -1215,16 +1215,16 @@ static void* callback_thread(void* user_data)
 {
 	(void) user_data;
 
-	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
-	/* This timeout only affects how much time it takes to stop the thread */
-	hidapi_timespec ts;
-	ts.tv_sec = 0;
-	ts.tv_nsec = 5000000;
-
 	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 	
 	/* We stop the thread if by the moment there are no events left in the queue there are no callbacks left */
 	while (1) {
+		/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
+		/* This timeout only affects how much time it takes to stop the thread */
+		hidapi_timespec ts;
+		hidapi_thread_gettime(&ts);
+		hidapi_thread_addtime(&ts, 5);
+
 		/* Make the tread fall asleep and wait for a condition to wake it up */
 		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
 
