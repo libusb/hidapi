@@ -153,6 +153,9 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length);
 static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
+	if (!dev)
+		return NULL;
+
 	dev->blocking = 1;
 
 	hidapi_thread_state_init(&dev->thread_state);
@@ -1670,10 +1673,19 @@ ret:
 	return bytes_read;
 }
 
+
 int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
 	return hid_read_timeout(dev, data, length, dev->blocking ? -1 : 0);
 }
+
+
+HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
+{
+	(void)dev;
+	return L"hid_read_error is not implemented yet";
+}
+
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 {

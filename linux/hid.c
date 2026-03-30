@@ -75,6 +75,7 @@ struct hid_device_ {
 	int device_handle;
 	int blocking;
 	wchar_t *last_error_str;
+	wchar_t *last_read_error_str;
 	struct hid_device_info* device_info;
 };
 
@@ -97,6 +98,7 @@ static hid_device *new_hid_device(void)
 	dev->device_handle = -1;
 	dev->blocking = 1;
 	dev->last_error_str = NULL;
+	dev->last_read_error_str = NULL;
 	dev->device_info = NULL;
 
 	return dev;
@@ -280,7 +282,7 @@ static __u32 get_hid_report_bytes(const __u8 *rpt, size_t len, size_t num_bytes,
  * Skips all nested Collection, i.e. iterates until the end of current level Collection.
  *
  * The return value is non-0 when an end of current Collection is found,
- * 0 when error is occured (broken Descriptor, end of a Collection is found before its begin,
+ * 0 when error is occurred (broken Descriptor, end of a Collection is found before its begin,
  *  or no Collection is found at all).
  */
 static int hid_iterate_over_collection(const __u8 *report_descriptor, __u32 size, unsigned int *pos, int *data_len, int *key_size)
@@ -400,8 +402,8 @@ static int get_next_hid_usage(const __u8 *report_descriptor, __u32 size, struct 
 	/* If no top-level application collection is found and usage page/usage pair is found, pair is valid
 	   https://docs.microsoft.com/en-us/windows-hardware/drivers/hid/top-level-collections */
 	if (initial && usage_found && ctx->usage_page_found) {
-			*usage_page = ctx->usage_page;
-			return 0; /* success */
+		*usage_page = ctx->usage_page;
+		return 0; /* success */
 	}
 
 	return 1; /* finished processing */
@@ -446,6 +448,8 @@ static int get_hid_report_descriptor_from_sysfs(const char *sysfs_path, struct h
 	/* Construct <sysfs_path>/device/report_descriptor */
 	size_t rpt_path_len = strlen(sysfs_path) + 25 + 1;
 	char* rpt_path = (char*) calloc(1, rpt_path_len);
+	if (!rpt_path)
+		return -1;
 	snprintf(rpt_path, rpt_path_len, "%s/device/report_descriptor", sysfs_path);
 
 	res = get_hid_report_descriptor(rpt_path, rpt_desc);
@@ -679,6 +683,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 		case BUS_I2C:
 		case BUS_USB:
 		case BUS_SPI:
+		case BUS_VIRTUAL:
 			break;
 
 		default:
@@ -775,6 +780,14 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 
 			break;
 
+		case BUS_VIRTUAL:
+			cur_dev->manufacturer_string = wcsdup(L"");
+			cur_dev->product_string = utf8_to_wchar_t(product_name_utf8);
+
+			cur_dev->bus_type = HID_API_BUS_VIRTUAL;
+
+			break;
+
 		default:
 			/* Unknown device type - this should never happen, as we
 			 * check for USB and Bluetooth devices above */
@@ -782,7 +795,14 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 	}
 
 	/* Usage Page and Usage */
-	result = get_hid_report_descriptor_from_sysfs(sysfs_path, &report_desc);
+
+	if (sysfs_path) {
+		result = get_hid_report_descriptor_from_sysfs(sysfs_path, &report_desc);
+	}
+	else {
+		result = -1;
+	}
+
 	if (result >= 0) {
 		unsigned short page = 0, usage = 0;
 		struct hid_usage_iterator usage_iterator;
@@ -807,7 +827,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			struct hid_device_info *prev_dev = cur_dev;
 
 			if (!tmp)
-				continue;
+				break;
 			cur_dev->next = tmp;
 			cur_dev = tmp;
 
@@ -852,6 +872,7 @@ static struct hid_device_info * create_device_info_for_hid_device(hid_device *de
 	/* Create the udev object */
 	udev = udev_new();
 	if (!udev) {
+		errno = ENOMEM;
 		register_device_error(dev, "Couldn't create udev context");
 		return NULL;
 	}
@@ -864,6 +885,7 @@ static struct hid_device_info * create_device_info_for_hid_device(hid_device *de
 
 	if (!root) {
 		/* TODO: have a better error reporting via create_device_info_for_device */
+		errno = EIO;
 		register_device_error(dev, "Couldn't create hid_device_info");
 	}
 
@@ -1059,6 +1081,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	dev = new_hid_device();
 	if (!dev) {
+		errno = ENOMEM;
 		register_global_error("Couldn't allocate memory");
 		return NULL;
 	}
@@ -1071,8 +1094,8 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 		/* Make sure this is a HIDRAW device - responds to HIDIOCGRDESCSIZE */
 		res = ioctl(dev->device_handle, HIDIOCGRDESCSIZE, &desc_size);
 		if (res < 0) {
-			hid_close(dev);
 			register_global_error_format("ioctl(GRDESCSIZE) error for '%s', not a HIDRAW device?: %s", path, strerror(errno));
+			hid_close(dev);
 			return NULL;
 		}
 
@@ -1093,7 +1116,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
-		register_device_error(dev, strerror(errno));
+		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
@@ -1107,8 +1130,14 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 
 int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t length, int milliseconds)
 {
+	if (!data || (length == 0)) {
+		errno = EINVAL;
+		register_error_str(&dev->last_read_error_str, "Zero buffer/length");
+		return -1;
+	}
+
 	/* Set device error to none */
-	register_device_error(dev, NULL);
+	register_error_str(&dev->last_read_error_str, NULL);
 
 	int bytes_read;
 
@@ -1132,7 +1161,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		}
 		if (ret == -1) {
 			/* Error */
-			register_device_error(dev, strerror(errno));
+			register_error_str(&dev->last_read_error_str, strerror(errno));
 			return ret;
 		}
 		else {
@@ -1140,7 +1169,8 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			   indicate a device disconnection. */
 			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
 				// We cannot use strerror() here as no -1 was returned from poll().
-				register_device_error(dev, "hid_read_timeout: unexpected poll error (device disconnected)");
+				errno = EIO;
+				register_error_str(&dev->last_read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
 				return -1;
 			}
 		}
@@ -1151,7 +1181,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		if (errno == EAGAIN || errno == EINPROGRESS)
 			bytes_read = 0;
 		else
-			register_device_error(dev, strerror(errno));
+			register_error_str(&dev->last_read_error_str, strerror(errno));
 	}
 
 	return bytes_read;
@@ -1160,6 +1190,13 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 {
 	return hid_read_timeout(dev, data, length, (dev->blocking)? -1: 0);
+}
+
+HID_API_EXPORT const wchar_t * HID_API_CALL  hid_read_error(hid_device *dev)
+{
+	if (dev->last_read_error_str == NULL)
+		return L"Success";
+	return dev->last_read_error_str;
 }
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
@@ -1177,6 +1214,12 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 {
 	int res;
 
+	if (!data || (length == 0)) {
+		errno = EINVAL;
+		register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	register_device_error(dev, NULL);
 
 	res = ioctl(dev->device_handle, HIDIOCSFEATURE(length), data);
@@ -1189,6 +1232,12 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
+
+	if (!data || (length == 0)) {
+		errno = EINVAL;
+		register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
 
 	register_device_error(dev, NULL);
 
@@ -1203,6 +1252,12 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device *dev, const un
 {
 	int res;
 
+	if (!data || (length == 0)) {
+		errno = EINVAL;
+		register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
 	register_device_error(dev, NULL);
 
 	res = ioctl(dev->device_handle, HIDIOCSOUTPUT(length), data);
@@ -1215,6 +1270,12 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device *dev, const un
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
+
+	if (!data || (length == 0)) {
+		errno = EINVAL;
+		register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
 
 	register_device_error(dev, NULL);
 
@@ -1232,8 +1293,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	close(dev->device_handle);
 
-	/* Free the device error message */
-	register_device_error(dev, NULL);
+	free(dev->last_error_str);
+	free(dev->last_read_error_str);
 
 	hid_free_enumeration(dev->device_info);
 
@@ -1244,6 +1305,7 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
 	if (!string || !maxlen) {
+		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
@@ -1268,6 +1330,7 @@ int HID_API_EXPORT_CALL hid_get_manufacturer_string(hid_device *dev, wchar_t *st
 int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
 	if (!string || !maxlen) {
+		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
@@ -1292,6 +1355,7 @@ int HID_API_EXPORT_CALL hid_get_product_string(hid_device *dev, wchar_t *string,
 int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *string, size_t maxlen)
 {
 	if (!string || !maxlen) {
+		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
@@ -1315,7 +1379,10 @@ int HID_API_EXPORT_CALL hid_get_serial_number_string(hid_device *dev, wchar_t *s
 
 
 HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_device *dev) {
-	if (!dev->device_info) {
+	if (dev->device_info) {
+		register_device_error(dev, NULL);
+	}
+	else {
 		// Lazy initialize device_info
 		dev->device_info = create_device_info_for_hid_device(dev);
 	}
@@ -1330,6 +1397,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	(void)string;
 	(void)maxlen;
 
+	errno = ENOSYS;
 	register_device_error(dev, "hid_get_indexed_string: not supported by hidraw");
 
 	return -1;
@@ -1339,6 +1407,15 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char *buf, size_t buf_size)
 {
 	struct hidraw_report_descriptor rpt_desc;
+
+	if (!buf || !buf_size) {
+		errno = EINVAL;
+		register_device_error(dev, "Zero buffer/length");
+		return -1;
+	}
+
+	register_device_error(dev, NULL);
+
 	int res = get_hid_report_descriptor_from_hidraw(dev, &rpt_desc);
 	if (res < 0) {
 		/* error already registered */

@@ -19,12 +19,6 @@
 #ifndef HIDAPI_DESCRIPTOR_RECONSTRUCT_H__
 #define HIDAPI_DESCRIPTOR_RECONSTRUCT_H__
 
-#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-/* Do not warn about wcsncpy usage.
-   https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt */
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "hidapi_winapi.h"
 
 #ifdef _MSC_VER
