@@ -1142,8 +1142,8 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	msg->event = event;
 	msg->next = NULL;
 
-	/* We use this thread's mutex to protect the queue */
-	hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
+	/* Use callback_thread's mutex to protect the queue and signal it */
+	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 	struct hid_hotplug_queue* end = hid_hotplug_context.queue;
 	if (end) {
 		while (end->next) {
@@ -1153,10 +1153,10 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	} else {
 		hid_hotplug_context.queue = msg;
 	}
-	hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
 
-	/* Wake up the other thread so it can react to the new message immediately */
+	/* Wake up the callback thread so it can react to the new message immediately */
 	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
 
 	return 0;
 }
@@ -1215,31 +1215,27 @@ static void* callback_thread(void* user_data)
 {
 	(void) user_data;
 
-	/* 5 msec timeout seems reasonable; don't set too low to avoid high CPU usage */
-	/* This timeout only affects how much time it takes to stop the thread */
-	hidapi_timespec ts;
-	ts.tv_sec = 0;
-	ts.tv_nsec = 5000000;
-
 	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 	
 	/* We stop the thread if by the moment there are no events left in the queue there are no callbacks left */
 	while (1) {
-		/* Make the tread fall asleep and wait for a condition to wake it up */
-		hidapi_thread_cond_timedwait(&hid_hotplug_context.callback_thread, &ts);
+		/* Wait for events to arrive or shutdown signal */
+		while (!hid_hotplug_context.queue && hid_hotplug_context.hotplug_cbs) {
+			hidapi_thread_cond_wait(&hid_hotplug_context.callback_thread);
+		}
 
-		/* We use this thread's mutex to protect the queue */
-		hidapi_thread_mutex_lock(&hid_hotplug_context.libusb_thread);
+		/* Process all pending events from the queue */
 		while (hid_hotplug_context.queue) {
 			struct hid_hotplug_queue *cur_event = hid_hotplug_context.queue;
-			process_hotplug_event(cur_event);
+			hid_hotplug_context.queue = cur_event->next;
 
-			/* Empty the queue */
-			cur_event = cur_event->next;
-			free(hid_hotplug_context.queue);
-			hid_hotplug_context.queue = cur_event;
+			/* Release the lock while processing to avoid blocking event producers */
+			hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
+			process_hotplug_event(cur_event);
+			free(cur_event);
+			hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 		}
-		hidapi_thread_mutex_unlock(&hid_hotplug_context.libusb_thread);
+
 		if (!hid_hotplug_context.hotplug_cbs) {
 			break;
 		}
@@ -1276,7 +1272,9 @@ static void* hotplug_thread(void* user_data)
 	libusb_exit(hid_hotplug_context.context);
 
 	/* Forcibly wake up the thread so it can shut down immediately and wait for it to stop */
+	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
 
 	hidapi_thread_join(&hid_hotplug_context.callback_thread);
 

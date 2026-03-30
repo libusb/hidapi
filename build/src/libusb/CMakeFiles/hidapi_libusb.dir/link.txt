@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/hidapi_libusb.dir/link.d -shared -Wl,-soname,libhidapi-libusb.so.0 -o libhidapi-libusb.so.0.16.0 CMakeFiles/hidapi_libusb.dir/hid.c.o  /usr/lib/x86_64-linux-gnu/libusb-1.0.so
