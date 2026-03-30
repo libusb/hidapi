@@ -173,7 +173,8 @@ static struct hid_hotplug_context {
 	struct hid_hotplug_callback *hotplug_cbs;
 
 	/* Linked list of the device infos (mandatory when the device is disconnected).
-	 * Only accessed from callback_thread. */
+	 * Initialized before callback_thread is created; exclusively owned by
+	 * callback_thread after that (both reads/writes and final cleanup). */
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
@@ -1218,9 +1219,6 @@ static void* callback_thread(void* user_data)
 
 	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 
-	/* Initialize the known-device list; only accessed from this thread */
-	hid_hotplug_context.devs = hid_enumerate(0, 0);
-
 	/* We stop the thread if by the moment there are no events left in the queue there are no callbacks left */
 	while (1) {
 		/* Wait for events to arrive or shutdown signal */
@@ -1342,12 +1340,14 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		last->next = hotplug_cb;
 	}
 	else {
+		/* Fill already connected devices so we can use this info in disconnection notification */
 		if (libusb_init(&hid_hotplug_context.context)) {
 			free(hotplug_cb);
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			return -1;
 		}
 
+		hid_hotplug_context.devs = hid_enumerate(0, 0);
 		hid_hotplug_context.hotplug_cbs = hotplug_cb;
 
 		/* Arm a global callback to receive ALL notifications for HID class devices */
@@ -1372,8 +1372,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	hid_hotplug_context.mutex_in_use = 1;
 	
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
-		struct hid_device_info* all_devs = hid_enumerate(0, 0);
-		struct hid_device_info* device = all_devs;
+		struct hid_device_info* device = hid_hotplug_context.devs;
 		/* Notify about already connected devices, if asked so */
 		while (device != NULL) {
 			if (hid_internal_match_device_id(device->vendor_id, device->product_id, hotplug_cb->vendor_id, hotplug_cb->product_id)) {
@@ -1382,7 +1381,6 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 			device = device->next;
 		}
-		hid_free_enumeration(all_devs);
 	}
 
 	hid_hotplug_context.mutex_in_use = old_state;
