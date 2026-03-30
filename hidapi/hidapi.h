@@ -303,6 +303,11 @@ extern "C" {
 			This callback may be called by an internal event thread and as such it is
 			recommended the callback do minimal processing before returning.
 
+			It is NOT safe to call hid_open/hid_open_path or any other global/non-device
+			functions from within this callback. If you need to open
+			or close a device in response to a hotplug event, queue the
+			device path and handle it on your own application thread.
+
 			hidapi will call this function later, when a matching event had happened on
 			a matching device.
 
@@ -315,6 +320,8 @@ extern "C" {
 
 			@param callback_handle The hid_hotplug_callback_handle callback handle.
 			@param device The hid_device_info of device this event occurred on event that occurred.
+				The device pointer is only valid for the duration of the callback.
+				If you need the information later, copy the relevant fields before returning.
 			@param event Event that occurred.
 			@param user_data User data provided when this callback was registered.
 				(Optionally NULL).
@@ -357,6 +364,9 @@ extern "C" {
 		/** @brief Deregister a callback from a HID hotplug.
 
 			This function is safe to call from within a hotplug callback.
+
+			It is safe to call this function on an already deregistered
+			callback handle - the call will be a no-op returning 0.
 
 			@ingroup API
 
