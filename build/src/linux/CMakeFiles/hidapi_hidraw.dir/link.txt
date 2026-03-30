@@ -1,1 +1,0 @@
-/usr/bin/cc -fPIC -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/hidapi_hidraw.dir/link.d -shared -Wl,-soname,libhidapi-hidraw.so.0 -o libhidapi-hidraw.so.0.16.0 CMakeFiles/hidapi_hidraw.dir/hid.c.o  /usr/lib/x86_64-linux-gnu/libudev.so

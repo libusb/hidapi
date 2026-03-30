@@ -30,3 +30,4 @@ CMakeLists.txt.user
 
 # doxgen output
 doxygen/html/
+build/
