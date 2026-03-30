@@ -173,8 +173,8 @@ static struct hid_hotplug_context {
 	struct hid_hotplug_callback *hotplug_cbs;
 
 	/* Linked list of the device infos (mandatory when the device is disconnected).
-	 * Initialized before callback_thread is created; exclusively owned by
-	 * callback_thread after that (both reads/writes and final cleanup). */
+	 * Protected by `mutex` for both reads and writes.
+	 * Final cleanup is done by callback_thread during shutdown. */
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
@@ -1165,6 +1165,11 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 
 static void process_hotplug_event(struct hid_hotplug_queue* msg)
 {
+	/* Lock the mutex to avoid race conditions with hid_hotplug_register_callback(),
+	 * which may iterate devs during HID_API_HOTPLUG_ENUMERATE while holding this mutex.
+	 * The mutex is recursive, so hid_internal_invoke_callbacks() can safely re-acquire it. */
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+
 	if (msg->event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
 		struct hid_device_info* info = hid_enumerate_from_libusb(msg->device, 0, 0);
 		struct hid_device_info* info_cur = info;
@@ -1204,6 +1209,8 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 			}
 		}
 	}
+
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	/* Release the libusb device - we are done with it */
 	libusb_unref_device(msg->device);
