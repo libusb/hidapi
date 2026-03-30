@@ -147,6 +147,8 @@ static struct hid_api_version api_version = {
 
 static libusb_context *usb_context = NULL;
 
+static hidapi_error_ctx last_global_error;
+
 uint16_t get_usb_code_for_current_locale(void);
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
 
@@ -583,12 +585,17 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 
 int HID_API_EXPORT hid_init(void)
 {
+	register_libusb_error(&last_global_error, LIBUSB_SUCCESS, NULL);
+
 	if (!usb_context) {
 		const char *locale;
 
 		/* Init Libusb */
-		if (libusb_init(&usb_context))
+		int res = libusb_init(&usb_context);
+		if (res) {
+			register_libusb_error(&last_global_error, res, "libusb_init");
 			return -1;
+		}
 
 		/* Set the locale if it's not set. */
 		locale = setlocale(LC_CTYPE, NULL);
@@ -605,6 +612,10 @@ int HID_API_EXPORT hid_exit(void)
 		libusb_exit(usb_context);
 		usb_context = NULL;
 	}
+
+	/* Free global error state */
+	free_hidapi_error(&last_global_error);
+	memset(&last_global_error, 0, sizeof(last_global_error));
 
 	return 0;
 }
@@ -898,11 +909,14 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	struct hid_device_info *cur_dev = NULL;
 
 	if(hid_init() < 0)
+		/* register_global_error: global error is set by hid_init */
 		return NULL;
 
 	num_devs = libusb_get_device_list(usb_context, &devs);
-	if (num_devs < 0)
+	if (num_devs < 0) {
+		register_libusb_error(&last_global_error, (enum libusb_error)num_devs, "libusb_get_device_list");
 		return NULL;
+	}
 	while ((dev = devs[i++]) != NULL) {
 		struct libusb_device_descriptor desc;
 		struct libusb_config_descriptor *conf_desc = NULL;
@@ -997,6 +1011,14 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 	libusb_free_device_list(devs, 1);
 
+	if (root == NULL) {
+		if (vendor_id == 0 && product_id == 0) {
+			register_string_error(&last_global_error, "No HID devices found in the system.");
+		} else {
+			register_string_error(&last_global_error, "No HID devices with requested VID/PID found in the system.");
+		}
+	}
+
 	return root;
 }
 
@@ -1020,7 +1042,13 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 	const char *path_to_open = NULL;
 	hid_device *handle = NULL;
 
+	/* register_global_error: global error is reset by hid_enumerate/hid_init */
 	devs = hid_enumerate(vendor_id, product_id);
+	if (!devs) {
+		/* register_global_error: global error is already set by hid_enumerate */
+		return NULL;
+	}
+
 	cur_dev = devs;
 	while (cur_dev) {
 		if (cur_dev->vendor_id == vendor_id &&
@@ -1043,6 +1071,8 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 	if (path_to_open) {
 		/* Open the device */
 		handle = hid_open_path(path_to_open);
+	} else {
+		register_string_error(&last_global_error, "Device with requested VID/PID/(SerialNumber) not found");
 	}
 
 	hid_free_enumeration(devs);
@@ -1371,15 +1401,22 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	int good_open = 0;
 
 	if(hid_init() < 0)
+		/* register_global_error: global error is set by hid_init */
 		return NULL;
 
 	dev = new_hid_device();
 	if (!dev) {
 		LOG("hid_open_path failed: Couldn't allocate memory\n");
+		register_string_error(&last_global_error, "hid_open_path: Couldn't allocate memory");
 		return NULL;
 	}
 
-	libusb_get_device_list(usb_context, &devs);
+	res = libusb_get_device_list(usb_context, &devs);
+	if (res < 0) {
+		register_libusb_error(&last_global_error, res, "hid_open_path/libusb_get_device_list");
+		free_hid_device(dev);
+		return NULL;
+	}
 	while ((usb_dev = devs[d++]) != NULL && !good_open) {
 		struct libusb_device_descriptor desc;
 		struct libusb_config_descriptor *conf_desc = NULL;
@@ -1409,11 +1446,14 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 						res = libusb_open(usb_dev, &dev->device_handle);
 						if (res < 0) {
 							LOG("can't open device\n");
+							register_libusb_error(&last_global_error, res, "hid_open_path/libusb_open");
 							break;
 						}
 						good_open = hidapi_initialize_device(dev, intf_desc, conf_desc);
-						if (!good_open)
+						if (!good_open) {
+							register_string_error(&last_global_error, "hid_open_path: failed to initialize device");
 							libusb_close(dev->device_handle);
+						}
 					}
 				}
 			}
@@ -1429,6 +1469,9 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 	else {
 		/* Unable to open any devices. */
+		if (last_global_error.error_code == LIBUSB_SUCCESS) {
+			register_string_error(&last_global_error, "hid_open_path: device not found");
+		}
 		free_hid_device(dev);
 		return NULL;
 	}
@@ -1446,17 +1489,19 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 	int j = 0, k = 0;
 
 	if(hid_init() < 0)
+		/* register_global_error: global error is set by hid_init */
 		return NULL;
 
 	dev = new_hid_device();
 	if (!dev) {
-		LOG("libusb_wrap_sys_device failed: Couldn't allocate memory\n");
+		register_string_error(&last_global_error, "hid_libusb_wrap_sys_device: Couldn't allocate memory");
 		return NULL;
 	}
 
 	res = libusb_wrap_sys_device(usb_context, sys_dev, &dev->device_handle);
 	if (res < 0) {
 		LOG("libusb_wrap_sys_device failed: %d %s\n", res, libusb_error_name(res));
+		register_libusb_error(&last_global_error, res, "hid_libusb_wrap_sys_device/libusb_wrap_sys_device");
 		goto err;
 	}
 
@@ -1466,6 +1511,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 
 	if (!conf_desc) {
 		LOG("Failed to get configuration descriptor: %d %s\n", res, libusb_error_name(res));
+		register_libusb_error(&last_global_error, res, "hid_libusb_wrap_sys_device/get_config_descriptor");
 		goto err;
 	}
 
@@ -1486,15 +1532,19 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys
 	if (!selected_intf_desc) {
 		if (interface_num < 0) {
 			LOG("Sys USB device doesn't contain a HID interface\n");
+			register_string_error(&last_global_error, "hid_libusb_wrap_sys_device: device doesn't contain a HID interface");
 		}
 		else {
 			LOG("Sys USB device doesn't contain a HID interface with number %d\n", interface_num);
+			register_string_error(&last_global_error, "hid_libusb_wrap_sys_device: device doesn't contain the requested HID interface");
 		}
 		goto err;
 	}
 
-	if (!hidapi_initialize_device(dev, selected_intf_desc, conf_desc))
+	if (!hidapi_initialize_device(dev, selected_intf_desc, conf_desc)) {
+		register_string_error(&last_global_error, "hid_libusb_wrap_sys_device: failed to initialize device");
 		goto err;
+	}
 
 	return dev;
 
@@ -1508,6 +1558,7 @@ err:
 	(void)sys_dev;
 	(void)interface_num;
 	LOG("libusb_wrap_sys_device is not available\n");
+	register_string_error(&last_global_error, "libusb_wrap_sys_device is not available (libusb API too old)");
 #endif
 	return NULL;
 }
@@ -1998,11 +2049,11 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 	hidapi_error_ctx *err;
 
 	if (!dev) {
-		/* TODO: have a global error handling */
-		return L"Global hid_error is not implemented yet";
+		err = &last_global_error;
 	}
-
-	err = &dev->error;
+	else {
+		err = &dev->error;
+	}
 
 	if (err->error_code == LIBUSB_SUCCESS) {
 		return L"Success";
@@ -2065,8 +2116,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 HID_API_EXPORT int HID_API_CALL hid_libusb_error(hid_device *dev)
 {
 	if (!dev) {
-		/* TODO: to be implemented as part of global error implementation */
-		return LIBUSB_SUCCESS;
+		return last_global_error.error_code;
 	}
 
 	return dev->error.error_code;
