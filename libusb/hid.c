@@ -1271,7 +1271,9 @@ static void* hotplug_thread(void* user_data)
 	libusb_hotplug_deregister_callback(hid_hotplug_context.context, hid_hotplug_context.callback_handle);
 	libusb_exit(hid_hotplug_context.context);
 
-	/* Forcibly wake up the thread so it can shut down immediately and wait for it to stop */
+	/* hotplug_cbs is already NULL here (the loop above exited because of that).
+	 * Signal callback_thread under the mutex so it can observe the NULL hotplug_cbs
+	 * and exit cleanly, rather than waiting indefinitely in cond_wait. */
 	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
 	hidapi_thread_cond_signal(&hid_hotplug_context.callback_thread);
 	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
