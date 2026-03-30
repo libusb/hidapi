@@ -137,6 +137,7 @@ struct hid_device_ {
 #endif
 
 	hidapi_error_ctx error;
+	wchar_t *last_read_error_str;
 };
 
 static struct hid_api_version api_version = {
@@ -177,6 +178,7 @@ static void free_hid_device(hid_device *dev)
 
 	hid_free_enumeration(dev->device_info);
 	free_hidapi_error(&dev->error);
+	free(dev->last_read_error_str);
 
 	/* Free the device itself */
 	free(dev);
@@ -346,6 +348,13 @@ static void register_string_error(hidapi_error_ctx *err, const char *error)
 	err->last_error_str = ctowcdup(error, strlen(error));
 	err->error_code = err->last_error_code_cache = 1;
 	err->error_context = err->last_error_context_cache = NULL;
+}
+
+
+static void register_read_error(hid_device *dev, const char *error)
+{
+	free(dev->last_read_error_str);
+	dev->last_read_error_str = error ? ctowcdup(error, strlen(error)) : NULL;
 }
 
 
@@ -1641,15 +1650,15 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	return transferred;
 #endif
 	/* by initialising this variable right here, GCC gives a compilation warning/error: */
-	/* error: variable ‘bytes_read’ might be clobbered by ‘longjmp’ or ‘vfork’ [-Werror=clobbered] */
+	/* error: variable 'bytes_read' might be clobbered by 'longjmp' or 'vfork' [-Werror=clobbered] */
 	int bytes_read; /* = -1; */
 
 	if (!data || !length) {
-		register_string_error(&dev->error, "Zero buffer/length");
+		register_read_error(dev, "Zero buffer/length");
 		return -1;
 	}
 
-	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+	register_read_error(dev, NULL);
 
 	hidapi_thread_mutex_lock(&dev->thread_state);
 	hidapi_thread_cleanup_push(cleanup_mutex, dev);
@@ -1667,7 +1676,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		/* This means the device has been disconnected.
 		   An error code of -1 should be returned. */
 		bytes_read = -1;
-		register_string_error(&dev->error, "hid_read(_timeout): device is closing");
+		register_read_error(dev, "hid_read(_timeout): device is closing");
 		goto ret;
 	}
 
@@ -1707,7 +1716,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			else {
 				/* Error. */
 				bytes_read = -1;
-				register_string_error(&dev->error, "hid_read(_timeout): error waiting for data");
+				register_read_error(dev, "hid_read(_timeout): error waiting for data");
 				break;
 			}
 		}
@@ -1733,8 +1742,9 @@ int HID_API_EXPORT hid_read(hid_device *dev, unsigned char *data, size_t length)
 
 HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 {
-	(void)dev;
-	return L"hid_read_error is not implemented yet";
+	if (dev->last_read_error_str == NULL)
+		return L"Success";
+	return dev->last_read_error_str;
 }
 
 
