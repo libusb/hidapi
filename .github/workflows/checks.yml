@@ -71,7 +71,7 @@ jobs:
 
 
   coverity-macos:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     needs: [coverity-windows]
 
     steps:
