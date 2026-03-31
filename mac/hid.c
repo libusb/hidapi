@@ -720,10 +720,10 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 
 	/* A small trick to store an io_service_t tag along with hid_device_info for matching info with unplugged device */
 	cur_dev_ex = (struct hid_device_info_ex *)calloc(1, sizeof(struct hid_device_info_ex));
-	cur_dev = &(cur_dev_ex->info);
-	if (cur_dev == NULL) {
+	if (cur_dev_ex == NULL) {
 		return NULL;
 	}
+	cur_dev = &(cur_dev_ex->info);
 
 	dev_vid = get_vendor_id(dev);
 	dev_pid = get_product_id(dev);
@@ -1045,7 +1045,7 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 	}
 }
 
-int match_ref_to_info(IOHIDDeviceRef device, struct hid_device_info *info)
+static int match_ref_to_info(IOHIDDeviceRef device, struct hid_device_info *info)
 {
 	if (!device || !info) {
 		return 0;
