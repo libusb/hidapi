@@ -1176,7 +1176,9 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 
 		/* Free removed device */
 		if (hotplug_event == HID_API_HOTPLUG_EVENT_DEVICE_LEFT) {
-			free(device);
+			/* Ensure only this node is freed by hid_free_enumeration() */
+			device->next = NULL;
+			hid_free_enumeration(device);
 		}
 
 		/* Remove any callbacks that were marked for removal and stop the notification if none are left */

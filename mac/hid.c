@@ -1077,7 +1077,7 @@ static void hid_internal_hotplug_disconnect_callback(void *context, IOReturn res
 			info->next = NULL;
 			hid_internal_invoke_callbacks(info, HID_API_HOTPLUG_EVENT_DEVICE_LEFT);
 			/* Free every removed device */
-			free(info);
+			hid_free_enumeration(info);
 		} else {
 			current = &info->next;
 		}

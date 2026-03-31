@@ -1135,6 +1135,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 
 	struct hid_hotplug_queue* msg = calloc(1, sizeof(struct hid_hotplug_queue));
 	if (NULL == msg) {
+		libusb_unref_device(device);
 		return 0;
 	}
 
@@ -1195,8 +1196,8 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 				*current = (*current)->next;
 				info->next = NULL;
 				hid_internal_invoke_callbacks(info, HID_API_HOTPLUG_EVENT_DEVICE_LEFT);
-				/* Free every removed device */
-				free(info);
+				/* Free every removed device (and its internal allocations) */
+				hid_free_enumeration(info);
 			} else {
 				current = &info->next;
 			}
