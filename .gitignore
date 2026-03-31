@@ -30,3 +30,7 @@ CMakeLists.txt.user
 
 # doxgen output
 doxygen/html/
+
+# Visual Studio Code + CMake
+.vscode/
+build/

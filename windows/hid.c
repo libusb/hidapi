@@ -20,12 +20,6 @@
         https://github.com/libusb/hidapi .
 ********************************************************/
 
-#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-/* Do not warn about wcsncpy usage.
-   https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt */
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -66,6 +60,16 @@ typedef LONG NTSTATUS;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* MSVC secure CRT (VS2005+) provides swprintf_s/wcsncpy_s.
+   Older MSVC and GCC/MinGW/Cygwin use the classic variants. */
+#if defined(_MSC_VER) && (_MSC_VER >= 1400)
+#define HIDAPI_SWPRINTF swprintf_s
+#define HIDAPI_WCSNCPY(dest, dest_count, src) wcsncpy_s((dest), (dest_count), (src), _TRUNCATE)
+#else
+#define HIDAPI_SWPRINTF swprintf
+#define HIDAPI_WCSNCPY(dest, dest_count, src) wcsncpy((dest), (src), (dest_count))
+#endif
 
 #ifdef MIN
 #undef MIN
@@ -323,7 +327,8 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	if (!msg)
 		return;
 
-	int printf_written = swprintf(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", (int)op_len, op, error_code, (int)system_err_len, system_err_buf);
+	int printf_written = HIDAPI_SWPRINTF(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", (int)op_len, op, error_code, (int)system_err_len, system_err_buf);
+	msg[msg_len] = L'\0';
 
 	if (printf_written < 0)
 	{
@@ -1825,7 +1830,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
+	HIDAPI_WCSNCPY(string, maxlen, dev->device_info->manufacturer_string);
 	string[maxlen - 1] = L'\0';
 
 	register_string_error(dev, NULL);
@@ -1845,7 +1850,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->product_string, maxlen);
+	HIDAPI_WCSNCPY(string, maxlen, dev->device_info->product_string);
 	string[maxlen - 1] = L'\0';
 
 	register_string_error(dev, NULL);
@@ -1865,7 +1870,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->serial_number, maxlen);
+	HIDAPI_WCSNCPY(string, maxlen, dev->device_info->serial_number);
 	string[maxlen - 1] = L'\0';
 
 	register_string_error(dev, NULL);
