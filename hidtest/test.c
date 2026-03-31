@@ -488,7 +488,7 @@ void print_version_check(void)
 		printf("Compile-time version matches runtime version of hidapi.\n\n");
 	}
 	else {
-		printf("Compile-time version is different than runtime version of hidapi.\n]n");
+		printf("Compile-time version is different than runtime version of hidapi.\n\n");
 	}
 }
 
