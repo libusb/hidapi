@@ -1260,10 +1260,6 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 
 int HID_API_EXPORT HID_API_CALL hid_set_input_report_buffer_size(hid_device *dev, int buffer_size)
 {
-	if (!dev) {
-		register_global_error(L"Device is NULL");
-		return -1;
-	}
 	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE) {
 		register_string_error(dev, L"buffer_size out of range");
 		return -1;

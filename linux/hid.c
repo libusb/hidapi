@@ -1202,16 +1202,13 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_read_error(hid_device *dev)
 
 int HID_API_EXPORT hid_set_input_report_buffer_size(hid_device *dev, int buffer_size)
 {
-	if (!dev) {
-		register_global_error("Device is NULL");
-		return -1;
-	}
 	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE) {
 		register_error_str(&dev->last_error_str, "buffer_size out of range");
 		return -1;
 	}
-	/* hidraw: kernel manages the input report buffer, no userspace queue
-	   to resize. Accept the call to preserve a consistent cross-platform
+	/* No-op on Linux hidraw and BSD backends: the kernel manages input
+	   report buffering and there is no userspace queue to resize. The
+	   call is accepted (returns 0) to preserve a consistent cross-platform
 	   API so callers do not need per-backend conditional code. */
 	(void)buffer_size;
 	return 0;

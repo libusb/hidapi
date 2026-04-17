@@ -1585,8 +1585,6 @@ int HID_API_EXPORT hid_set_input_report_buffer_size(hid_device *dev, int buffer_
 	   (hid_error returns a fixed string). This function returns -1 on
 	   invalid arguments but cannot provide a descriptive error message
 	   until the backend gains error registration. */
-	if (!dev)
-		return -1;
 	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE)
 		return -1;
 	hidapi_thread_mutex_lock(&dev->thread_state);
