@@ -127,6 +127,7 @@ struct hid_device_ {
 	IOOptionBits open_options;
 	int blocking;
 	int disconnected;
+	int input_report_buffer_size;
 	CFStringRef run_loop_mode;
 	CFRunLoopRef run_loop;
 	CFRunLoopSourceRef source;
@@ -156,6 +157,7 @@ static hid_device *new_hid_device(void)
 	dev->open_options = device_open_options;
 	dev->blocking = 1;
 	dev->disconnected = 0;
+	dev->input_report_buffer_size = 30;
 	dev->run_loop_mode = NULL;
 	dev->run_loop = NULL;
 	dev->source = NULL;
@@ -908,7 +910,7 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
 		/* Pop one off if we've reached 30 in the queue. This
 		   way we don't grow forever if the user never reads
 		   anything from the device. */
-		if (num_queued > 30) {
+		if (num_queued > dev->input_report_buffer_size) {
 			return_data(dev, NULL, 0);
 		}
 	}
@@ -1345,6 +1347,23 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 	if (dev->last_read_error_str == NULL)
 		return L"Success";
 	return dev->last_read_error_str;
+}
+
+
+int HID_API_EXPORT hid_set_input_report_buffer_size(hid_device *dev, int buffer_size)
+{
+	if (!dev) {
+		register_global_error("Device is NULL");
+		return -1;
+	}
+	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE) {
+		register_error_str(&dev->last_error_str, "buffer_size out of range");
+		return -1;
+	}
+	pthread_mutex_lock(&dev->mutex);
+	dev->input_report_buffer_size = buffer_size;
+	pthread_mutex_unlock(&dev->mutex);
+	return 0;
 }
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)

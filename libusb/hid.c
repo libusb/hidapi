@@ -110,6 +110,9 @@ struct hid_device_ {
 	/* Whether blocking reads are used */
 	int blocking; /* boolean */
 
+	/* Maximum number of input reports to queue before dropping oldest. */
+	int input_report_buffer_size;
+
 	/* Read thread objects */
 	hidapi_thread_state thread_state;
 	int shutdown_thread;
@@ -143,6 +146,7 @@ static hid_device *new_hid_device(void)
 		return NULL;
 
 	dev->blocking = 1;
+	dev->input_report_buffer_size = 30;
 
 	hidapi_thread_state_init(&dev->thread_state);
 
@@ -985,7 +989,7 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 			/* Pop one off if we've reached 30 in the queue. This
 			   way we don't grow forever if the user never reads
 			   anything from the device. */
-			if (num_queued > 30) {
+			if (num_queued > dev->input_report_buffer_size) {
 				return_data(dev, NULL, 0);
 			}
 		}
@@ -1573,6 +1577,23 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 	return L"hid_read_error is not implemented yet";
 }
 
+
+
+int HID_API_EXPORT hid_set_input_report_buffer_size(hid_device *dev, int buffer_size)
+{
+	/* Note: libusb backend currently has no error reporting infrastructure
+	   (hid_error returns a fixed string). This function returns -1 on
+	   invalid arguments but cannot provide a descriptive error message
+	   until the backend gains error registration. */
+	if (!dev)
+		return -1;
+	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE)
+		return -1;
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	dev->input_report_buffer_size = buffer_size;
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+	return 0;
+}
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 {

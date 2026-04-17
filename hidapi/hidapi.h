@@ -423,6 +423,44 @@ extern "C" {
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock);
 
+		/** @brief Upper bound for hid_set_input_report_buffer_size().
+
+		    Values passed above this limit are rejected by
+		    hid_set_input_report_buffer_size(). Guards against
+		    memory-exhaustion via unbounded input report queue growth.
+		*/
+		#define HID_API_MAX_INPUT_REPORT_BUFFER_SIZE 1024
+
+		/** @brief Set the size of the input report buffer/queue.
+
+		    Some HID devices emit input reports in bursts at rates
+		    that exceed the default internal queue capacity, causing
+		    silent report drops on macOS and the libusb Linux backend.
+		    This function allows callers to resize the per-device
+		    input report buffer.
+
+		    Defaults per backend:
+		    - macOS:        30 reports
+		    - Linux libusb: 30 reports
+		    - Windows:      64 reports (via HidD_SetNumInputBuffers)
+		    - Linux hidraw: kernel-managed, no userspace queue
+		    - NetBSD:       kernel-managed, no userspace queue
+
+		    Call after hid_open() and before the first hid_read()
+		    to avoid losing reports buffered at open time.
+
+		    @ingroup API
+		    @param dev A device handle returned from hid_open().
+		    @param buffer_size The desired buffer size in reports.
+		        Must be in range [1, HID_API_MAX_INPUT_REPORT_BUFFER_SIZE].
+
+		    @returns
+		        0 on success, -1 on failure (invalid parameters or
+		        backend-specific error). Call hid_error(dev) for
+		        details where supported.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_set_input_report_buffer_size(hid_device *dev, int buffer_size);
+
 		/** @brief Send a Feature report to the device.
 
 			Feature reports are sent over the Control endpoint as a

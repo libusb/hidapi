@@ -955,6 +955,24 @@ HID_API_EXPORT const wchar_t* HID_API_CALL hid_read_error(hid_device *dev)
 	return dev->last_read_error_str;
 }
 
+
+int HID_API_EXPORT HID_API_CALL hid_set_input_report_buffer_size(hid_device *dev, int buffer_size)
+{
+	if (!dev) {
+		register_global_error("Device is NULL");
+		return -1;
+	}
+	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE) {
+		register_error_str(&dev->last_error_str, "buffer_size out of range");
+		return -1;
+	}
+	/* NetBSD: kernel manages the input report buffer, no userspace queue
+	   to resize. Accept the call to preserve a consistent cross-platform
+	   API so callers do not need per-backend conditional code. */
+	(void)buffer_size;
+	return 0;
+}
+
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)
 {
 	dev->blocking = !nonblock;
