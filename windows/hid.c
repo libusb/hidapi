@@ -1258,13 +1258,13 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 }
 
 
-int HID_API_EXPORT HID_API_CALL hid_set_input_report_buffer_size(hid_device *dev, int buffer_size)
+int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 {
-	if (buffer_size <= 0 || buffer_size > HID_API_MAX_INPUT_REPORT_BUFFER_SIZE) {
-		register_string_error(dev, L"buffer_size out of range");
+	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS) {
+		register_string_error(dev, L"num_buffers out of range");
 		return -1;
 	}
-	if (!HidD_SetNumInputBuffers(dev->device_handle, (ULONG)buffer_size)) {
+	if (!HidD_SetNumInputBuffers(dev->device_handle, (ULONG)num_buffers)) {
 		register_winapi_error(dev, L"HidD_SetNumInputBuffers");
 		return -1;
 	}

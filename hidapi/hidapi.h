@@ -423,21 +423,21 @@ extern "C" {
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock);
 
-		/** @brief Upper bound for hid_set_input_report_buffer_size().
+		/** @brief Upper bound for hid_set_num_input_buffers().
 
 		    Values passed above this limit are rejected by
-		    hid_set_input_report_buffer_size(). Guards against
+		    hid_set_num_input_buffers(). Guards against
 		    memory-exhaustion via unbounded input report queue growth.
 		*/
-		#define HID_API_MAX_INPUT_REPORT_BUFFER_SIZE 1024
+		#define HID_API_MAX_NUM_INPUT_BUFFERS 1024
 
-		/** @brief Set the size of the input report buffer/queue.
+		/** @brief Set the number of input report buffers queued per device.
 
 		    Some HID devices emit input reports in bursts at rates
 		    that exceed the default internal queue capacity, causing
 		    silent report drops on macOS and the libusb Linux backend.
-		    This function allows callers to resize the per-device
-		    input report buffer.
+		    This function allows callers to change how many input
+		    report buffers are retained per device.
 
 		    Defaults per backend:
 		    - macOS:        30 reports
@@ -451,15 +451,15 @@ extern "C" {
 
 		    @ingroup API
 		    @param dev A device handle returned from hid_open().
-		    @param buffer_size The desired buffer size in reports.
-		        Must be in range [1, HID_API_MAX_INPUT_REPORT_BUFFER_SIZE].
+		    @param num_buffers The desired number of input report buffers.
+		        Must be in range [1, HID_API_MAX_NUM_INPUT_BUFFERS].
 
 		    @returns
 		        0 on success, -1 on failure (invalid parameters or
 		        backend-specific error). Call hid_error(dev) for
 		        details where supported.
 		*/
-		int HID_API_EXPORT HID_API_CALL hid_set_input_report_buffer_size(hid_device *dev, int buffer_size);
+		int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int num_buffers);
 
 		/** @brief Send a Feature report to the device.
 
