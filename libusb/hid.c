@@ -1581,10 +1581,6 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 
 int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 {
-	/* Note: libusb backend currently has no error reporting infrastructure
-	   (hid_error returns a fixed string). This function returns -1 on
-	   invalid arguments but cannot provide a descriptive error message
-	   until the backend gains error registration. */
 	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS)
 		return -1;
 	hidapi_thread_mutex_lock(&dev->thread_state);

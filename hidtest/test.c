@@ -145,6 +145,9 @@ int main(int argc, char* argv[])
 #if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
 	(void)&hid_send_output_report;
 #endif
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+	(void)&hid_set_num_input_buffers;
+#endif
 	(void)&hid_get_feature_report;
 	(void)&hid_send_feature_report;
 #if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 14, 0)
@@ -197,6 +200,13 @@ int main(int argc, char* argv[])
 		hid_exit();
  		return 1;
 	}
+
+#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+	res = hid_set_num_input_buffers(handle, 500);
+	if (res < 0) {
+		printf("Unable to set input buffers: %ls\n", hid_error(handle));
+	}
+#endif
 
 #if defined(_WIN32) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
 	hid_winapi_set_write_timeout(handle, 5000);

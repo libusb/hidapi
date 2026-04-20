@@ -962,10 +962,6 @@ int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int n
 		register_error_str(&dev->last_error_str, "num_buffers out of range");
 		return -1;
 	}
-	/* No-op on Linux hidraw and BSD backends: the kernel manages input
-	   report buffering and there is no userspace queue to resize. The
-	   call is accepted (returns 0) to preserve a consistent cross-platform
-	   API so callers do not need per-backend conditional code. */
 	(void)num_buffers;
 	return 0;
 }

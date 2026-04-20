@@ -439,15 +439,21 @@ extern "C" {
 		    This function allows callers to change how many input
 		    report buffers are retained per device.
 
-		    Defaults per backend:
-		    - macOS:        30 reports
-		    - Linux libusb: 30 reports
-		    - Windows:      64 reports (via HidD_SetNumInputBuffers)
-		    - Linux hidraw: kernel-managed, no userspace queue
-		    - NetBSD:       kernel-managed, no userspace queue
+		    Call after hid_open() and before the first hid_read() to
+		    avoid losing reports buffered at open time.
 
-		    Call after hid_open() and before the first hid_read()
-		    to avoid losing reports buffered at open time.
+		    @note Per-backend behavior:
+		    - **macOS (IOKit)** and **Linux libusb**: resizes the
+		      userspace input-report queue. Default: 30 reports.
+		    - **Windows**: forwards to HidD_SetNumInputBuffers(),
+		      which resizes the kernel HID ring buffer. The kernel
+		      accepts values in the range [2, 512]; requests outside
+		      this range return -1. Default: 64 reports.
+		    - **Linux hidraw** and **NetBSD uhid**: the call is
+		      accepted (returns 0) and validated against
+		      HID_API_MAX_NUM_INPUT_BUFFERS, but has no effect (no-op) —
+		      these kernels manage the input report buffer internally
+		      and expose no userspace resize.
 
 		    @ingroup API
 		    @param dev A device handle returned from hid_open().
