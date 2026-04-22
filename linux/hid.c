@@ -1203,7 +1203,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_read_error(hid_device *dev)
 int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 {
 	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS) {
-		register_error_str(&dev->last_error_str, "num_buffers out of range");
+		register_device_error(dev, "num_buffers out of range");
 		return -1;
 	}
 	(void)num_buffers;

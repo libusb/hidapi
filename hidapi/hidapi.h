@@ -428,8 +428,13 @@ extern "C" {
 		    Values passed above this limit are rejected by
 		    hid_set_num_input_buffers(). Guards against
 		    memory-exhaustion via unbounded input report queue growth.
+
+		    May be overridden at build time via
+		    -DHID_API_MAX_NUM_INPUT_BUFFERS=<value>.
 		*/
+		#ifndef HID_API_MAX_NUM_INPUT_BUFFERS
 		#define HID_API_MAX_NUM_INPUT_BUFFERS 1024
+		#endif
 
 		/** @brief Set the number of input report buffers queued per device.
 

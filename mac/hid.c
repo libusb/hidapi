@@ -37,6 +37,7 @@
 #include <dlfcn.h>
 
 #include "hidapi_darwin.h"
+#include "hidapi_input_ring.h"
 
 /* Barrier implementation because Mac OSX doesn't have pthread_barrier.
    It also doesn't have clock_gettime(). So much for POSIX and SUSv2.
@@ -100,14 +101,8 @@ static int pthread_barrier_wait(pthread_barrier_t *barrier)
 	}
 }
 
-static int return_data(hid_device *dev, unsigned char *data, size_t length);
 
 /* Linked List of input reports received from the device. */
-struct input_report {
-	uint8_t *data;
-	size_t len;
-	struct input_report *next;
-};
 
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
@@ -133,11 +128,11 @@ struct hid_device_ {
 	CFRunLoopSourceRef source;
 	uint8_t *input_report_buf;
 	CFIndex max_input_report_len;
-	struct input_report *input_reports;
+	struct hidapi_input_ring input_ring;
 	struct hid_device_info* device_info;
 
 	pthread_t thread;
-	pthread_mutex_t mutex; /* Protects input_reports */
+	pthread_mutex_t mutex; /* Protects input_ring */
 	pthread_cond_t condition;
 	pthread_barrier_t barrier; /* Ensures correct startup sequence */
 	pthread_barrier_t shutdown_barrier; /* Ensures correct shutdown sequence */
@@ -153,6 +148,11 @@ static hid_device *new_hid_device(void)
 		return NULL;
 	}
 
+	if (hidapi_input_ring_init(&dev->input_ring, HID_API_MAX_NUM_INPUT_BUFFERS) != 0) {
+		free(dev);
+		return NULL;
+	}
+
 	dev->device_handle = NULL;
 	dev->open_options = device_open_options;
 	dev->blocking = 1;
@@ -162,7 +162,6 @@ static hid_device *new_hid_device(void)
 	dev->run_loop = NULL;
 	dev->source = NULL;
 	dev->input_report_buf = NULL;
-	dev->input_reports = NULL;
 	dev->device_info = NULL;
 	dev->shutdown_thread = 0;
 	dev->last_error_str = NULL;
@@ -182,14 +181,8 @@ static void free_hid_device(hid_device *dev)
 	if (!dev)
 		return;
 
-	/* Delete any input reports still left over. */
-	struct input_report *rpt = dev->input_reports;
-	while (rpt) {
-		struct input_report *next = rpt->next;
-		free(rpt->data);
-		free(rpt);
-		rpt = next;
-	}
+	/* Free any queued input reports and the ring backing array. */
+	hidapi_input_ring_destroy(&dev->input_ring);
 
 	/* Free the string and the report buffer. The check for NULL
 	   is necessary here as CFRelease() doesn't handle NULL like
@@ -879,48 +872,21 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
 	(void) report_type;
 	(void) report_id;
 
-	struct input_report *rpt;
 	hid_device *dev = (hid_device*) context;
 
-	/* Make a new Input Report object */
-	rpt = (struct input_report*) calloc(1, sizeof(struct input_report));
-	rpt->data = (uint8_t*) calloc(1, report_length);
-	memcpy(rpt->data, report, report_length);
-	rpt->len = report_length;
-	rpt->next = NULL;
-
-	/* Lock this section */
 	pthread_mutex_lock(&dev->mutex);
 
-	/* Attach the new report object to the end of the list. */
-	if (dev->input_reports == NULL) {
-		/* The list is empty. Put it at the root. */
-		dev->input_reports = rpt;
-	}
-	else {
-		/* Find the end of the list and attach. */
-		struct input_report *cur = dev->input_reports;
-		int num_queued = 0;
-		while (cur->next != NULL) {
-			cur = cur->next;
-			num_queued++;
-		}
-		cur->next = rpt;
-
-		/* Pop one off if we've reached 30 in the queue. This
-		   way we don't grow forever if the user never reads
-		   anything from the device. */
-		if (num_queued > dev->num_input_buffers) {
-			return_data(dev, NULL, 0);
-		}
+	int push_rc = hidapi_input_ring_push(&dev->input_ring,
+	                                     dev->num_input_buffers,
+	                                     report,
+	                                     (size_t)report_length);
+	if (push_rc == 0) {
+		pthread_cond_signal(&dev->condition);
+	} else {
+		register_device_error(dev, "input queue allocation failed");
 	}
 
-	/* Signal a waiting thread that there is data. */
-	pthread_cond_signal(&dev->condition);
-
-	/* Unlock */
 	pthread_mutex_unlock(&dev->mutex);
-
 }
 
 /* This gets called when the read_thread's run loop gets signaled by
@@ -1193,25 +1159,24 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 	return set_report(dev, kIOHIDReportTypeOutput, data, length);
 }
 
-/* Helper function, so that this isn't duplicated in hid_read(). */
-static int return_data(hid_device *dev, unsigned char *data, size_t length)
+/* Pop one report from the ring into (data, length). Caller must
+   hold dev->mutex. Returns bytes copied, or -1 if empty. */
+static int ring_pop_into(hid_device *dev, unsigned char *data, size_t length)
 {
-	/* Copy the data out of the linked list item (rpt) into the
-	   return buffer (data), and delete the liked list item. */
-	struct input_report *rpt = dev->input_reports;
-	size_t len = (length < rpt->len)? length: rpt->len;
-	if (data != NULL) {
-		memcpy(data, rpt->data, len);
-	}
-	dev->input_reports = rpt->next;
-	free(rpt->data);
-	free(rpt);
+	uint8_t *rpt_data;
+	size_t   rpt_len;
+	if (hidapi_input_ring_pop(&dev->input_ring, &rpt_data, &rpt_len) != 0)
+		return -1;
+	size_t len = (length < rpt_len) ? length : rpt_len;
+	if (len > 0 && data != NULL)
+		memcpy(data, rpt_data, len);
+	free(rpt_data);
 	return (int) len;
 }
 
 static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mutex)
 {
-	while (!dev->input_reports) {
+	while (dev->input_ring.count == 0) {
 		int res = pthread_cond_wait(cond, mutex);
 		if (res != 0)
 			return res;
@@ -1232,7 +1197,7 @@ static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mut
 
 static int cond_timedwait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mutex, const struct timespec *abstime)
 {
-	while (!dev->input_reports) {
+	while (dev->input_ring.count == 0) {
 		int res = pthread_cond_timedwait(cond, mutex, abstime);
 		if (res != 0)
 			return res;
@@ -1266,9 +1231,8 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	pthread_mutex_lock(&dev->mutex);
 
 	/* There's an input report queued up. Return it. */
-	if (dev->input_reports) {
-		/* Return the first one */
-		bytes_read = return_data(dev, data, length);
+	if (dev->input_ring.count > 0) {
+		bytes_read = ring_pop_into(dev, data, length);
 		goto ret;
 	}
 
@@ -1295,7 +1259,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		int res;
 		res = cond_wait(dev, &dev->condition, &dev->mutex);
 		if (res == 0)
-			bytes_read = return_data(dev, data, length);
+			bytes_read = ring_pop_into(dev, data, length);
 		else {
 			/* There was an error, or a device disconnection. */
 			register_error_str(&dev->last_read_error_str, "hid_read_timeout: error waiting for more data");
@@ -1318,7 +1282,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 		res = cond_timedwait(dev, &dev->condition, &dev->mutex, &ts);
 		if (res == 0) {
-			bytes_read = return_data(dev, data, length);
+			bytes_read = ring_pop_into(dev, data, length);
 		} else if (res == ETIMEDOUT) {
 			bytes_read = 0;
 		} else {
@@ -1353,11 +1317,15 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 {
 	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS) {
-		register_error_str(&dev->last_error_str, "num_buffers out of range");
+		register_device_error(dev, "num_buffers out of range");
 		return -1;
 	}
 	pthread_mutex_lock(&dev->mutex);
 	dev->num_input_buffers = num_buffers;
+	if (dev->input_ring.count > num_buffers) {
+		hidapi_input_ring_drop_oldest(&dev->input_ring,
+		                              dev->input_ring.count - num_buffers);
+	}
 	pthread_mutex_unlock(&dev->mutex);
 	return 0;
 }
@@ -1433,12 +1401,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 		IOHIDDeviceClose(dev->device_handle, dev->open_options);
 	}
 
-	/* Clear out the queue of received reports. */
-	pthread_mutex_lock(&dev->mutex);
-	while (dev->input_reports) {
-		return_data(dev, NULL, 0);
-	}
-	pthread_mutex_unlock(&dev->mutex);
+	/* Queued reports are freed inside free_hid_device via
+	   hidapi_input_ring_destroy. */
 	CFRelease(dev->device_handle);
 
 	free_hid_device(dev);
