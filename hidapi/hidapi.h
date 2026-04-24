@@ -297,31 +297,77 @@ extern "C" {
 			HID_API_HOTPLUG_ENUMERATE = (1 << 0)
 		} hid_hotplug_flag;
 
-		/** @brief Hotplug callback function type. When requesting hotplug event notifications,
-			you pass a pointer to a callback function of this type.
+		/** @brief Hotplug callback function type.
 
-			This callback may be called by an internal event thread and as such it is
-			recommended the callback do minimal processing before returning.
+			Called by HIDAPI when a device matching the registration filter
+			is connected or disconnected. See #hid_hotplug_register_callback.
 
-			hidapi will call this function later, when a matching event had happened on
-			a matching device.
+			## Execution context
 
-			Note that when callbacks are called from hid_hotplug_register_callback()
-			because of the \ref HID_API_HOTPLUG_ENUMERATE flag, the callback return
-			value is ignored. In other words, you cannot cause a callback to be
-			deregistered by returning 1 when it is called from hid_hotplug_register_callback().
+			The callback is invoked on an internal HIDAPI thread that is
+			distinct from any thread the application creates. Every callback
+			invocation holds an internal hotplug mutex for its duration, which
+			means that any other thread calling hid_hotplug_register_callback()
+			or hid_hotplug_deregister_callback() will block until the callback
+			returns. Keep the callback short.
+
+			## What the callback may call
+
+			The hotplug API itself is thread-safe (see "Thread safety" under
+			#hid_hotplug_register_callback) and the following calls are always
+			safe from within the callback:
+
+			  - hid_hotplug_register_callback()
+			  - hid_hotplug_deregister_callback()   (including on its own handle)
+			  - hid_error(dev)                      with a non-NULL device handle
+
+			Any other HIDAPI function follows HIDAPI's general thread-safety
+			rule (see the Multi-threading Notes in the project wiki): it is
+			the application's responsibility to serialize hid_init / hid_exit /
+			hid_enumerate / hid_open* / hid_close / hid_error(NULL) across all
+			threads, including the hotplug callback thread. If your application
+			already calls those functions only from one thread, calling them
+			from the hotplug callback adds a second thread and is therefore
+			UNSAFE unless the application adds synchronisation itself. The
+			recommended pattern is to copy the needed fields of @p device out
+			of the callback and handle open/close on your own thread.
+
+			Calling hid_exit() from within the callback has undefined behavior:
+			hid_exit() joins the hotplug thread, which would be joining itself.
+
+			## device parameter
+
+			The @p device pointer is owned by HIDAPI and is valid only for the
+			duration of the call. To keep any of its fields (path,
+			serial_number, manufacturer_string, etc.) beyond the callback,
+			copy them out; pointer fields must be deep-copied, as all strings
+			are owned by HIDAPI.
+
+			The @p device->next pointer is always NULL. Each callback
+			invocation describes exactly one device; compound or composite
+			devices that expose multiple interfaces produce multiple callback
+			invocations (typically delivered in quick succession).
+
+			## Return value
+
+			Return 0 to keep the callback registered. Return any non-zero
+			value to have HIDAPI deregister the callback; no further events
+			for this handle will be delivered, and the handle is freed as if
+			hid_hotplug_deregister_callback() had been called. This applies
+			to both live events and to the synthetic "arrived" events
+			delivered during registration when #HID_API_HOTPLUG_ENUMERATE is
+			set.
 
 			@ingroup API
 
-			@param callback_handle The hid_hotplug_callback_handle callback handle.
-			@param device The hid_device_info of device this event occurred on event that occurred.
-			@param event Event that occurred.
-			@param user_data User data provided when this callback was registered.
-				(Optionally NULL).
+			@param callback_handle The handle of this callback.
+			@param device The hid_device_info of the device this event occurred on.
+			@param event Event that occurred. See \ref hid_hotplug_event.
+			@param user_data User data provided when this callback was registered
+				(may be NULL).
 
-			@returns bool
-				Whether this callback is finished processing events.
-				Returning non-zero value will cause this callback to be deregistered.
+			@returns
+				0 to stay registered; any non-zero value to be deregistered.
 		 */
 		typedef int (HID_API_CALL *hid_hotplug_callback_fn)(
 			hid_hotplug_callback_handle callback_handle,
@@ -334,6 +380,20 @@ extern "C" {
 			If @p vendor_id is set to 0 then any vendor matches.
 			If @p product_id is set to 0 then any product matches.
 			If @p vendor_id and @p product_id are both set to 0, then all HID devices will be notified.
+
+			## Thread safety
+
+			hid_hotplug_register_callback() and hid_hotplug_deregister_callback()
+			are thread-safe. They may be called from any thread, including
+			from within a hotplug callback. This is a deliberate exception
+			to HIDAPI's general "not thread-safe" rule (see the
+			Multi-threading Notes in the project wiki).
+
+			The first successful call to hid_hotplug_register_callback()
+			starts an internal HIDAPI thread that runs until either (a) the
+			last callback is deregistered, or (b) hid_exit() is called.
+			hid_exit() must not be called from within a hotplug callback
+			(see #hid_hotplug_callback_fn).
 
 			@ingroup API
 
@@ -356,7 +416,13 @@ extern "C" {
 
 		/** @brief Deregister a callback from a HID hotplug.
 
-			This function is safe to call from within a hotplug callback.
+			Thread-safe. May be called from any thread, including from within
+			a hotplug callback (on its own handle or on another callback's
+			handle). Calling it on a handle that was already deregistered,
+			or on a handle that was never valid, is a safe no-op returning 0.
+
+			See "Thread safety" on #hid_hotplug_register_callback for the
+			full thread-safety contract of the hotplug API.
 
 			@ingroup API
 
