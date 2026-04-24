@@ -173,8 +173,9 @@ static struct hid_hotplug_context {
 	struct hid_hotplug_callback *hotplug_cbs;
 
 	/* Linked list of the device infos (mandatory when the device is disconnected).
-	 * Protected by `mutex` for both reads and writes.
-	 * Final cleanup is done by callback_thread during shutdown. */
+	 * Protected by `mutex`: all reads, writes and the final free during teardown
+	 * are performed while holding it. The teardown free runs in
+	 * hid_internal_hotplug_cleanup() after the hotplug threads have been joined. */
 	struct hid_device_info *devs;
 } hid_hotplug_context = {
 	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
@@ -586,6 +587,11 @@ static void hid_internal_hotplug_cleanup()
 
 	/* Wait for both threads to stop */
 	hidapi_thread_join(&hid_hotplug_context.libusb_thread);
+
+	/* Both hotplug threads have exited: we now have exclusive access to `devs`
+	 * (the caller holds `mutex` and no hotplug event can reach process_hotplug_event). */
+	hid_free_enumeration(hid_hotplug_context.devs);
+	hid_hotplug_context.devs = NULL;
 }
 
 static void hid_internal_hotplug_init()
@@ -1250,10 +1256,6 @@ static void* callback_thread(void* user_data)
 		}
 	}
 
-	/* Cleanup connected device list */
-	hid_free_enumeration(hid_hotplug_context.devs);
-	hid_hotplug_context.devs = NULL;
-
 	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
 
 	return NULL;
@@ -1362,8 +1364,12 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 											LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
 											0, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY, &hid_libusb_hotplug_callback, NULL,
 											&hid_hotplug_context.callback_handle)) {
-			/* Major malfunction, failed to register a callback */
+			/* Major malfunction, failed to register a callback.
+			 * No hotplug thread was started, so we must unwind `devs` ourselves
+			 * (hid_internal_hotplug_cleanup() would try to join a non-existent thread). */
 			libusb_exit(hid_hotplug_context.context);
+			hid_free_enumeration(hid_hotplug_context.devs);
+			hid_hotplug_context.devs = NULL;
 			free(hotplug_cb);
 			hid_hotplug_context.hotplug_cbs = NULL;
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
