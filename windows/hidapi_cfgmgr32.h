@@ -57,6 +57,73 @@ typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_PropertyW_)(LPCWSTR pszDevi
 typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_List_SizeW_)(PULONG pulLen, LPGUID InterfaceClassGuid, DEVINSTID_W pDeviceID, ULONG ulFlags);
 typedef CONFIGRET(__stdcall* CM_Get_Device_Interface_ListW_)(LPGUID InterfaceClassGuid, DEVINSTID_W pDeviceID, PZZWSTR Buffer, ULONG BufferLen, ULONG ulFlags);
 
+DECLARE_HANDLE(HCMNOTIFICATION);
+typedef HCMNOTIFICATION* PHCMNOTIFICATION;
+
+typedef enum _CM_NOTIFY_FILTER_TYPE {
+    CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE = 0,
+    CM_NOTIFY_FILTER_TYPE_DEVICEHANDLE,
+    CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE,
+    CM_NOTIFY_FILTER_TYPE_MAX
+} CM_NOTIFY_FILTER_TYPE, * PCM_NOTIFY_FILTER_TYPE;
+
+typedef struct _CM_NOTIFY_FILTER {
+    DWORD cbSize;
+    DWORD Flags;
+    CM_NOTIFY_FILTER_TYPE FilterType;
+    DWORD Reserved;
+    union {
+        struct {
+            GUID ClassGuid;
+        } DeviceInterface;
+        struct {
+            HANDLE  hTarget;
+        } DeviceHandle;
+        struct {
+            WCHAR InstanceId[200];
+        } DeviceInstance;
+    } u;
+} CM_NOTIFY_FILTER, * PCM_NOTIFY_FILTER;
+
+typedef enum _CM_NOTIFY_ACTION {
+    CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL = 0,
+    CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL,
+    CM_NOTIFY_ACTION_DEVICEQUERYREMOVE,
+    CM_NOTIFY_ACTION_DEVICEQUERYREMOVEFAILED,
+    CM_NOTIFY_ACTION_DEVICEREMOVEPENDING,
+    CM_NOTIFY_ACTION_DEVICEREMOVECOMPLETE,
+    CM_NOTIFY_ACTION_DEVICECUSTOMEVENT,
+    CM_NOTIFY_ACTION_DEVICEINSTANCEENUMERATED,
+    CM_NOTIFY_ACTION_DEVICEINSTANCESTARTED,
+    CM_NOTIFY_ACTION_DEVICEINSTANCEREMOVED,
+    CM_NOTIFY_ACTION_MAX
+} CM_NOTIFY_ACTION, * PCM_NOTIFY_ACTION;
+
+typedef struct _CM_NOTIFY_EVENT_DATA {
+    CM_NOTIFY_FILTER_TYPE FilterType;
+    DWORD Reserved;
+    union {
+        struct {
+            GUID ClassGuid;
+            WCHAR SymbolicLink[ANYSIZE_ARRAY];
+        } DeviceInterface;
+        struct {
+            GUID EventGuid;
+            LONG NameOffset;
+            DWORD DataSize;
+            BYTE Data[ANYSIZE_ARRAY];
+        } DeviceHandle;
+        struct {
+            WCHAR InstanceId[ANYSIZE_ARRAY];
+        } DeviceInstance;
+    } u;
+} CM_NOTIFY_EVENT_DATA, * PCM_NOTIFY_EVENT_DATA;
+
+typedef DWORD(CALLBACK* PCM_NOTIFY_CALLBACK)(HCMNOTIFICATION hNotify, PVOID Context, CM_NOTIFY_ACTION Action, PCM_NOTIFY_EVENT_DATA EventData, DWORD EventDataSize);
+
+typedef CONFIGRET(__stdcall* CM_Register_Notification_)(PCM_NOTIFY_FILTER pFilter, PVOID pContext, PCM_NOTIFY_CALLBACK pCallback, PHCMNOTIFICATION pNotifyContext);
+typedef CONFIGRET(__stdcall* CM_Unregister_Notification_)(HCMNOTIFICATION NotifyContext);
+
 // from devpkey.h
 DEFINE_DEVPROPKEY(DEVPKEY_NAME, 0xb725f130, 0x47ef, 0x101a, 0xa5, 0xf1, 0x02, 0x60, 0x8c, 0x9e, 0xeb, 0xac, 10); // DEVPROP_TYPE_STRING
 DEFINE_DEVPROPKEY(DEVPKEY_Device_Manufacturer, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 13); // DEVPROP_TYPE_STRING
