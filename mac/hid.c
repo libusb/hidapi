@@ -37,7 +37,7 @@
 #include <dlfcn.h>
 
 #include "hidapi_darwin.h"
-#include "hidapi_input_ring.h"
+#include "../core/hidapi_input_ring.h"
 
 /* Barrier implementation because Mac OSX doesn't have pthread_barrier.
    It also doesn't have clock_gettime(). So much for POSIX and SUSv2.
@@ -145,11 +145,6 @@ static hid_device *new_hid_device(void)
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
 	if (dev == NULL) {
-		return NULL;
-	}
-
-	if (hidapi_input_ring_init(&dev->input_ring, HID_API_MAX_NUM_INPUT_BUFFERS) != 0) {
-		free(dev);
 		return NULL;
 	}
 
@@ -877,7 +872,6 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
 	pthread_mutex_lock(&dev->mutex);
 
 	int push_rc = hidapi_input_ring_push(&dev->input_ring,
-	                                     dev->num_input_buffers,
 	                                     report,
 	                                     (size_t)report_length);
 	if (push_rc == 0) {
@@ -1034,6 +1028,18 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	dev->max_input_report_len = (CFIndex) get_max_report_length(dev->device_handle);
 	dev->input_report_buf = (uint8_t*) calloc(dev->max_input_report_len, sizeof(uint8_t));
 
+	{
+		/* Clamp slot_size to at least 64 B if device reports none
+		 * (defensive fallback for devices that don't advertise
+		 * kIOHIDMaxInputReportSizeKey). */
+		size_t slot_size = (dev->max_input_report_len > 0)
+		                   ? (size_t)dev->max_input_report_len : 64;
+		if (hidapi_input_ring_init(&dev->input_ring, dev->num_input_buffers, slot_size) != 0) {
+			register_global_error_format("hid_open_path: failed to allocate input report ring");
+			goto return_error;
+		}
+	}
+
 	/* Create the Run Loop Mode for this device.
 	   printing the reference seems to work. */
 	snprintf(str, sizeof(str), "HIDAPI_%p", (void*) dev->device_handle);
@@ -1163,15 +1169,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
    hold dev->mutex. Returns bytes copied, or -1 if empty. */
 static int ring_pop_into(hid_device *dev, unsigned char *data, size_t length)
 {
-	uint8_t *rpt_data;
-	size_t   rpt_len;
-	if (hidapi_input_ring_pop(&dev->input_ring, &rpt_data, &rpt_len) != 0)
-		return -1;
-	size_t len = (length < rpt_len) ? length : rpt_len;
-	if (len > 0 && data != NULL)
-		memcpy(data, rpt_data, len);
-	free(rpt_data);
-	return (int) len;
+	return hidapi_input_ring_pop_into(&dev->input_ring, data, length);
 }
 
 static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mutex)
@@ -1321,11 +1319,12 @@ int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 		return -1;
 	}
 	pthread_mutex_lock(&dev->mutex);
-	dev->num_input_buffers = num_buffers;
-	if (dev->input_ring.count > num_buffers) {
-		hidapi_input_ring_drop_oldest(&dev->input_ring,
-		                              dev->input_ring.count - num_buffers);
+	if (hidapi_input_ring_resize(&dev->input_ring, num_buffers) != 0) {
+		pthread_mutex_unlock(&dev->mutex);
+		register_device_error(dev, "failed to resize input report ring");
+		return -1;
 	}
+	dev->num_input_buffers = num_buffers;
 	pthread_mutex_unlock(&dev->mutex);
 	return 0;
 }

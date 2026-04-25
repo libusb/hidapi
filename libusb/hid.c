@@ -49,7 +49,7 @@
 #endif
 
 #include "hidapi_libusb.h"
-#include "hidapi_input_ring.h"
+#include "../core/hidapi_input_ring.h"
 
 #ifndef HIDAPI_THREAD_MODEL_INCLUDE
 #define HIDAPI_THREAD_MODEL_INCLUDE "hidapi_thread_pthread.h"
@@ -113,9 +113,12 @@ struct hid_device_ {
 	int transfer_loop_finished;
 	struct libusb_transfer *transfer;
 
-	/* Input report ring buffer. Backing array sized at
-	   HID_API_MAX_NUM_INPUT_BUFFERS at device open; logical cap
-	   (drop-oldest threshold) is dev->num_input_buffers. */
+	/* Input report ring buffer. Flat inline-slot storage sized at
+	   (dev->num_input_buffers × max(wMaxPacketSize, 64)) bytes,
+	   allocated in hidapi_initialize_device() once the interrupt-IN
+	   endpoint is known. The max(., 64) clamp is a defensive fallback
+	   for devices with no interrupt-IN endpoint. Resized under the
+	   device mutex by hid_set_num_input_buffers(). */
 	struct hidapi_input_ring input_ring;
 
 	/* Was kernel driver detached by libusb */
@@ -139,11 +142,6 @@ static hid_device *new_hid_device(void)
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
 	if (!dev)
 		return NULL;
-
-	if (hidapi_input_ring_init(&dev->input_ring, HID_API_MAX_NUM_INPUT_BUFFERS) != 0) {
-		free(dev);
-		return NULL;
-	}
 
 	dev->blocking = 1;
 	dev->num_input_buffers = 30;
@@ -968,14 +966,17 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 		hidapi_thread_mutex_lock(&dev->thread_state);
 
 		int push_rc = hidapi_input_ring_push(&dev->input_ring,
-		                                     dev->num_input_buffers,
 		                                     transfer->buffer,
 		                                     (size_t)transfer->actual_length);
 		if (push_rc == 0) {
 			hidapi_thread_cond_signal(&dev->thread_state);
+		} else {
+			/* Push rejected. len > slot_size is not expected here
+			 * because the current libusb backend sizes both the
+			 * transfer buffer and ring slot_size from
+			 * input_ep_max_packet_size. libusb has no active error
+			 * channel, so drop silently. */
 		}
-		/* Allocation failed; libusb has no active error channel here, so the
-		 * report is dropped silently. */
 
 		hidapi_thread_mutex_unlock(&dev->thread_state);
 	}
@@ -1241,6 +1242,18 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 		}
 	}
 
+	{
+		/* Clamp slot_size to at least 64 B if endpoint reports none
+		 * (defensive fallback for non-compliant devices).
+		 * Enhancement: prefer max input report size by going through
+		 * report descriptor once parser is available. */
+		size_t slot_size = (dev->input_ep_max_packet_size > 0)
+		                   ? (size_t)dev->input_ep_max_packet_size : 64;
+		if (hidapi_input_ring_init(&dev->input_ring, dev->num_input_buffers, slot_size) != 0) {
+			return 0;
+		}
+	}
+
 	hidapi_thread_create(&dev->thread_state, read_thread, dev);
 
 	/* Wait here for the read thread to be initialized. */
@@ -1446,15 +1459,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
    hold dev->thread_state. Returns bytes copied, or -1 if empty. */
 static int ring_pop_into(hid_device *dev, unsigned char *data, size_t length)
 {
-	uint8_t *rpt_data;
-	size_t   rpt_len;
-	if (hidapi_input_ring_pop(&dev->input_ring, &rpt_data, &rpt_len) != 0)
-		return -1;
-	size_t len = (length < rpt_len) ? length : rpt_len;
-	if (len > 0 && data)
-		memcpy(data, rpt_data, len);
-	free(rpt_data);
-	return (int)len;
+	return hidapi_input_ring_pop_into(&dev->input_ring, data, length);
 }
 
 static void cleanup_mutex(void *param)
@@ -1566,11 +1571,11 @@ int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS)
 		return -1;
 	hidapi_thread_mutex_lock(&dev->thread_state);
-	dev->num_input_buffers = num_buffers;
-	if (dev->input_ring.count > num_buffers) {
-		hidapi_input_ring_drop_oldest(&dev->input_ring,
-		                              dev->input_ring.count - num_buffers);
+	if (hidapi_input_ring_resize(&dev->input_ring, num_buffers) != 0) {
+		hidapi_thread_mutex_unlock(&dev->thread_state);
+		return -1;
 	}
+	dev->num_input_buffers = num_buffers;
 	hidapi_thread_mutex_unlock(&dev->thread_state);
 	return 0;
 }
