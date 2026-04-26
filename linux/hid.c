@@ -33,6 +33,8 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
+#include <sys/eventfd.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <poll.h>
 
@@ -77,6 +79,8 @@ struct hid_device_ {
 	wchar_t *last_error_str;
 	wchar_t *last_read_error_str;
 	struct hid_device_info* device_info;
+	int interrupt_efd;
+	volatile int interrupted;
 };
 
 static struct hid_api_version api_version = {
@@ -100,6 +104,12 @@ static hid_device *new_hid_device(void)
 	dev->last_error_str = NULL;
 	dev->last_read_error_str = NULL;
 	dev->device_info = NULL;
+	dev->interrupted = 0;
+	dev->interrupt_efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	if (dev->interrupt_efd < 0) {
+		free(dev);
+		return NULL;
+	}
 
 	return dev;
 }
@@ -1103,7 +1113,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 	else {
 		/* Unable to open a device. */
-		free(dev);
+		hid_close(dev);
 		register_global_error_format("Failed to open a device with path '%s': %s", path, strerror(errno));
 		return NULL;
 	}
@@ -1139,6 +1149,11 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Set device error to none */
 	register_error_str(&dev->last_read_error_str, NULL);
 
+	if (dev->interrupted) {
+		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+		return -1;
+	}
+
 	int bytes_read;
 
 	if (milliseconds >= 0) {
@@ -1149,12 +1164,15 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		   properly report device disconnection through read() when
 		   in non-blocking mode.  */
 		int ret;
-		struct pollfd fds;
+		struct pollfd fds[2];
 
-		fds.fd = dev->device_handle;
-		fds.events = POLLIN;
-		fds.revents = 0;
-		ret = poll(&fds, 1, milliseconds);
+		fds[0].fd = dev->device_handle;
+		fds[0].events = POLLIN;
+		fds[0].revents = 0;
+		fds[1].fd = dev->interrupt_efd;
+		fds[1].events = POLLIN;
+		fds[1].revents = 0;
+		ret = poll(fds, 2, milliseconds);
 		if (ret == 0) {
 			/* Timeout */
 			return ret;
@@ -1164,15 +1182,24 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			register_error_str(&dev->last_read_error_str, strerror(errno));
 			return ret;
 		}
-		else {
-			/* Check for errors on the file descriptor. This will
-			   indicate a device disconnection. */
-			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				// We cannot use strerror() here as no -1 was returned from poll().
-				errno = EIO;
-				register_error_str(&dev->last_read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
-				return -1;
-			}
+
+		/* Device disconnection takes priority over the interrupt. */
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			// We cannot use strerror() here as no -1 was returned from poll().
+			errno = EIO;
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
+			return -1;
+		}
+
+		if (fds[1].revents & POLLIN) {
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+			return -1;
+		}
+
+		if (!(fds[0].revents & POLLIN)) {
+			/* Neither fd is readable yet still poll() returned > 0;
+			   treat as no data available. */
+			return 0;
 		}
 	}
 
@@ -1207,6 +1234,29 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 
 	dev->blocking = !nonblock;
 	return 0; /* Success */
+}
+
+int HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+{
+	dev->interrupted = 1;
+	uint64_t one = 1;
+	ssize_t written = write(dev->interrupt_efd, &one, sizeof(one));
+	(void)written;
+	return 0;
+}
+
+int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
+{
+	return dev->interrupted;
+}
+
+int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+{
+	dev->interrupted = 0;
+	uint64_t v;
+	ssize_t got = read(dev->interrupt_efd, &v, sizeof(v));
+	(void)got;
+	return 0;
 }
 
 
@@ -1292,6 +1342,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 		return;
 
 	close(dev->device_handle);
+	if (dev->interrupt_efd >= 0)
+		close(dev->interrupt_efd);
 
 	free(dev->last_error_str);
 	free(dev->last_read_error_str);
