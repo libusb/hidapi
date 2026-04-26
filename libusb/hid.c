@@ -113,9 +113,10 @@ struct hid_device_ {
 	int transfer_loop_finished;
 	struct libusb_transfer *transfer;
 
-	/* Input report ring buffer. Flat inline-slot storage sized at
-	   (dev->num_input_buffers × max(wMaxPacketSize, 64)) bytes,
-	   allocated in hidapi_initialize_device() once the interrupt-IN
+	/* Input report ring buffer. Single allocation owned by
+	   input_ring.storage, holding the lengths region followed by
+	   (dev->num_input_buffers × max(wMaxPacketSize, 64)) bytes of slot
+	   data, made in hidapi_initialize_device() once the interrupt-IN
 	   endpoint is known. The max(., 64) clamp is a defensive fallback
 	   for devices with no interrupt-IN endpoint. Resized under the
 	   device mutex by hid_set_num_input_buffers(). */

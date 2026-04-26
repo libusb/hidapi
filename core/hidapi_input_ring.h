@@ -3,9 +3,12 @@
  communication with HID devices.
 
  Internal ring buffer — a bounded FIFO of HID input reports.
- Storage is a single pre-allocated flat byte buffer of
- (capacity × slot_size) bytes, where slot_size is a backend-specific
- runtime upper bound on input report size, determined at open time.
+ Storage is a single pre-allocated allocation owned by r->storage,
+ holding a lengths array (capacity × sizeof(size_t) bytes) followed
+ by a slot data region (capacity × slot_size bytes). r->lengths and
+ r->data are non-owning views into that allocation.
+ slot_size is a backend-specific runtime upper bound on input
+ report size, determined at open time.
  Drop-oldest-when-full semantics.
 
  All helpers are defined as `static`; each translation unit
@@ -55,8 +58,9 @@
 #include <string.h>
 
 struct hidapi_input_ring {
-    uint8_t *storage;     /* capacity × slot_size bytes; one allocation */
-    size_t  *lengths;     /* actual len of each queued report; capacity entries */
+    uint8_t *storage;     /* owns the single allocation */
+    size_t  *lengths;     /* non-owning view: lengths region (capacity × sizeof(size_t)) */
+    uint8_t *data;        /* non-owning view: slot data region (capacity × slot_size) */
     int      capacity;    /* slot count; changed only by resize()   */
     size_t   slot_size;   /* bytes per slot; fixed at init          */
     int      head;        /* oldest report index (dequeue side)     */
@@ -76,19 +80,24 @@ static int hidapi_input_ring_init(struct hidapi_input_ring *r,
         return -1;
     if (r->storage)      /* double-init guard */
         return -1;
-    /* Reject capacity × slot_size that would overflow size_t. */
+    /* Reject overflow on lengths_bytes + data_bytes. */
+    if ((size_t)capacity > SIZE_MAX / sizeof(size_t))
+        return -1;
     if ((size_t)capacity > SIZE_MAX / slot_size)
         return -1;
+    size_t lengths_bytes = (size_t)capacity * sizeof(size_t);
+    size_t data_bytes    = (size_t)capacity * slot_size;
+    if (lengths_bytes > SIZE_MAX - data_bytes)
+        return -1;
 
-    r->storage = (uint8_t *)malloc((size_t)capacity * slot_size);
-    r->lengths = (size_t *)calloc((size_t)capacity, sizeof(size_t));
-    if (!r->storage || !r->lengths) {
-        free(r->storage);
-        free(r->lengths);
-        r->storage = NULL;
+    r->storage = (uint8_t *)calloc(1, lengths_bytes + data_bytes);
+    if (!r->storage) {
         r->lengths = NULL;
+        r->data    = NULL;
         return -1;
     }
+    r->lengths = (size_t *)r->storage;                  /* view: lengths region at offset 0 */
+    r->data    = r->storage + lengths_bytes;            /* view: data region after lengths */
     r->capacity  = capacity;
     r->slot_size = slot_size;
     r->head = 0;
@@ -99,15 +108,15 @@ static int hidapi_input_ring_init(struct hidapi_input_ring *r,
 }
 
 /* PRECONDITION: caller holds r's mutex, or is tearing down.
- * Frees storage and lengths; zeros r. Safe on zero-init or
- * previously-destroyed rings. */
+ * Frees the single allocation (owned by r->storage); zeros r.
+ * Safe on zero-init or previously-destroyed rings. */
 static void hidapi_input_ring_destroy(struct hidapi_input_ring *r)
 {
     if (!r) return;
     free(r->storage);
-    free(r->lengths);
     r->storage   = NULL;
-    r->lengths   = NULL;
+    r->lengths   = NULL;   /* non-owning view; null for consistency */
+    r->data      = NULL;   /* non-owning view; null for consistency */
     r->capacity  = 0;
     r->slot_size = 0;
     r->head = 0;
@@ -140,7 +149,7 @@ static int hidapi_input_ring_push(struct hidapi_input_ring *r,
     }
 
     if (len > 0) {
-        memcpy(r->storage + (size_t)r->tail * r->slot_size, data, len);
+        memcpy(r->data + (size_t)r->tail * r->slot_size, data, len);
     }
     r->lengths[r->tail] = len;
     r->tail = (r->tail + 1) % r->capacity;
@@ -182,16 +191,17 @@ static int hidapi_input_ring_pop_into(struct hidapi_input_ring *r,
     size_t payload_len = r->lengths[r->head];
     size_t to_copy = (payload_len < dst_len) ? payload_len : dst_len;
     if (to_copy > 0) {
-        memcpy(dst, r->storage + (size_t)r->head * r->slot_size, to_copy);
+        memcpy(dst, r->data + (size_t)r->head * r->slot_size, to_copy);
     }
     r->head = (r->head + 1) % r->capacity;
     r->count--;
     return (int)to_copy;
 }
 
-/* Resize the slot array to new_cap. Allocates a new flat storage buffer
- * and lengths array, memcpy's surviving reports' bytes into the new
- * storage preserving FIFO order, then frees the old buffers.
+/* Resize the slot array to new_cap. Allocates a new combined block
+ * (lengths region followed by data region), memcpy's both the surviving
+ * lengths and their payload bytes into FIFO-ordered positions in the
+ * new block, then frees the old block.
  *
  * On shrink below count, the oldest (count - new_cap) reports are
  * evicted — matching the push-time drop-oldest policy.
@@ -208,28 +218,33 @@ static int hidapi_input_ring_resize(struct hidapi_input_ring *r, int new_cap)
         return -1;
     if (new_cap == r->capacity)
         return 0;
-    /* Reject new_cap × slot_size that would overflow size_t. */
+    /* Reject overflow on the new combined block size. */
+    if ((size_t)new_cap > SIZE_MAX / sizeof(size_t))
+        return -1;
     if ((size_t)new_cap > SIZE_MAX / r->slot_size)
         return -1;
+    size_t new_lengths_bytes = (size_t)new_cap * sizeof(size_t);
+    size_t new_data_bytes    = (size_t)new_cap * r->slot_size;
+    if (new_lengths_bytes > SIZE_MAX - new_data_bytes)
+        return -1;
 
-    uint8_t *new_storage = (uint8_t *)malloc((size_t)new_cap * r->slot_size);
-    size_t  *new_lengths = (size_t *)calloc((size_t)new_cap, sizeof(size_t));
-    if (!new_storage || !new_lengths) {
-        free(new_storage);
-        free(new_lengths);
+    uint8_t *new_storage = (uint8_t *)calloc(1, new_lengths_bytes + new_data_bytes);
+    if (!new_storage) {
         return -1;
     }
+    size_t  *new_lengths = (size_t *)new_storage;
+    uint8_t *new_data    = new_storage + new_lengths_bytes;
 
     int keep    = (r->count > new_cap) ? new_cap : r->count;
     int dropped = r->count - keep;
 
-    /* Copy surviving reports' payload bytes into new storage, packed
+    /* Copy surviving reports' payload bytes into new data region, packed
      * starting at slot 0. Oldest dropped entries are simply not copied. */
     int src = (r->head + dropped) % r->capacity;
     for (int dst = 0; dst < keep; dst++) {
         if (r->lengths[src] > 0) {
-            memcpy(new_storage + (size_t)dst * r->slot_size,
-                   r->storage  + (size_t)src * r->slot_size,
+            memcpy(new_data + (size_t)dst * r->slot_size,
+                   r->data  + (size_t)src * r->slot_size,
                    r->lengths[src]);
         }
         new_lengths[dst] = r->lengths[src];
@@ -238,11 +253,11 @@ static int hidapi_input_ring_resize(struct hidapi_input_ring *r, int new_cap)
 
     r->dropped += dropped;
 
-    free(r->storage);
-    free(r->lengths);
+    free(r->storage);   /* frees the entire old block */
 
     r->storage  = new_storage;
     r->lengths  = new_lengths;
+    r->data     = new_data;
     r->capacity = new_cap;
     r->head     = 0;
     r->count    = keep;

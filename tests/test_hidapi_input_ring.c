@@ -22,7 +22,11 @@ static int test_init_destroy(void) {
     CHECK(r.capacity == 4 && r.slot_size == SLOT_SZ && r.count == 0);
     CHECK(r.head == 0 && r.tail == 0);
     hidapi_input_ring_destroy(&r);
-    CHECK(r.storage == NULL && r.capacity == 0 && r.slot_size == 0);
+    CHECK(r.storage == NULL);
+    CHECK(r.lengths == NULL);
+    CHECK(r.data == NULL);
+    CHECK(r.capacity == 0);
+    CHECK(r.slot_size == 0);
     return 0;
 }
 
@@ -43,13 +47,18 @@ static int test_destroy_idempotent(void) {
 
     struct hidapi_input_ring zero = {0};
     hidapi_input_ring_destroy(&zero);
-    CHECK(zero.storage == NULL && zero.capacity == 0);
+    CHECK(zero.storage == NULL);
+    CHECK(zero.lengths == NULL);
+    CHECK(zero.data == NULL);
+    CHECK(zero.capacity == 0);
 
     struct hidapi_input_ring r = {0};
     CHECK(hidapi_input_ring_init(&r, 4, SLOT_SZ) == 0);
     hidapi_input_ring_destroy(&r);
     hidapi_input_ring_destroy(&r);
     CHECK(r.storage == NULL);
+    CHECK(r.lengths == NULL);
+    CHECK(r.data == NULL);
     return 0;
 }
 
@@ -107,6 +116,7 @@ static int test_init_overflow_reject(void) {
     /* r left untouched on failure — all fields still zero-initialized. */
     CHECK(r.storage == NULL);
     CHECK(r.lengths == NULL);
+    CHECK(r.data == NULL);
     CHECK(r.capacity == 0);
     CHECK(r.slot_size == 0);
     CHECK(r.count == 0 && r.head == 0 && r.tail == 0 && r.dropped == 0);

@@ -102,7 +102,7 @@ static int pthread_barrier_wait(pthread_barrier_t *barrier)
 }
 
 
-/* Linked List of input reports received from the device. */
+/* Input report ring state and supporting declarations. */
 
 static struct hid_api_version api_version = {
 	.major = HID_API_VERSION_MAJOR,
@@ -856,8 +856,8 @@ static void hid_device_removal_callback(void *context, IOReturn result,
 }
 
 /* The Run Loop calls this function for each input report received.
-   This function puts the data into a linked list to be picked up by
-   hid_read(). */
+   This function pushes the data into the input report ring buffer
+   to be picked up by hid_read(). */
 static void hid_report_callback(void *context, IOReturn result, void *sender,
                          IOHIDReportType report_type, uint32_t report_id,
                          uint8_t *report, CFIndex report_length)
@@ -877,7 +877,9 @@ static void hid_report_callback(void *context, IOReturn result, void *sender,
 	if (push_rc == 0) {
 		pthread_cond_signal(&dev->condition);
 	} else {
-		register_device_error(dev, "input queue allocation failed");
+		/* Push rejected. Do not call register_device_error() from the
+		 * callback thread as it would race with user-thread hid_error().
+		 * Drop silently. */
 	}
 
 	pthread_mutex_unlock(&dev->mutex);
@@ -1225,7 +1227,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	register_error_str(&dev->last_read_error_str, NULL);
 
-	/* Lock the access to the report list. */
+	/* Lock the access to the input report ring. */
 	pthread_mutex_lock(&dev->mutex);
 
 	/* There's an input report queued up. Return it. */
