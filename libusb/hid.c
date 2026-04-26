@@ -1673,10 +1673,11 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	}
 
 	if (dev->shutdown_thread) {
-		/* This means the device has been disconnected.
+		/* The read thread is no longer running (device disconnected,
+		   event loop failure, etc.).
 		   An error code of -1 should be returned. */
 		bytes_read = -1;
-		register_read_error(dev, "hid_read(_timeout): device is closing");
+		register_read_error(dev, "hid_read(_timeout): read thread terminated");
 		goto ret;
 	}
 
@@ -1687,6 +1688,10 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		}
 		if (dev->input_reports) {
 			bytes_read = return_data(dev, data, length);
+		}
+		else {
+			/* Woken up by shutdown_thread without data. */
+			register_read_error(dev, "hid_read(_timeout): read thread terminated");
 		}
 	}
 	else if (milliseconds > 0) {
@@ -1703,10 +1708,12 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 					bytes_read = return_data(dev, data, length);
 					break;
 				}
+				if (dev->shutdown_thread) {
+					register_read_error(dev, "hid_read(_timeout): read thread terminated");
+					break;
+				}
 
-				/* If we're here, there was a spurious wake up
-				   or the read thread was shutdown. Run the
-				   loop again (ie: don't break). */
+				/* Spurious wake up. Loop again. */
 			}
 			else if (res == HIDAPI_THREAD_TIMED_OUT) {
 				/* Timed out. */
@@ -1876,7 +1883,7 @@ int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *
 	if (skipped_report_id)
 		length++;
 
-	return length;
+	return (int)length;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
@@ -2055,7 +2062,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 {
 	const char *name, *description, *context;
 	char *buffer;
-	size_t len;
+	int len;
 	hidapi_error_ctx *err;
 
 	if (!dev) {
@@ -2093,12 +2100,12 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 		return L"Error string format error";
 	}
 
-	buffer = malloc(len + 1); /* +1 for terminating NULL */
+	buffer = malloc((size_t)len + 1); /* +1 for terminating NULL */
 	if (!buffer) {
 		return L"Error string memory allocation error";
 	}
 
-	len = snprintf(buffer, len + 1, "%s: (%s) %s", context, name, description);
+	len = snprintf(buffer, (size_t)len + 1, "%s: (%s) %s", context, name, description);
 
 	if (len <= 0) {
 		free(buffer);
