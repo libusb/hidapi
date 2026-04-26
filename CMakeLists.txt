@@ -91,6 +91,11 @@ if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
 endif()
 
+option(HIDAPI_BUILD_HID_READ_TEST "Build hid_read_test cmd-line tool" OFF)
+if(HIDAPI_BUILD_HID_READ_TEST)
+    add_subdirectory(hid_read_test)
+endif()
+
 if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
     add_subdirectory(src/tests)
 endif()
