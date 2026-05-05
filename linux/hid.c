@@ -80,7 +80,7 @@ struct hid_device_ {
 	wchar_t *last_read_error_str;
 	struct hid_device_info* device_info;
 	int interrupt_efd;
-	volatile int interrupted;
+	int interrupted;
 };
 
 static struct hid_api_version api_version = {
@@ -107,7 +107,9 @@ static hid_device *new_hid_device(void)
 	dev->interrupted = 0;
 	dev->interrupt_efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
 	if (dev->interrupt_efd < 0) {
+		int saved_errno = errno;
 		free(dev);
+		errno = saved_errno;
 		return NULL;
 	}
 
@@ -1091,8 +1093,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	dev = new_hid_device();
 	if (!dev) {
-		errno = ENOMEM;
-		register_global_error("Couldn't allocate memory");
+		register_global_error_format("Failed to create hid_device: %s", strerror(errno));
 		return NULL;
 	}
 
@@ -1149,7 +1150,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Set device error to none */
 	register_error_str(&dev->last_read_error_str, NULL);
 
-	if (dev->interrupted) {
+	if (__atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE)) {
 		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
 		return -1;
 	}
@@ -1238,7 +1239,7 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 
 int HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 {
-	dev->interrupted = 1;
+	__atomic_store_n(&dev->interrupted, 1, __ATOMIC_RELEASE);
 	uint64_t one = 1;
 	ssize_t written = write(dev->interrupt_efd, &one, sizeof(one));
 	(void)written;
@@ -1247,12 +1248,12 @@ int HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 
 int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 {
-	return dev->interrupted;
+	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
 }
 
 int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
-	dev->interrupted = 0;
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 	uint64_t v;
 	ssize_t got = read(dev->interrupt_efd, &v, sizeof(v));
 	(void)got;
@@ -1341,7 +1342,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	close(dev->device_handle);
+	if (dev->device_handle >= 0)
+		close(dev->device_handle);
 	if (dev->interrupt_efd >= 0)
 		close(dev->interrupt_efd);
 
