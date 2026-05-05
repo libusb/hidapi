@@ -60,7 +60,7 @@ struct hid_device_ {
 	int report_handles[256];
 	char path[USB_MAX_DEVNAMELEN];
 	int interrupt_pipe[2];
-	volatile int interrupted;
+	int interrupted;
 };
 
 struct hid_enumerate_data {
@@ -932,7 +932,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 
 	register_device_read_error(dev, NULL);
 
-	if (dev->interrupted) {
+	if (__atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE)) {
 		register_device_read_error(dev, "hid_read_timeout: operation interrupted");
 		return -1;
 	}
@@ -995,7 +995,7 @@ int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonbloc
 
 int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
 {
-	dev->interrupted = 1;
+	__atomic_store_n(&dev->interrupted, 1, __ATOMIC_RELEASE);
 	const char one = 1;
 	ssize_t written = write(dev->interrupt_pipe[1], &one, 1);
 	(void)written;
@@ -1004,12 +1004,12 @@ int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
 
 int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
 {
-	return dev->interrupted;
+	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
 {
-	dev->interrupted = 0;
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 	char buf[64];
 	ssize_t got;
 	do {

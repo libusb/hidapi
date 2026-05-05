@@ -24,9 +24,13 @@
 #include <string>
 #include <thread>
 
+#ifndef _WIN32
+#include <signal.h>
+#endif
+
 namespace {
 
-std::atomic<hid_device*> g_dev{nullptr};
+std::atomic<bool> g_terminate{false};
 
 std::string timestamp_now()
 {
@@ -50,8 +54,9 @@ std::string timestamp_now()
 
 extern "C" void on_signal(int)
 {
-    if (hid_device *d = g_dev.load(std::memory_order_acquire))
-        hid_read_interrupt(d);
+    /* async-signal-safe: atomic store only. Main thread will call
+       hid_read_interrupt() once cin.get() returns from EINTR. */
+    g_terminate.store(true, std::memory_order_release);
 }
 
 void read_thread_fn(hid_device *dev)
@@ -122,11 +127,19 @@ int main(int argc, char **argv)
         hid_exit();
         return 1;
     }
-    g_dev.store(dev, std::memory_order_release);
-
+#ifdef _WIN32
     std::signal(SIGINT, on_signal);
 #ifdef SIGTERM
     std::signal(SIGTERM, on_signal);
+#endif
+#else
+    /* Use sigaction without SA_RESTART so cin.get() returns on signal. */
+    struct sigaction sa;
+    sa.sa_handler = on_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
 #endif
 
     std::cout << "Reading from VID=" << std::hex << std::setw(4) << std::setfill('0')

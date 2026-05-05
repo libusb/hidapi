@@ -1283,9 +1283,9 @@ int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
 
 int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
 {
-	// TODO: very common but not the most efficient way to check this,
+	// TODO: common but not the most efficient way to check this;
 	// move to C11 atomics when the time comes.
-	// For now this is the most portable and efficient enought.
+	// For now this is portable and efficient enough.
 	return InterlockedCompareExchange(&dev->interrupted, 0, 0) ? 1 : 0;
 }
 
