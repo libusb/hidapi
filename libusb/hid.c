@@ -20,7 +20,9 @@
         https://github.com/libusb/hidapi .
 ********************************************************/
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* needed for wcsdup() before glibc 2.10 */
+#endif
 
 /* C */
 #include <stdio.h>
@@ -92,11 +94,16 @@ struct input_report {
 
 
 typedef struct hidapi_error_ctx_ {
-	enum libusb_error error_code;
+	/* libusb error code (negative LIBUSB_ERROR_* values or LIBUSB_SUCCESS),
+	 * or a sentinel non-zero value when set via register_string_error().
+	 * Stored as plain int so call sites can pass libusb return values
+	 * (which are typed as int) without an explicit cast — that keeps
+	 * libusb/hid.c compilable as C++ as well as C. */
+	int error_code;
 	/* designed to hold string literals only - do not free */
 	const char *error_context;
 
-	enum libusb_error last_error_code_cache;
+	int last_error_code_cache;
 	const char *last_error_context_cache;
 	/* dynamically allocated */
 	wchar_t *last_error_str;
@@ -421,7 +428,7 @@ static wchar_t *ctowcdup(const char *s, size_t slen)
 }
 
 
-static void register_libusb_error(hidapi_error_ctx *err, enum libusb_error error, const char *error_context)
+static void register_libusb_error(hidapi_error_ctx *err, int error, const char *error_context)
 {
 	err->error_code = error;
 	err->error_context = error_context;
@@ -469,7 +476,7 @@ static wchar_t *utf_to_wchar(char *utf, size_t utfbytes, const char *fromcode, s
 	}
 
 	wbuf_size = (max_expected_wchar + 1) * sizeof(wchar_t);
-	wbuf = malloc(wbuf_size);
+	wbuf = (wchar_t *) malloc(wbuf_size);
 	if (!wbuf) {
 		goto end;
 	}
@@ -806,7 +813,7 @@ static void invasive_fill_device_info_usage(struct hid_device_info *cur_dev, lib
 static struct hid_device_info * create_device_info_for_device(libusb_device *device, libusb_device_handle *handle, struct libusb_device_descriptor *desc, int config_number, int interface_num)
 {
 	int res = 0;
-	struct hid_device_info *cur_dev = calloc(1, sizeof(struct hid_device_info));
+	struct hid_device_info *cur_dev = (struct hid_device_info *) calloc(1, sizeof(struct hid_device_info));
 	if (cur_dev == NULL) {
 		return NULL;
 	}
@@ -1010,7 +1017,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 
 	num_devs = libusb_get_device_list(usb_context, &devs);
 	if (num_devs < 0) {
-		register_libusb_error(&last_global_error, (enum libusb_error)num_devs, "libusb_get_device_list");
+		register_libusb_error(&last_global_error, num_devs, "libusb_get_device_list");
 		return NULL;
 	}
 	while ((dev = devs[i++]) != NULL) {
@@ -1178,7 +1185,7 @@ hid_device * hid_open(unsigned short vendor_id, unsigned short product_id, const
 
 static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 {
-	hid_device *dev = transfer->user_data;
+	hid_device *dev = (hid_device *) transfer->user_data;
 	int res;
 
 	if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
@@ -1247,7 +1254,7 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 static void *read_thread(void *param)
 {
 	int res;
-	hid_device *dev = param;
+	hid_device *dev = (hid_device *) param;
 	uint8_t *buf;
 	size_t length;
 	if (dev->max_input_report_size > 0) {
@@ -1739,7 +1746,7 @@ static int return_data(hid_device *dev, unsigned char *data, size_t length)
 
 static void cleanup_mutex(void *param)
 {
-	hid_device *dev = param;
+	hid_device *dev = (hid_device *) param;
 	hidapi_thread_mutex_unlock(&dev->thread_state);
 }
 
@@ -2203,7 +2210,7 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_error(hid_device *dev)
 		return L"Error string format error";
 	}
 
-	buffer = malloc((size_t)len + 1); /* +1 for terminating NULL */
+	buffer = (char *) malloc((size_t)len + 1); /* +1 for terminating NULL */
 	if (!buffer) {
 		return L"Error string memory allocation error";
 	}
