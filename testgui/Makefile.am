@@ -11,11 +11,22 @@ hidapi_hidraw_testgui_LDADD = $(top_builddir)/linux/libhidapi-hidraw.la $(LIBS_T
 hidapi_libusb_testgui_SOURCES = test.cpp
 hidapi_libusb_testgui_LDADD = $(top_builddir)/libusb/libhidapi-libusb.la $(LIBS_TESTGUI)
 else
+if OS_FREEBSD
+bin_PROGRAMS = hidapi-hidraw-testgui hidapi-libusb-testgui
+
+hidapi_hidraw_testgui_SOURCES = test.cpp
+hidapi_hidraw_testgui_LDADD = $(top_builddir)/freebsd/libhidapi-hidraw.la $(LIBS_TESTGUI)
+
+hidapi_libusb_testgui_SOURCES = test.cpp
+hidapi_libusb_testgui_LDADD = $(top_builddir)/libusb/libhidapi-libusb.la $(LIBS_TESTGUI)
+else
+
 ## Other OS's
 bin_PROGRAMS = hidapi-testgui
 
 hidapi_testgui_SOURCES = test.cpp
 hidapi_testgui_LDADD = $(top_builddir)/$(backend)/libhidapi.la $(LIBS_TESTGUI)
+endif
 endif
 
 if OS_DARWIN
