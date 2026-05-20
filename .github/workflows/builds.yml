@@ -154,6 +154,21 @@ jobs:
         cd build/static_test
         make install
 
+    - name: Check C++ compile (backends as C++ sources)
+      working-directory: hidapisrc
+      # Verify the libusb/hidraw backend sources still compile as C++,
+      # so regressions of #671 are caught. -pedantic is intentionally not
+      # used here: libusb.h declares zero-size arrays and we rely on
+      # designated initialisers, both GNU extensions that g++ accepts in
+      # its default mode but rejects under strict ISO C++.
+      run: |
+        g++ -xc++ -Wall -Wextra -Werror -Wformat-signedness -D_GNU_SOURCE \
+          -I hidapi -I libusb $(pkg-config --cflags libusb-1.0) \
+          -c libusb/hid.c -o /tmp/hid_libusb_cxx.o
+        g++ -xc++ -Wall -Wextra -Werror -Wformat-signedness -D_GNU_SOURCE \
+          -I hidapi -I linux $(pkg-config --cflags libudev) \
+          -c linux/hid.c -o /tmp/hid_hidraw_cxx.o
+
     - name: Check Meson build
       run: |
         meson setup build_meson hidapisrc
