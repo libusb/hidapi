@@ -616,10 +616,12 @@ static int parse_uevent_info(const char *uevent, unsigned *bus_type,
 			}
 		} else if (strcmp(key, "HID_NAME") == 0) {
 			/* The caller has to free the product name */
+			free(*product_name_utf8);
 			*product_name_utf8 = strdup(value);
 			found_name = 1;
 		} else if (strcmp(key, "HID_UNIQ") == 0) {
 			/* The caller has to free the serial number */
+			free(*serial_number_utf8);
 			*serial_number_utf8 = strdup(value);
 			found_serial = 1;
 		}
