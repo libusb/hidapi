@@ -39,7 +39,7 @@ extern "C" {
 			for details on libusb_wrap_sys_device.
 
 			@ingroup API
-			@param sys_dev Platform-specific file descriptor that can be recognised by libusb.
+			@param sys_dev Platform-specific file descriptor that can be recognized by libusb.
 			@param interface_num USB interface number of the device to be used as HID interface.
 			Pass -1 to select first HID interface of the device.
 
@@ -48,6 +48,23 @@ extern "C" {
 				success or NULL on failure.
 		*/
 		HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys_dev, int interface_num);
+
+              /** @brief Similar to @ref hid_error but gives a libusb error code.
+
+                     Since version 0.15.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+
+                     If the error occurred is not immediately caused by a libusb function call,
+                     the returned value is 1. @ref hid_error would still contain a valid and meaningful error message.
+
+                     @ingroup API
+                     @param dev A device handle returned from hid_open(),
+                       or NULL to get the last non-device-specific error
+                       (e.g. for errors in hid_open() or hid_enumerate()).
+
+                     @returns
+                            enum libusb_error value representing last error code.
+              */
+              HID_API_EXPORT int HID_API_CALL hid_libusb_error(hid_device *dev);
 
 #ifdef __cplusplus
 }

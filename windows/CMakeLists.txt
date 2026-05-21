@@ -22,6 +22,12 @@ target_link_libraries(hidapi_winapi
     PUBLIC hidapi_include
 )
 
+target_compile_definitions(hidapi_winapi
+    # CMake compiles hidapi_descriptor_reconstruct.c as a separate translation unit,
+    # so hid.c must not #include it (to avoid duplicate symbol LNK4006 in static builds).
+    PRIVATE HIDAPI_CMAKE_V0_BUILD
+)
+
 if(NOT BUILD_SHARED_LIBS)
     target_compile_definitions(hidapi_winapi
         # prevent marking functions as __declspec(dllexport) for static library build
