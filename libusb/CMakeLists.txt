@@ -106,3 +106,7 @@ if(HIDAPI_INSTALL_TARGETS)
 endif()
 
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-libusb.pc.in")
+
+if(HIDAPI_WITH_TESTS)
+     add_subdirectory(test)
+endif()
