@@ -19,7 +19,6 @@
 #include <wchar.h>
 #include <string.h>
 #include <stdlib.h>
-
 #include <hidapi.h>
 
 // Headers needed for sleeping.

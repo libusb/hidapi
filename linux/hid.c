@@ -26,23 +26,25 @@
 #include <stdlib.h>
 #include <locale.h>
 #include <errno.h>
-
 /* Unix */
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <sys/utsname.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <linux/types.h>
+#include <linux/hid.h>
+#include <stdarg.h>
+#include <wchar.h>
 
 /* Linux */
 #include <linux/hidraw.h>
-#include <linux/version.h>
 #include <linux/input.h>
 #include <libudev.h>
 
 #include "hidapi.h"
+
+struct udev_device;
 
 #ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
 /* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.

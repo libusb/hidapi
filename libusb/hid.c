@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <locale.h>
 #include <errno.h>
@@ -33,9 +34,6 @@
 /* Unix */
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/utsname.h>
 #include <fcntl.h>
 #include <wchar.h>
 
