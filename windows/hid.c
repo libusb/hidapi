@@ -203,6 +203,8 @@ struct hid_device_ {
 		char *read_buf;
 		OVERLAPPED ol;
 		OVERLAPPED write_ol;
+		HANDLE interrupt_event;
+		volatile LONG interrupted;
 		struct hid_device_info* device_info;
 		DWORD write_timeout_ms;
 };
@@ -230,6 +232,8 @@ static hid_device *new_hid_device()
 	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
+	dev->interrupt_event = CreateEvent(NULL, TRUE /*manual reset*/, FALSE /*initial state nonsignaled*/, NULL);
+	dev->interrupted = 0;
 	dev->device_info = NULL;
 	dev->write_timeout_ms = 1000;
 
@@ -240,6 +244,7 @@ static void free_hid_device(hid_device *dev)
 {
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
+	CloseHandle(dev->interrupt_event);
 	CloseHandle(dev->device_handle);
 	free(dev->last_error_str);
 	free(dev->last_read_error_str);
@@ -1173,6 +1178,11 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 
 	register_string_error_to_buffer(&dev->last_read_error_str, NULL);
 
+	if (InterlockedCompareExchange(&dev->interrupted, 0, 0)) {
+		register_string_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout: operation interrupted");
+		return -1;
+	}
+
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
 
@@ -1200,9 +1210,16 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	}
 
 	if (overlapped) {
-		/* See if there is any data yet. */
-		res = WaitForSingleObject(ev, milliseconds >= 0 ? (DWORD)milliseconds : INFINITE);
-		if (res != WAIT_OBJECT_0) {
+		HANDLE waits[2] = { ev, dev->interrupt_event };
+		DWORD wr = WaitForMultipleObjects(2, waits, FALSE, milliseconds >= 0 ? (DWORD)milliseconds : INFINITE);
+		if (wr == WAIT_OBJECT_0 + 1) {
+			/* Interrupt fired and no data is ready. The pending ReadFile is
+			   left in flight; it will resume on the next hid_read_timeout()
+			   call after hid_read_clear_interrupt(). */
+			register_string_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout: operation interrupted");
+			return -1;
+		}
+		if (wr != WAIT_OBJECT_0) {
 			/* There was no data this time. Return zero bytes available,
 			   but leave the Overlapped I/O running. */
 			return 0;
@@ -1255,6 +1272,28 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 	if (dev->last_read_error_str == NULL)
 		return L"Success";
 	return dev->last_read_error_str;
+}
+
+int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
+{
+	InterlockedExchange(&dev->interrupted, 1);
+	SetEvent(dev->interrupt_event);
+	return 0;
+}
+
+int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
+{
+	// TODO: common but not the most efficient way to check this;
+	// move to C11 atomics when the time comes.
+	// For now this is portable and efficient enough.
+	return InterlockedCompareExchange(&dev->interrupted, 0, 0) ? 1 : 0;
+}
+
+int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
+{
+	InterlockedExchange(&dev->interrupted, 0);
+	ResetEvent(dev->interrupt_event);
+	return 0;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)
