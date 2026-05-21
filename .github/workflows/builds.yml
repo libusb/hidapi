@@ -90,6 +90,15 @@ jobs:
         cd build/static_test
         make install
 
+    - name: Check C++ portability build
+      run: |
+        rm -rf build/cxx
+        cmake -B build/cxx -S hidapisrc \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DHIDAPI_BUILD_AS_CXX=ON \
+          "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror"
+        cmake --build build/cxx
+
     - name: Check Meson build
       run: |
         meson setup build_meson hidapisrc
@@ -154,6 +163,15 @@ jobs:
         cd build/static_test
         make install
 
+    - name: Check C++ portability build
+      run: |
+        rm -rf build/cxx
+        cmake -B build/cxx -S hidapisrc \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DHIDAPI_BUILD_AS_CXX=ON \
+          "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror -Wformat-signedness"
+        cmake --build build/cxx
+
     - name: Check Meson build
       run: |
         meson setup build_meson hidapisrc
@@ -205,6 +223,14 @@ jobs:
       shell: cmd
       working-directory: build/msvc
       run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
+
+    - name: Configure CMake MSVC C++
+      shell: cmd
+      run: |
+        cmake -B build\msvc_cxx -S hidapisrc -DCMAKE_BUILD_TYPE=Release -DHIDAPI_BUILD_AS_CXX=ON -DCMAKE_CXX_STANDARD=20 "-DCMAKE_CXX_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake MSVC C++
+      working-directory: build/msvc_cxx
+      run: cmake --build . --config Release
 
     - name: Configure CMake NMake MSVC
       shell: cmd
