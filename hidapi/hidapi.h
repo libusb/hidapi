@@ -423,6 +423,55 @@ extern "C" {
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock);
 
+		/** @brief Upper bound for hid_set_num_input_buffers().
+
+		    Values passed above this limit are rejected by
+		    hid_set_num_input_buffers(). Guards against
+		    memory-exhaustion via unbounded input report queue growth.
+
+		    May be overridden at build time via
+		    -DHID_API_MAX_NUM_INPUT_BUFFERS=<value>.
+		*/
+		#ifndef HID_API_MAX_NUM_INPUT_BUFFERS
+		#define HID_API_MAX_NUM_INPUT_BUFFERS 1024
+		#endif
+
+		/** @brief Set the number of input report buffers queued per device.
+
+		    Some HID devices emit input reports in bursts at rates
+		    that exceed the default internal queue capacity, causing
+		    silent report drops on macOS and the libusb Linux backend.
+		    This function allows callers to change how many input
+		    report buffers are retained per device.
+
+		    Call after hid_open() and before the first hid_read() to
+		    avoid losing reports buffered at open time.
+
+		    @note Per-backend behavior:
+		    - **macOS (IOKit)** and **Linux libusb**: resizes the
+		      userspace input-report queue. Default: 30 reports.
+		    - **Windows**: forwards to HidD_SetNumInputBuffers(),
+		      which resizes the kernel HID ring buffer. The kernel
+		      accepts values in the range [2, 512]; requests outside
+		      this range return -1. Default: 64 reports.
+		    - **Linux hidraw** and **NetBSD uhid**: the call is
+		      accepted (returns 0) and validated against
+		      HID_API_MAX_NUM_INPUT_BUFFERS, but has no effect (no-op) —
+		      these kernels manage the input report buffer internally
+		      and expose no userspace resize.
+
+		    @ingroup API
+		    @param dev A device handle returned from hid_open().
+		    @param num_buffers The desired number of input report buffers.
+		        Must be in range [1, HID_API_MAX_NUM_INPUT_BUFFERS].
+
+		    @returns
+		        0 on success, -1 on failure (invalid parameters or
+		        backend-specific error). Call hid_error(dev) for
+		        details where supported.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int num_buffers);
+
 		/** @brief Send a Feature report to the device.
 
 			Feature reports are sent over the Control endpoint as a
