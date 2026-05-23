@@ -9,10 +9,7 @@ target_link_libraries(hidapi_hidraw PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
 
-include(FindPkgConfig)
-pkg_check_modules(libudev REQUIRED IMPORTED_TARGET libudev)
-
-target_link_libraries(hidapi_hidraw PRIVATE PkgConfig::libudev Threads::Threads)
+target_link_libraries(hidapi_hidraw PRIVATE Threads::Threads dl)
 
 set_target_properties(hidapi_hidraw
     PROPERTIES

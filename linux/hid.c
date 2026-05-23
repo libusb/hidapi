@@ -40,7 +40,9 @@
 #include <linux/hidraw.h>
 #include <linux/version.h>
 #include <linux/input.h>
-#include <libudev.h>
+
+/* falkTX: replaced by local file for dynamic loading */
+#include "libudev.c"
 
 #include "hidapi.h"
 
