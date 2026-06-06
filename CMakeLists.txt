@@ -71,8 +71,10 @@ if(HIDAPI_ENABLE_ASAN)
 endif()
 
 if(WIN32)
-    # so far only Windows has tests
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    # Linux has virtual-device (uhid) based tests for the hidraw backend
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 else()
     set(HIDAPI_WITH_TESTS OFF)
 endif()
@@ -97,10 +99,14 @@ if(HIDAPI_BUILD_HID_READ_TEST)
     add_subdirectory(hid_read_test)
 endif()
 
+if(HIDAPI_WITH_TESTS AND CMAKE_SYSTEM_NAME MATCHES "Linux")
+    add_subdirectory(src/tests)
+endif()
+
 if(HIDAPI_ENABLE_ASAN)
     if(NOT MSVC)
         # MSVC doesn't recognize those options, other compilers - requiring it
-        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest hid_read_test_hidraw hid_read_test_libusb hid_read_test)
+        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest hid_read_test_hidraw hid_read_test_libusb hid_read_test test_read_interrupt)
             if(TARGET ${HIDAPI_TARGET})
                 if(BUILD_SHARED_LIBS)
                     target_link_options(${HIDAPI_TARGET} PRIVATE -fsanitize=address)
