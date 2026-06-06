@@ -1,11 +1,12 @@
-cmake_minimum_required(VERSION 3.4.3...3.25 FATAL_ERROR)
-
 list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_darwin.h")
 
 add_library(hidapi_darwin
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
+endif()
 
 find_package(Threads REQUIRED)
 

@@ -101,6 +101,13 @@ currently this option is only available on Windows, since only Windows backend h
 
 </details><br>
 
+<details>
+  <summary>Testing-only variables</summary>
+
+  - `HIDAPI_BUILD_AS_CXX` - when set to TRUE, the HIDAPI C source files are compiled with a C++ compiler instead of a C compiler. Useful to confirm that HIDAPI's sources stay compatible with consumers that include them into a C++ translation unit. Not intended for production builds; defaults to FALSE.
+
+</details><br>
+
 To see all most-useful CMake variables available for HIDAPI, one of the most convenient ways is too use [`cmake-gui`](https://cmake.org/cmake/help/latest/manual/cmake-gui.1.html) tool ([example](https://cmake.org/runningcmake/)).
 
 _NOTE_: HIDAPI packages built by CMake can be used with `pkg-config`, as if built with [Autotools](BUILD.autotools.md).

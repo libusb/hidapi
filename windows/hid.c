@@ -1646,7 +1646,9 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 	return last_global_error_str;
 }
 
-#ifndef hidapi_winapi_EXPORTS
+#ifndef HIDAPI_CMAKE_V0_BUILD
+/* Include the descriptor reconstruction code when NOT building with CMake.
+   CMake builds compile hidapi_descriptor_reconstruct.c as a separate translation unit. */
 #include "hidapi_descriptor_reconstruct.c"
 #endif
 
