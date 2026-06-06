@@ -445,9 +445,9 @@ extern "C" {
 			feature/output report functions, and all other operations on @p dev
 			continue to work normally.
 
-			This is the only function on hid_device that may be called concurrently
-			with another function operating on the same device. The call is
-			idempotent and is safe to invoke when no read is in flight.
+			This function may be called concurrently with another function
+			operating on the same device. The call is idempotent and is safe
+			to invoke when no read is in flight.
 
 			Recommended usage to cleanly shut down a dedicated read thread:
 			@code
