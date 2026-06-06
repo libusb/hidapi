@@ -13,7 +13,6 @@
 
 #include <hidapi.h>
 
-#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -30,7 +29,10 @@
 
 namespace {
 
-std::atomic<bool> g_terminate{false};
+/* volatile sig_atomic_t is the type the C/C++ standards guarantee is safe to
+   write from a signal handler; std::atomic<bool> is only async-signal-safe when
+   it happens to be lock-free, which is not guaranteed. */
+volatile sig_atomic_t g_terminate = 0;
 
 std::string timestamp_now()
 {
@@ -54,9 +56,9 @@ std::string timestamp_now()
 
 extern "C" void on_signal(int)
 {
-    /* async-signal-safe: atomic store only. Main thread will call
-       hid_read_interrupt() once cin.get() returns from EINTR. */
-    g_terminate.store(true, std::memory_order_release);
+    /* async-signal-safe: a single store to a volatile sig_atomic_t. The main
+       thread polls g_terminate and calls hid_read_interrupt() from there. */
+    g_terminate = 1;
 }
 
 void read_thread_fn(hid_device *dev)
@@ -148,7 +150,18 @@ int main(int argc, char **argv)
 
     std::thread reader(read_thread_fn, dev);
 
-    std::cin.get();  /* Enter, EOF, or POSIX-EINTR from a signal */
+    /* Wait for Enter/EOF on a detached helper thread, so the main thread can
+       also observe g_terminate being set asynchronously by the signal handler.
+       This keeps Ctrl+C working on platforms (e.g. Windows) where a console
+       read is not interrupted by the signal. */
+    std::thread input_waiter([]() {
+        std::cin.get();  /* Enter or EOF */
+        g_terminate = 1;
+    });
+    input_waiter.detach();
+
+    while (!g_terminate)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     hid_read_interrupt(dev);  /* idempotent — also safe if signal handler ran first */
     reader.join();

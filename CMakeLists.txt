@@ -100,7 +100,7 @@ endif()
 if(HIDAPI_ENABLE_ASAN)
     if(NOT MSVC)
         # MSVC doesn't recognize those options, other compilers - requiring it
-        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest)
+        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest hid_read_test_hidraw hid_read_test_libusb hid_read_test)
             if(TARGET ${HIDAPI_TARGET})
                 if(BUILD_SHARED_LIBS)
                     target_link_options(${HIDAPI_TARGET} PRIVATE -fsanitize=address)

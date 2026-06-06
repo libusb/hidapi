@@ -477,8 +477,7 @@ extern "C" {
 			@param dev A device handle returned from hid_open().
 
 			@returns
-				1 if the read pipeline is interrupted, 0 if not, -1 on error.
-				Call hid_error(dev) to get the failure reason.
+				1 if the read pipeline is interrupted, 0 if not.
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev);
 

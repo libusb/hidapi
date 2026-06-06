@@ -1157,13 +1157,14 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	int bytes_read;
 
-	if (milliseconds >= 0) {
-		/* Milliseconds is either 0 (non-blocking) or > 0 (contains
-		   a valid timeout). In both cases we want to call poll()
-		   and wait for data to arrive.  Don't rely on non-blocking
-		   operation (O_NONBLOCK) since some kernels don't seem to
-		   properly report device disconnection through read() when
-		   in non-blocking mode.  */
+	{
+		/* Always poll() - even for a blocking read (milliseconds < 0) -
+		   so that hid_read_interrupt() can wake a read that is waiting for
+		   data via the interrupt eventfd. A negative timeout makes poll()
+		   block indefinitely, matching blocking-read semantics.
+		   Don't rely on non-blocking operation (O_NONBLOCK) since some
+		   kernels don't seem to properly report device disconnection
+		   through read() when in non-blocking mode.  */
 		int ret;
 		struct pollfd fds[2];
 
@@ -1175,7 +1176,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		fds[1].revents = 0;
 		ret = poll(fds, 2, milliseconds);
 		if (ret == 0) {
-			/* Timeout */
+			/* Timeout (only reachable when milliseconds >= 0) */
 			return ret;
 		}
 		if (ret == -1) {
