@@ -1,0 +1,95 @@
+name: Windows Virtual HID Test (experimental)
+
+on:
+  # Manual-trigger only: this job builds, self-signs and installs a kernel
+  # driver, so it is intentionally not run on every push/PR. Run it on demand
+  # from the Actions tab (or `gh workflow run`) when the virtual-device driver
+  # or the Windows provider changes. Note that GitHub only exposes the "Run
+  # workflow" button once this file is present on the repository's default
+  # branch.
+  workflow_dispatch:
+
+jobs:
+  win-vhid:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Show environment
+      shell: pwsh
+      run: |
+        Write-Host "VS installs:"
+        & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -all -products * -property installationPath
+        Write-Host "Existing WDK kits:"
+        Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+
+    - name: Install WDK 26100.6584 (matches VS2022, registers VS2022 WDK VSIX)
+      shell: pwsh
+      run: |
+        $url = "https://go.microsoft.com/fwlink/?linkid=2335869"
+        Write-Host "Downloading WDK setup..."
+        Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\wdksetup.exe"
+        Write-Host "Running WDK setup (silent)..."
+        $p = Start-Process -FilePath "$env:RUNNER_TEMP\wdksetup.exe" -ArgumentList '/quiet','/norestart','/ceip','off' -Wait -PassThru
+        Write-Host "WDK setup exit code: $($p.ExitCode)"
+        Write-Host "=== WDK VSIX present for VS2022? ==="
+        Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Vsix" -Recurse -Filter *.vsix -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+        Write-Host "=== wdf include dirs ==="
+        Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include\wdf\umdf" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+
+    - name: Build vhidmini2 (UMDF2)
+      shell: cmd
+      working-directory: src/tests/windows/driver
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        msbuild VhidminiUm.vcxproj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.26100.0 /v:minimal
+
+    - name: Trust the driver's test certificate
+      shell: pwsh
+      run: |
+        $pkg = "src/tests/windows/driver/x64/Release/VhidminiUm"
+        $cer = "src/tests/windows/driver/x64/Release/VhidminiUm.cer"
+        Write-Host "=== package contents ==="
+        Get-ChildItem $pkg | Select-Object Name, Length
+        Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+        Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+        Write-Host "Imported test cert into Root and TrustedPublisher."
+
+    - name: Install virtual HID device (devcon, root-enumerated)
+      shell: pwsh
+      run: |
+        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        Write-Host "devcon: $devcon"
+        $inf = (Resolve-Path "src/tests/windows/driver/x64/Release/VhidminiUm/VhidminiUm.inf").Path
+        Write-Host "inf: $inf"
+        & $devcon install $inf "root\VhidminiUm"
+        Write-Host "devcon exit: $LASTEXITCODE"
+
+    - name: HID devices present (diagnostic)
+      shell: pwsh
+      run: |
+        Start-Sleep -Seconds 3
+        Get-PnpDevice -Class HIDClass -ErrorAction SilentlyContinue |
+            Select-Object Status, FriendlyName, InstanceId | Format-Table -AutoSize
+
+    - name: Build HIDAPI + tests
+      shell: pwsh
+      run: |
+        cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DHIDAPI_WITH_TESTS=ON
+        cmake --build build --config Release
+
+    - name: Run read-interrupt test against the virtual device
+      shell: pwsh
+      working-directory: build
+      run: |
+        ctest -C Release -R ReadInterrupt --output-on-failure
+
+    - name: Cleanup virtual device
+      if: always()
+      shell: pwsh
+      run: |
+        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        if ($devcon) { & $devcon remove "root\VhidminiUm" 2>$null }
+        Write-Host "cleanup done"

@@ -99,7 +99,7 @@ if(HIDAPI_BUILD_HID_READ_TEST)
     add_subdirectory(hid_read_test)
 endif()
 
-if(HIDAPI_WITH_TESTS AND CMAKE_SYSTEM_NAME MATCHES "Linux")
+if(HIDAPI_WITH_TESTS AND (CMAKE_SYSTEM_NAME MATCHES "Linux" OR WIN32))
     add_subdirectory(src/tests)
 endif()
 
