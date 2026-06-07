@@ -12,10 +12,11 @@
 
 /*
  * Creating a uhid device makes the kernel expose a real /dev/hidrawN node that
- * the HIDAPI hidraw backend can enumerate and open, so the tests drive the
- * public HIDAPI Linux code paths against a deterministic device with no
- * physical hardware. Requires the 'uhid' module and (typically) root to open
- * /dev/uhid; when that isn't possible, test_virtual_device_create() returns
+ * the HIDAPI hidraw backend can enumerate and open. The pre-recorded scenarios
+ * (see test_virtual_device.h) are played back here: the uhid event pump watches
+ * for a Feature SET_REPORT whose first byte is a TEST_VDEV_CMD_* command and
+ * replays the matching canned input report. Requires the 'uhid' module and
+ * (typically) root to open /dev/uhid; otherwise create() returns
  * TEST_VDEV_UNAVAILABLE so the test is skipped rather than failed.
  */
 
@@ -45,17 +46,11 @@ struct test_virtual_device {
 	unsigned short product_id;
 	char serial[64];              /* uhid 'uniq' == HIDAPI serial_number */
 
-	pthread_mutex_t lock;         /* protects buffers below + serializes fd writes */
-
-	unsigned char feature[64];    /* bytes returned for a feature GET_REPORT */
-	size_t feature_len;
-
-	unsigned char last_output[64];/* last OUTPUT/SET_REPORT payload received */
-	size_t last_output_len;
+	pthread_mutex_t write_lock;   /* serializes writes to the uhid fd */
 };
 
 /* A generic vendor-defined descriptor: one 8-byte Input, Output and Feature
- * report, no Report ID. With no Report ID, hid_read() returns the injected
+ * report, no Report ID. With no Report ID, hid_read() returns the replayed
  * input bytes verbatim, which keeps the tests easy to reason about. */
 static const unsigned char k_report_descriptor[] = {
 	0x06, 0x00, 0xFF,       /* Usage Page (Vendor Defined 0xFF00)      */
@@ -74,9 +69,11 @@ static const unsigned char k_report_descriptor[] = {
 	0xC0                    /* End Collection                          */
 };
 
-/* write() is marked warn_unused_result by glibc; this wrapper consumes the
- * result for the best-effort writes where there's nothing useful to do on
- * failure (replies, teardown). */
+static const unsigned char k_input_a[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_A;
+static const unsigned char k_input_b[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_B;
+
+/* write() is marked warn_unused_result by glibc; consume the result for the
+ * best-effort writes (replies, teardown). */
 static void write_event_best_effort(int fd, const struct uhid_event *ev)
 {
 	ssize_t r = write(fd, ev, sizeof(*ev));
@@ -91,66 +88,73 @@ static void sleep_ms(int ms)
 	nanosleep(&ts, NULL);
 }
 
-/* Serialize writes to the uhid fd (the main thread injects input while the
- * pump thread writes GET/SET_REPORT replies). */
-static int uhid_write_event(struct test_virtual_device *dev, const struct uhid_event *ev)
+/* Send one input report (size TEST_VDEV_REPORT_SIZE) to the host. */
+static void emit_input(struct test_virtual_device *dev, const unsigned char *payload)
 {
-	ssize_t ret;
-	pthread_mutex_lock(&dev->lock);
-	ret = write(dev->fd, ev, sizeof(*ev));
-	pthread_mutex_unlock(&dev->lock);
-	return ret < 0 ? TEST_VDEV_ERROR : TEST_VDEV_OK;
+	struct uhid_event ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.type = UHID_INPUT2;
+	ev.u.input2.size = TEST_VDEV_REPORT_SIZE;
+	memcpy(ev.u.input2.data, payload, TEST_VDEV_REPORT_SIZE);
+
+	pthread_mutex_lock(&dev->write_lock);
+	write_event_best_effort(dev->fd, &ev);
+	pthread_mutex_unlock(&dev->write_lock);
 }
 
+/* A Feature SET_REPORT carries a scenario command. Depending on whether the
+ * report is numbered, the payload the kernel hands to uhid may be prefixed by
+ * a report-number byte, so locate the command by scanning the first few bytes
+ * for a recognised TEST_VDEV_CMD_* value (the report-number byte is 0 for our
+ * unnumbered device, and the commands are non-zero, so this is unambiguous). */
+static void handle_set_report(struct test_virtual_device *dev, const struct uhid_event *in)
+{
+	struct uhid_event out;
+	unsigned char command = TEST_VDEV_CMD_NONE;
+	uint16_t scan = in->u.set_report.size;
+	uint16_t i;
+	if (scan > 4)
+		scan = 4;
+	for (i = 0; i < scan; i++) {
+		unsigned char b = in->u.set_report.data[i];
+		if (b == TEST_VDEV_CMD_EMIT_A || b == TEST_VDEV_CMD_EMIT_B) {
+			command = b;
+			break;
+		}
+	}
+
+	memset(&out, 0, sizeof(out));
+	out.type = UHID_SET_REPORT_REPLY;
+	out.u.set_report_reply.id = in->u.set_report.id;
+	out.u.set_report_reply.err = 0;
+	pthread_mutex_lock(&dev->write_lock);
+	write_event_best_effort(dev->fd, &out);
+	pthread_mutex_unlock(&dev->write_lock);
+
+	switch (command) {
+	case TEST_VDEV_CMD_EMIT_A:
+		emit_input(dev, k_input_a);
+		break;
+	case TEST_VDEV_CMD_EMIT_B:
+		emit_input(dev, k_input_b);
+		break;
+	default:
+		break;
+	}
+}
+
+/* Answer feature GET_REPORT requests benignly (empty payload). */
 static void handle_get_report(struct test_virtual_device *dev, const struct uhid_event *in)
 {
 	struct uhid_event out;
 	memset(&out, 0, sizeof(out));
 	out.type = UHID_GET_REPORT_REPLY;
 	out.u.get_report_reply.id = in->u.get_report.id;
-
-	pthread_mutex_lock(&dev->lock);
-	if (in->u.get_report.rtype == UHID_FEATURE_REPORT && dev->feature_len > 0) {
-		uint16_t n = (uint16_t)dev->feature_len;
-		out.u.get_report_reply.err = 0;
-		out.u.get_report_reply.size = n;
-		memcpy(out.u.get_report_reply.data, dev->feature, n);
-	} else {
-		out.u.get_report_reply.err = 0;
-		out.u.get_report_reply.size = 0;
-	}
+	out.u.get_report_reply.err = 0;
+	out.u.get_report_reply.size = 0;
+	pthread_mutex_lock(&dev->write_lock);
 	write_event_best_effort(dev->fd, &out);
-	pthread_mutex_unlock(&dev->lock);
-}
-
-static void handle_set_report(struct test_virtual_device *dev, const struct uhid_event *in)
-{
-	struct uhid_event out;
-	uint16_t n = in->u.set_report.size;
-	if (n > sizeof(dev->last_output))
-		n = (uint16_t)sizeof(dev->last_output);
-
-	pthread_mutex_lock(&dev->lock);
-	memcpy(dev->last_output, in->u.set_report.data, n);
-	dev->last_output_len = n;
-
-	memset(&out, 0, sizeof(out));
-	out.type = UHID_SET_REPORT_REPLY;
-	out.u.set_report_reply.id = in->u.set_report.id;
-	out.u.set_report_reply.err = 0;
-	write_event_best_effort(dev->fd, &out);
-	pthread_mutex_unlock(&dev->lock);
-}
-
-static void handle_output(struct test_virtual_device *dev, const struct uhid_event *in)
-{
-	uint16_t n = in->u.output.size;
-	if (n > sizeof(dev->last_output))
-		n = (uint16_t)sizeof(dev->last_output);
-	pthread_mutex_lock(&dev->lock);
-	memcpy(dev->last_output, in->u.output.data, n);
-	dev->last_output_len = n;
-	pthread_mutex_unlock(&dev->lock);
+	pthread_mutex_unlock(&dev->write_lock);
 }
 
 static void *pump_thread_fn(void *arg)
@@ -183,17 +187,14 @@ static void *pump_thread_fn(void *arg)
 		}
 
 		switch (ev.type) {
-		case UHID_GET_REPORT:
-			handle_get_report(dev, &ev);
-			break;
 		case UHID_SET_REPORT:
 			handle_set_report(dev, &ev);
 			break;
-		case UHID_OUTPUT:
-			handle_output(dev, &ev);
+		case UHID_GET_REPORT:
+			handle_get_report(dev, &ev);
 			break;
 		default:
-			/* UHID_START / UHID_OPEN / UHID_CLOSE / UHID_STOP: ignore */
+			/* UHID_START / UHID_OPEN / UHID_CLOSE / UHID_STOP / UHID_OUTPUT */
 			break;
 		}
 	}
@@ -222,12 +223,12 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	dev->vendor_id = vendor_id;
 	dev->product_id = product_id;
 	snprintf(dev->serial, sizeof(dev->serial), "%s", serial ? serial : "");
-	pthread_mutex_init(&dev->lock, NULL);
+	pthread_mutex_init(&dev->write_lock, NULL);
 
 	dev->fd = open("/dev/uhid", O_RDWR | O_CLOEXEC);
 	if (dev->fd < 0) {
 		int e = errno;
-		pthread_mutex_destroy(&dev->lock);
+		pthread_mutex_destroy(&dev->write_lock);
 		free(dev);
 		if (e == ENOENT || e == EACCES || e == EPERM || e == ENODEV)
 			return TEST_VDEV_UNAVAILABLE;
@@ -249,7 +250,7 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	if (write(dev->fd, &ev, sizeof(ev)) < 0) {
 		int e = errno;
 		close(dev->fd);
-		pthread_mutex_destroy(&dev->lock);
+		pthread_mutex_destroy(&dev->write_lock);
 		free(dev);
 		if (e == EACCES || e == EPERM)
 			return TEST_VDEV_UNAVAILABLE;
@@ -262,7 +263,7 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 		ev.type = UHID_DESTROY;
 		write_event_best_effort(dev->fd, &ev);
 		close(dev->fd);
-		pthread_mutex_destroy(&dev->lock);
+		pthread_mutex_destroy(&dev->write_lock);
 		free(dev);
 		return TEST_VDEV_ERROR;
 	}
@@ -270,51 +271,6 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 
 	*out_dev = dev;
 	return TEST_VDEV_OK;
-}
-
-int test_virtual_device_send_input(test_virtual_device *dev,
-                                   const unsigned char *data, size_t length)
-{
-	struct uhid_event ev;
-
-	if (!dev || dev->fd < 0)
-		return TEST_VDEV_ERROR;
-	if (length > sizeof(ev.u.input2.data))
-		return TEST_VDEV_ERROR;
-
-	memset(&ev, 0, sizeof(ev));
-	ev.type = UHID_INPUT2;
-	ev.u.input2.size = (uint16_t)length;
-	if (length > 0)
-		memcpy(ev.u.input2.data, data, length);
-
-	return uhid_write_event(dev, &ev);
-}
-
-void test_virtual_device_set_feature(test_virtual_device *dev,
-                                     const unsigned char *data, size_t length)
-{
-	if (!dev)
-		return;
-	if (length > sizeof(dev->feature))
-		length = sizeof(dev->feature);
-	pthread_mutex_lock(&dev->lock);
-	memcpy(dev->feature, data, length);
-	dev->feature_len = length;
-	pthread_mutex_unlock(&dev->lock);
-}
-
-size_t test_virtual_device_last_output(test_virtual_device *dev,
-                                       unsigned char *data, size_t length)
-{
-	size_t n;
-	if (!dev)
-		return 0;
-	pthread_mutex_lock(&dev->lock);
-	n = dev->last_output_len < length ? dev->last_output_len : length;
-	memcpy(data, dev->last_output, n);
-	pthread_mutex_unlock(&dev->lock);
-	return n;
 }
 
 hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeout_ms)
@@ -326,15 +282,13 @@ hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeou
 	if (!dev)
 		return NULL;
 
-	/* Widen the ASCII serial for comparison against hid_device_info. */
 	for (i = 0; i + 1 < (sizeof(wserial) / sizeof(wserial[0])) && dev->serial[i]; i++)
 		wserial[i] = (wchar_t)(unsigned char)dev->serial[i];
 	wserial[i] = L'\0';
 
 	/* The hidraw node and its udev attributes appear asynchronously after
 	   UHID_CREATE2; poll enumeration until the device shows up. Match by the
-	   (test-unique) VID/PID, preferring the entry whose serial matches in
-	   case the host happens to have another device with the same ids. */
+	   (test-unique) VID/PID, preferring the entry whose serial matches. */
 	for (;;) {
 		struct hid_device_info *infos = hid_enumerate(dev->vendor_id, dev->product_id);
 		struct hid_device_info *cur;
@@ -363,6 +317,17 @@ hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeou
 	}
 }
 
+int test_virtual_device_trigger(test_virtual_device *dev, hid_device *handle,
+                                unsigned char command)
+{
+	unsigned char feature[1 + TEST_VDEV_REPORT_SIZE];
+	(void)dev;
+	memset(feature, 0, sizeof(feature));
+	feature[0] = 0x00;        /* Report ID (the device has no numbered reports) */
+	feature[1] = command;     /* scenario command, first byte of the payload */
+	return hid_send_feature_report(handle, feature, sizeof(feature));
+}
+
 void test_virtual_device_destroy(test_virtual_device *dev)
 {
 	struct uhid_event ev;
@@ -384,6 +349,6 @@ void test_virtual_device_destroy(test_virtual_device *dev)
 		dev->fd = -1;
 	}
 
-	pthread_mutex_destroy(&dev->lock);
+	pthread_mutex_destroy(&dev->write_lock);
 	free(dev);
 }
