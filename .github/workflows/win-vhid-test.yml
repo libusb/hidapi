@@ -1,0 +1,109 @@
+name: Windows Virtual HID Device Test (manual)
+
+# Builds, self-signs and installs a modified vhidmini2 UMDF2 driver on a hosted
+# windows-latest runner, then runs the backend-agnostic device-I/O test against
+# that real virtual HID device (winapi backend). It installs a kernel driver, so
+# it is not part of the per-push CI matrix; run it on demand from the Actions
+# tab, or by adding the 'ci-virtual-device' label to a pull request.
+
+on:
+  workflow_dispatch:
+  # Also runs automatically on a pull request that carries the
+  # 'ci-virtual-device' label (the job below is gated on that label).
+  pull_request:
+    types: [opened, reopened, labeled, synchronize]
+
+jobs:
+  win-vhid:
+    # workflow_dispatch always runs; on a PR, only when the label is present.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-virtual-device')
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # The hosted runner ships the Windows SDK but not the WDK (no UMDF headers),
+    # so the WDK must be obtained. Cache a self-contained offline installer
+    # layout (the components, not just the bootstrapper) so it is downloaded only
+    # once; later runs restore it from the cache and install offline.
+    - name: Cache the WDK installer layout
+      id: wdk-cache
+      uses: actions/cache@v4
+      with:
+        path: wdk-layout
+        key: wdk-layout-26100.6584
+
+    - name: Download WDK installer layout (cache miss only)
+      if: steps.wdk-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2335869" -OutFile "$env:RUNNER_TEMP\wdksetup.exe"
+        # /layout downloads a complete offline copy into wdk-layout (cached).
+        Start-Process -FilePath "$env:RUNNER_TEMP\wdksetup.exe" -ArgumentList '/layout', "$PWD\wdk-layout", '/quiet', '/ceip', 'off' -Wait
+
+    - name: Build vhidmini2 (UMDF2)
+      shell: pwsh
+      run: |
+        $proj = "src\tests\windows\driver\VhidminiUm.vcxproj"
+        $inc  = "C:\Program Files (x86)\Windows Kits\10\Include"
+        # Use a preinstalled WDK if a future image ships one (kit with UMDF
+        # headers); otherwise install from the cached offline layout.
+        $ver = Get-ChildItem $inc -Directory -ErrorAction SilentlyContinue |
+               Where-Object { Test-Path (Join-Path $_.FullName 'wdf\umdf') } |
+               Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty Name
+        if ($ver) {
+          Write-Host "Using preinstalled WDK ($ver)."
+        } else {
+          Write-Host "Installing WDK from the cached offline layout ..."
+          Start-Process -FilePath "wdk-layout\wdksetup.exe" -ArgumentList '/quiet', '/norestart', '/ceip', 'off' -Wait
+          $ver = "10.0.26100.0"
+        }
+        $vcvars = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cmd /c "call `"$vcvars`" && msbuild $proj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$ver /v:minimal"
+        if ($LASTEXITCODE -ne 0) { throw "vhidmini2 build failed (exit $LASTEXITCODE)." }
+
+    - name: Trust the driver's test certificate
+      shell: pwsh
+      run: |
+        $cer = "src/tests/windows/driver/x64/Release/VhidminiUm.cer"
+        Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+        Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+        Write-Host "Imported test cert into Root and TrustedPublisher."
+
+    - name: Install virtual HID device (devcon, root-enumerated)
+      shell: pwsh
+      run: |
+        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        Write-Host "devcon: $devcon"
+        $inf = (Resolve-Path "src/tests/windows/driver/x64/Release/VhidminiUm/VhidminiUm.inf").Path
+        Write-Host "inf: $inf"
+        & $devcon install $inf "root\VhidminiUm"
+        Write-Host "devcon exit: $LASTEXITCODE"
+
+    - name: HID devices present (diagnostic)
+      shell: pwsh
+      run: |
+        Start-Sleep -Seconds 3
+        Get-PnpDevice -Class HIDClass -ErrorAction SilentlyContinue |
+            Select-Object Status, FriendlyName, InstanceId | Format-Table -AutoSize
+
+    - name: Build HIDAPI + tests
+      shell: pwsh
+      run: |
+        cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DHIDAPI_WITH_TESTS=ON
+        cmake --build build --config Release
+
+    - name: Run device-I/O test against the virtual device
+      shell: pwsh
+      working-directory: build
+      run: |
+        ctest -C Release -R DeviceIO_winapi --output-on-failure
+
+    - name: Cleanup virtual device
+      if: always()
+      shell: pwsh
+      run: |
+        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        if ($devcon) { & $devcon remove "root\VhidminiUm" 2>$null }
+        Write-Host "cleanup done"

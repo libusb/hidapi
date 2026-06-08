@@ -1,0 +1,89 @@
+name: Linux libusb Virtual HID Device Test (manual)
+
+# Runs the device-I/O test against the HIDAPI *libusb* backend using a real
+# virtual USB HID device (USB Raw Gadget on top of dummy_hcd).
+#
+# The hosted ubuntu-latest (azure) kernel is built without the USB gadget
+# subsystem, so raw_gadget/dummy_hcd can't be loaded (or even built) there. We
+# therefore run the test inside a lightweight VM (virtme-ng + QEMU) booting a
+# *generic* Ubuntu kernel, whose linux-modules-extra ships dummy_hcd and
+# raw_gadget. The VM shares the host filesystem, so it runs the binaries built
+# on the host. The same approach works locally and on WSL2 (which also lacks
+# those modules in its default kernel).
+#
+# Runs on demand (workflow_dispatch) or on a PR labelled 'ci-virtual-device'.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, labeled, synchronize]
+
+jobs:
+  libusb-rawgadget:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-virtual-device')
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        path: hidapisrc
+
+    - name: Install deps + a gadget-capable generic kernel + virtme-ng
+      run: |
+        set -eux
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential cmake libudev-dev libusb-1.0-0-dev \
+          qemu-system-x86 virtme-ng linux-image-generic
+        # raw_gadget ships in the generic kernel's modules-extra; install that
+        # plus headers (needed to build dummy_hcd, which Ubuntu doesn't package).
+        KVER=$(ls -1 /lib/modules | grep -- '-generic$' | sort -V | tail -n1)
+        echo "generic kernel: ${KVER}"
+        sudo apt-get install -y "linux-modules-extra-${KVER}" "linux-headers-${KVER}"
+        find "/lib/modules/${KVER}" \( -name 'raw_gadget*' -o -name 'dummy_hcd*' \) || true
+
+    - name: Build dummy_hcd for the generic kernel (Ubuntu ships no package)
+      run: |
+        set -eux
+        KVER=$(ls -1 /lib/modules | grep -- '-generic$' | sort -V | tail -n1)
+        KMAJ=$(echo "${KVER}" | grep -oE '^[0-9]+\.[0-9]+')
+        mkdir -p dummyhcd
+        # Ubuntu packages no dummy_hcd; build it from the upstream source that
+        # matches the generic kernel's major version (xairy's copy tracks newer
+        # kernels and won't compile against an older one).
+        curl -fsSL -o dummyhcd/dummy_hcd.c \
+          "https://raw.githubusercontent.com/torvalds/linux/v${KMAJ}/drivers/usb/gadget/udc/dummy_hcd.c"
+        printf 'obj-m += dummy_hcd.o\n' > dummyhcd/Makefile
+        make -C "/lib/modules/${KVER}/build" M="${PWD}/dummyhcd" modules
+        sudo install -m 0644 "${PWD}/dummyhcd/dummy_hcd.ko" \
+          "/lib/modules/${KVER}/kernel/drivers/usb/gadget/udc/"
+        sudo depmod -a "${KVER}"
+
+    - name: Build HIDAPI + tests (libusb backend)
+      run: |
+        cmake -B build -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON
+        cmake --build build
+
+    - name: Run DeviceIO_libusb inside a VM (generic kernel + raw_gadget)
+      run: |
+        set -eux
+        # The generic kernel just installed (has dummy_hcd + raw_gadget modules).
+        KVER=$(ls -1 /lib/modules | grep -- '-generic$' | sort -V | tail -n1)
+        KIMG="/boot/vmlinuz-${KVER}"
+        echo "guest kernel: ${KVER} (${KIMG})"
+        test -e "${KIMG}"
+        # Ubuntu installs the kernel image as 0600 root:root, but vng reads it
+        # as the (non-root) runner user; make it readable.
+        sudo chmod a+r "${KIMG}"
+        # Make sure KVM is usable for acceleration (else vng falls back to TCG).
+        sudo chmod 666 /dev/kvm 2>/dev/null || true
+        # Boot that kernel in a VM (KVM if /dev/kvm is usable, else TCG). The
+        # guest runs as root with the host fs mounted; load the gadget modules
+        # and run the test against the host build tree. vng exit-code
+        # propagation varies, so derive pass/fail from a sentinel line.
+        # Boot the kernel in a VM and run the guest script via --exec (vng's
+        # native flag; passing a complex command after '--' gets mangled). The
+        # script loads dummy_hcd/raw_gadget and runs the test (see it for why).
+        vng -v --pwd -r "${KIMG}" --exec "bash hidapisrc/.github/vmrun-libusb.sh" 2>&1 | tee vng.log
+        echo "--- VM run result ---"
+        grep -q "VNG_CTEST_EXIT=0" vng.log
