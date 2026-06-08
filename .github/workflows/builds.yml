@@ -44,7 +44,7 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cmake -B build/framework -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/framework -DCMAKE_FRAMEWORK=ON -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared
@@ -56,6 +56,14 @@ jobs:
     - name: Build CMake Framework
       working-directory: build/framework
       run: make install
+    - name: Run virtual-device tests (IOHIDUserDevice self-skips on hosted CI)
+      working-directory: build/shared
+      run: |
+        # The macOS virtual device needs the com.apple.developer.hid.virtual.device
+        # entitlement and interactive user consent, neither available on a hosted
+        # runner, so DeviceIO_darwin self-skips (CTest code 77). This still
+        # verifies the provider builds and the test runs/links.
+        ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
@@ -122,7 +130,7 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
         cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
     - name: Build CMake Shared
       working-directory: build/shared
@@ -130,6 +138,19 @@ jobs:
     - name: Build CMake Static
       working-directory: build/static
       run: make install
+    - name: Run virtual-device tests (uhid -> hidraw; raw-gadget self-skips)
+      working-directory: build/shared
+      run: |
+        # uhid ships in the 'extra' modules package on the runner kernel.
+        # Everything here is best-effort: if a virtual device can't be provided
+        # the matching test self-skips (CTest code 77) instead of failing.
+        sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+        sudo modprobe uhid || true
+        ls -l /dev/uhid || echo "/dev/uhid not present"
+        # Run as root so the test can create /dev/uhid and open the resulting
+        # /dev/hidrawN. LeakSanitizer off (udev keeps allocations alive at
+        # exit); ASan use-after-free / overflow detection stays active.
+        sudo env "ASAN_OPTIONS=detect_leaks=0" ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
