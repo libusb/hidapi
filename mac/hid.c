@@ -544,8 +544,8 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 {
 	unsigned short dev_vid;
 	unsigned short dev_pid;
-	const int BUF_LEN = 256;
-	wchar_t buf[BUF_LEN];
+	enum { BufLen = 256 };
+	wchar_t buf[BufLen];
 	CFTypeRef transport_prop;
 
 	struct hid_device_info *cur_dev;
@@ -598,13 +598,13 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	}
 
 	/* Serial Number */
-	get_serial_number(dev, buf, BUF_LEN);
+	get_serial_number(dev, buf, BufLen);
 	cur_dev->serial_number = dup_wcs(buf);
 
 	/* Manufacturer and Product strings */
-	get_manufacturer_string(dev, buf, BUF_LEN);
+	get_manufacturer_string(dev, buf, BufLen);
 	cur_dev->manufacturer_string = dup_wcs(buf);
-	get_product_string(dev, buf, BUF_LEN);
+	get_product_string(dev, buf, BufLen);
 	cur_dev->product_string = dup_wcs(buf);
 
 	/* VID/PID */
