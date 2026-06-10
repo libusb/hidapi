@@ -423,6 +423,89 @@ extern "C" {
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock);
 
+		/** @brief Asynchronously interrupt blocking hid_read/hid_read_timeout call.
+
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+
+			Thread-safely interrupts a blocking hid_read()/hid_read_timeout() call
+			currently in progress (or about to start) on @p dev. The interrupted
+			call returns -1 immediately; hid_read_error(dev) returns a string
+			indicating the read was interrupted.
+
+			Once interrupted, subsequent calls to hid_read()/
+			hid_read_timeout() also return -1 immediately, until @ref
+			hid_read_clear_interrupt is called.
+
+			A hid_read*() call that observes data already buffered or
+			queued before the interrupt may return that data; otherwise it
+			returns -1. Eventually (within at most one further call) hid_read*()
+			will return -1.
+
+			Only the read pipeline is affected: hid_write(), hid_get_input_report(),
+			feature/output report functions, and all other operations on @p dev
+			continue to work normally.
+
+			This function may be called concurrently with another function
+			operating on the same device. The call is idempotent and is safe
+			to invoke when no read is in flight.
+
+			Recommended usage to cleanly shut down a dedicated read thread:
+			@code
+				hid_read_interrupt(dev);
+				// join the read thread
+				hid_close(dev);
+			@endcode
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				This function returns 0 on success and -1 on error.
+				Call hid_error(dev) to get the failure reason.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev);
+
+		/** @brief Query whether the read pipeline is currently interrupted.
+
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+
+			Returns the current interrupt state set by @ref hid_read_interrupt
+			and @ref hid_read_clear_interrupt. Suitable for cross-thread
+			observation (read with acquire semantics).
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				1 if the read pipeline is interrupted, 0 if not.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev);
+
+		/** @brief Clear the read-interrupt state, allowing reads to resume.
+
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+
+			After this call, subsequent hid_read()/hid_read_timeout() calls
+			operate normally. Any data that the device buffered during the
+			interrupted period may be returned by subsequent reads, subject
+			to a (backend-specific) buffer capacity. For a fresh-start
+			behavior, the caller may drain the buffered data with a loop of
+			hid_read_timeout(dev, ..., 0) calls before resuming the normal
+			read loop.
+
+			Recommended use: call only when no hid_read*() call is in flight
+			on @p dev. The timing of an in-flight read returning -1 versus
+			a concurrent clear-interrupt taking effect is undefined.
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				This function returns 0 on success and -1 on error.
+				Call hid_error(dev) to get the failure reason.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev);
+
 		/** @brief Send a Feature report to the device.
 
 			Feature reports are sent over the Control endpoint as a
