@@ -73,12 +73,17 @@ endif()
 if(WIN32)
     # so far only Windows has tests
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+elseif(APPLE OR HIDAPI_WITH_LIBUSB)
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
 else()
     set(HIDAPI_WITH_TESTS OFF)
 endif()
 
 if(HIDAPI_WITH_TESTS)
     enable_testing()
+    if(APPLE OR HIDAPI_WITH_LIBUSB)
+        add_subdirectory(tests)
+    endif()
 endif()
 
 if(WIN32)
