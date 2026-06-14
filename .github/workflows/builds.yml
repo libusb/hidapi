@@ -179,7 +179,7 @@ jobs:
         ninja
 
 
-  windows-cmake:
+  windows-cmake-msvc:
 
     runs-on: windows-latest
 
