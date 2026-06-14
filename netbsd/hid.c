@@ -30,6 +30,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <iconv.h>
+#ifndef ICONV_CONST
+#define ICONV_CONST
+#endif
+
 #include <poll.h>
 
 /* NetBSD */
@@ -247,7 +251,7 @@ static uint32_t get_hid_report_bytes(const uint8_t *rpt, size_t len, size_t num_
  * Skips all nested Collection, i.e. iterates until the end of current level Collection.
  *
  * The return value is non-0 when an end of current Collection is found,
- * 0 when error is occured (broken Descriptor, end of a Collection is found before its begin,
+ * 0 when error is occurred (broken Descriptor, end of a Collection is found before its begin,
  *  or no Collection is found at all).
  */
 static int hid_iterate_over_collection(const uint8_t *report_descriptor, uint32_t size, unsigned int *pos, int *data_len, int *key_size)
@@ -724,6 +728,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	for (size_t i = 0; i < len; i++) {
 		char devpath[USB_MAX_DEVNAMELEN];
 		int bus;
+		struct hid_device_info *prev_end;
 
 		strlcpy(devpath, "/dev/", sizeof(devpath));
 		strlcat(devpath, arr[i], sizeof(devpath));
@@ -732,7 +737,17 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		if (bus == -1)
 			continue;
 
+		/*
+		 * ehci/ohci/uhci/dwctwo etc. use 'addr 1' for root hubs
+		 * but xhci uses 'addr 0' on NetBSD.
+		 * Check addr 0 (that would be unused on other than xhci)
+		 * and then check addr 1 if there is no device at addr 0.
+		 */
+		prev_end = hed.end;
 		enumerate_usb_devices(bus, 0, hid_enumerate_callback, &hed);
+		if (hed.end == prev_end)
+			enumerate_usb_devices(bus, 1,
+			    hid_enumerate_callback, &hed);
 
 		close(bus);
 	}
@@ -1087,7 +1102,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 	struct usb_string_desc usd;
 	usb_string_descriptor_t *str;
 	iconv_t ic;
-	const char *src;
+	ICONV_CONST char *src;
 	size_t srcleft;
 	char *dst;
 	size_t dstleft;
@@ -1131,7 +1146,7 @@ int HID_API_EXPORT_CALL hid_get_indexed_string(hid_device *dev, int string_index
 		return -1;
 	}
 
-	src = (const char *) str->bString;
+	src = (ICONV_CONST char *)str->bString;
 	srcleft = str->bLength - 2;
 	dst = (char *) string;
 	dstleft = sizeof(wchar_t[maxlen]);

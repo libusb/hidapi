@@ -90,6 +90,15 @@ jobs:
         cd build/static_test
         make install
 
+    - name: Check C++ portability build
+      run: |
+        rm -rf build/cxx
+        cmake -B build/cxx -S hidapisrc \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DHIDAPI_BUILD_AS_CXX=ON \
+          "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror"
+        cmake --build build/cxx
+
     - name: Check Meson build
       run: |
         meson setup build_meson hidapisrc
@@ -154,6 +163,15 @@ jobs:
         cd build/static_test
         make install
 
+    - name: Check C++ portability build
+      run: |
+        rm -rf build/cxx
+        cmake -B build/cxx -S hidapisrc \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DHIDAPI_BUILD_AS_CXX=ON \
+          "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror -Wformat-signedness"
+        cmake --build build/cxx
+
     - name: Check Meson build
       run: |
         meson setup build_meson hidapisrc
@@ -205,6 +223,14 @@ jobs:
       shell: cmd
       working-directory: build/msvc
       run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
+
+    - name: Configure CMake MSVC C++
+      shell: cmd
+      run: |
+        cmake -B build\msvc_cxx -S hidapisrc -DCMAKE_BUILD_TYPE=Release -DHIDAPI_BUILD_AS_CXX=ON -DCMAKE_CXX_STANDARD=20 "-DCMAKE_CXX_FLAGS=%MSVC_COMPILE_FLAGS%"
+    - name: Build CMake MSVC C++
+      working-directory: build/msvc_cxx
+      run: cmake --build . --config Release
 
     - name: Configure CMake NMake MSVC
       shell: cmd
@@ -439,7 +465,7 @@ jobs:
     - name: Install dependencies
       run: |
         pacman -Sy
-        pacman -S --noconfirm glibc lib32-glibc gcc pkg-config autoconf automake libtool libusb libudev0 cmake make
+        pacman -S --noconfirm glibc lib32-glibc gcc pkg-config autoconf automake libtool libusb cmake make
     - name: Configure CMake
       run: |
         rm -rf build install
@@ -562,7 +588,7 @@ jobs:
           -GNinja \
           -B build/shared_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/shared-cmake \
+          -Dhidapi_ROOT=$(pwd)/install/shared-cmake \
           -DCMAKE_INSTALL_PREFIX=install/shared_test \
           "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
         cd build/shared_test
@@ -573,7 +599,7 @@ jobs:
           -GNinja \
           -B build/static_test \
           -S hidapisrc/hidtest \
-          -Dhidapi_ROOT=install/static-cmake \
+          -Dhidapi_ROOT=$(pwd)/install/static-cmake \
           -DCMAKE_INSTALL_PREFIX=install/static_test \
           "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
         cd build/static_test

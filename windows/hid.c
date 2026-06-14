@@ -20,14 +20,14 @@
         https://github.com/libusb/hidapi .
 ********************************************************/
 
-#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-/* Do not warn about wcsncpy usage.
-   https://docs.microsoft.com/cpp/c-runtime-library/security-features-in-the-crt */
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#ifdef WIN32_LEAN_AND_MEAN
+/* It may be set by IDE/project and apparently HIDAPI relies
+ * on certain Windows headers being included by default. */
+#undef WIN32_LEAN_AND_MEAN
 #endif
 
 #include "hidapi_winapi.h"
@@ -59,6 +59,16 @@ typedef LONG NTSTATUS;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* MSVC secure CRT (VS2005+) provides swprintf_s/wcsncpy_s.
+   Older MSVC and GCC/MinGW/Cygwin use the classic variants. */
+#if defined(_MSC_VER) && (_MSC_VER >= 1400)
+#define HIDAPI_SWPRINTF swprintf_s
+#define HIDAPI_WCSNCPY(dest, dest_count, src) wcsncpy_s((dest), (dest_count), (src), _TRUNCATE)
+#else
+#define HIDAPI_SWPRINTF swprintf
+#define HIDAPI_WCSNCPY(dest, dest_count, src) wcsncpy((dest), (src), (dest_count))
+#endif
 
 #ifdef MIN
 #undef MIN
@@ -138,11 +148,13 @@ static int lookup_functions()
 		goto err;
 	}
 
-#if defined(__GNUC__)
-# pragma GCC diagnostic push
-# pragma GCC diagnostic ignored "-Wcast-function-type"
-#endif
-#define RESOLVE(lib_handle, x) x = (x##_)GetProcAddress(lib_handle, #x); if (!x) goto err;
+/* Avoid direct function-pointer cast from FARPROC to typed callback pointer.
+   Using memcpy keeps this warning-free regardless of the compiler and compiler settings. */
+#define RESOLVE(lib_handle, x) do { \
+	FARPROC proc_addr = GetProcAddress(lib_handle, #x); \
+	if (!proc_addr) goto err; \
+	memcpy(&x, &proc_addr, sizeof(x)); \
+} while (0)
 
 	RESOLVE(hid_lib_handle, HidD_GetHidGuid);
 	RESOLVE(hid_lib_handle, HidD_GetAttributes);
@@ -167,9 +179,6 @@ static int lookup_functions()
 	RESOLVE(cfgmgr32_lib_handle, CM_Get_Device_Interface_ListW);
 
 #undef RESOLVE
-#if defined(__GNUC__)
-# pragma GCC diagnostic pop
-#endif
 
 	return 0;
 
@@ -281,7 +290,8 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 	if (!msg)
 		return;
 
-	int printf_written = swprintf(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", (int)op_len, op, error_code, (int)system_err_len, system_err_buf);
+	int printf_written = HIDAPI_SWPRINTF(msg, msg_len + 1, L"%.*ls: (0x%08X) %.*ls", (int)op_len, op, error_code, (int)system_err_len, system_err_buf);
+	msg[msg_len] = L'\0';
 
 	if (printf_written < 0)
 	{
@@ -804,6 +814,7 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	case HID_API_BUS_UNKNOWN:
 	case HID_API_BUS_SPI:
 	case HID_API_BUS_I2C:
+	case HID_API_BUS_VIRTUAL:
 		/* shut down -Wswitch */
 		break;
 	}
@@ -1426,7 +1437,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_manufacturer_string(hid_device *dev
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->manufacturer_string, maxlen);
+	HIDAPI_WCSNCPY(string, maxlen, dev->device_info->manufacturer_string);
 	string[maxlen - 1] = L'\0';
 
 	register_string_error(dev, NULL);
@@ -1446,7 +1457,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_product_string(hid_device *dev, wch
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->product_string, maxlen);
+	HIDAPI_WCSNCPY(string, maxlen, dev->device_info->product_string);
 	string[maxlen - 1] = L'\0';
 
 	register_string_error(dev, NULL);
@@ -1466,7 +1477,7 @@ int HID_API_EXPORT_CALL HID_API_CALL hid_get_serial_number_string(hid_device *de
 		return -1;
 	}
 
-	wcsncpy(string, dev->device_info->serial_number, maxlen);
+	HIDAPI_WCSNCPY(string, maxlen, dev->device_info->serial_number);
 	string[maxlen - 1] = L'\0';
 
 	register_string_error(dev, NULL);
@@ -1596,7 +1607,9 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 	return last_global_error_str;
 }
 
-#ifndef hidapi_winapi_EXPORTS
+#ifndef HIDAPI_CMAKE_V0_BUILD
+/* Include the descriptor reconstruction code when NOT building with CMake.
+   CMake builds compile hidapi_descriptor_reconstruct.c as a separate translation unit. */
 #include "hidapi_descriptor_reconstruct.c"
 #endif
 

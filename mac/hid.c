@@ -342,7 +342,7 @@ static bool try_get_ioregistry_int_property(io_service_t service, CFStringRef pr
 
 	if (ref) {
 		if (CFGetTypeID(ref) == CFNumberGetTypeID()) {
-			result = CFNumberGetValue(ref, kCFNumberSInt32Type, out_val);
+			result = CFNumberGetValue((CFNumberRef) ref, kCFNumberSInt32Type, out_val);
 		}
 
 		CFRelease(ref);
@@ -547,8 +547,8 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 {
 	unsigned short dev_vid;
 	unsigned short dev_pid;
-	int BUF_LEN = 256;
-	wchar_t buf[BUF_LEN];
+	enum { BufLen = 256 };
+	wchar_t buf[BufLen];
 	CFTypeRef transport_prop;
 
 	struct hid_device_info *cur_dev;
@@ -589,7 +589,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		   so for (max) "path" string 'DevSrvsID:18446744073709551615' we would need
 		   9+1+20+1=31 bytes buffer, but allocate 32 for simple alignment */
 		const size_t path_len = 32;
-		cur_dev->path = calloc(1, path_len);
+		cur_dev->path = (char *) calloc(1, path_len);
 		if (cur_dev->path != NULL) {
 			snprintf(cur_dev->path, path_len, "DevSrvsID:%llu", entry_id);
 		}
@@ -601,13 +601,13 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	}
 
 	/* Serial Number */
-	get_serial_number(dev, buf, BUF_LEN);
+	get_serial_number(dev, buf, BufLen);
 	cur_dev->serial_number = dup_wcs(buf);
 
 	/* Manufacturer and Product strings */
-	get_manufacturer_string(dev, buf, BUF_LEN);
+	get_manufacturer_string(dev, buf, BufLen);
 	cur_dev->manufacturer_string = dup_wcs(buf);
-	get_product_string(dev, buf, BUF_LEN);
+	get_product_string(dev, buf, BufLen);
 	cur_dev->product_string = dup_wcs(buf);
 
 	/* VID/PID */

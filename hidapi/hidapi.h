@@ -52,7 +52,7 @@
 
 	@ingroup API
 */
-#define HID_API_VERSION_MINOR 15
+#define HID_API_VERSION_MINOR 16
 /** @brief Static/compile-time patch version of the library.
 
 	@ingroup API
@@ -144,6 +144,13 @@ extern "C" {
 			   Specifications:
 			   https://www.microsoft.com/download/details.aspx?id=103325 */
 			HID_API_BUS_SPI = 0x04,
+
+			/** Virtual device
+			    E.g.: https://elixir.bootlin.com/linux/v4.0/source/include/uapi/linux/input.h#L955 
+			    
+			    Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+			*/
+			HID_API_BUS_VIRTUAL = 0x05,
 		} hid_bus_type;
 
 		/** hidapi info structure */

@@ -1,14 +1,25 @@
-cmake_minimum_required(VERSION 3.6.3...3.25 FATAL_ERROR)
-
 add_library(hidapi_netbsd
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_netbsd PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
 
 target_link_libraries(hidapi_netbsd PRIVATE Threads::Threads)
+
+# check for error: "conflicting types for 'iconv'"
+include(CheckCSourceCompiles)
+check_c_source_compiles("#include<iconv.h>
+    extern size_t iconv (iconv_t cd, const char **inbuf, size_t *inbytesleft, char **outbuf, size_t *outbytesleft);
+    int main() {}"
+HIDAPI_ICONV_CONST)
+if(HIDAPI_ICONV_CONST)
+    target_compile_definitions(hidapi_netbsd PRIVATE "ICONV_CONST=const")
+endif()
 
 set_target_properties(hidapi_netbsd
     PROPERTIES
