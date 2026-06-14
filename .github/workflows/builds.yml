@@ -312,7 +312,7 @@ jobs:
         ninja
 
 
-  windows-mingw:
+  windows-cmake-mingw:
 
     runs-on: windows-latest
 
