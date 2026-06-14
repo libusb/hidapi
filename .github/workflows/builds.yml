@@ -193,6 +193,12 @@ jobs:
         choco install ninja
         pip3 install meson
         refreshenv
+    - name: Find Visual Studio installation
+      shell: cmd
+      run: |
+        for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do (
+          echo VCVARS_PATH=%%i\VC\Auxiliary\Build\vcvars64.bat>> %GITHUB_ENV%
+        )
     - name: Configure CMake MSVC
       shell: cmd
       run: |
@@ -235,13 +241,13 @@ jobs:
     - name: Configure CMake NMake MSVC
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake NMake MSVC
       working-directory: build\nmake
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         nmake install
     - name: Check artifacts CMake NMake MSVC
       uses: andstor/file-existence-action@v2
@@ -254,7 +260,7 @@ jobs:
     - name: Check CMake NMake MSVC Export Package
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         cmake ^
           -G"NMake Makefiles" ^
           -B build\nmake_test ^
@@ -271,13 +277,13 @@ jobs:
     - name: Configure CMake NMake ClangCL
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         cmake -G"NMake Makefiles" -B build\clang_cl -S hidapisrc -D CMAKE_C_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=OFF -DCMAKE_INSTALL_PREFIX=install\clang_cl -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake NMake ClangCL
       working-directory: build\clang_cl
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         nmake install
     - name: Check artifacts CMake NMake ClangCL
       uses: andstor/file-existence-action@v2
@@ -290,7 +296,7 @@ jobs:
     - name: Check CMake NMake ClangCL Export Package
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         cmake ^
           -G"NMake Makefiles" ^
           -B build\clang_cl_test ^
@@ -340,7 +346,7 @@ jobs:
     - name: Check Meson build
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        call "%VCVARS_PATH%"
         meson setup build_meson hidapisrc
         cd build_meson
         ninja
