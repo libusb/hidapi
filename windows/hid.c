@@ -1257,6 +1257,20 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 	return dev->last_read_error_str;
 }
 
+
+int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int num_buffers)
+{
+	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS) {
+		register_string_error(dev, L"num_buffers out of range");
+		return -1;
+	}
+	if (!HidD_SetNumInputBuffers(dev->device_handle, (ULONG)num_buffers)) {
+		register_winapi_error(dev, L"HidD_SetNumInputBuffers");
+		return -1;
+	}
+	return 0;
+}
+
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)
 {
 	dev->blocking = !nonblock;
