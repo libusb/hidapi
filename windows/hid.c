@@ -66,6 +66,7 @@ typedef LONG NTSTATUS;
 #include "hidapi_hidclass.h"
 #include "hidapi_hidsdi.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -234,6 +235,20 @@ static struct hid_hotplug_context {
 	   Created with the first callback registration, closed by hid_exit(). */
 	PTP_WORK event_work;
 
+	/* Number of notification handles detached from the context whose
+	   CM_Unregister_Notification call has not completed yet, and the condition
+	   used to wait for that to drop to zero (a zero-initialized
+	   CONDITION_VARIABLE is valid). Guarded by the critical section.
+	   A new notification is only armed once this is zero: the OS keeps a
+	   detached handle live until the unregistration completes, and two live
+	   registrations would deliver every event twice. */
+	LONG pending_unregistrations;
+	CONDITION_VARIABLE unregistration_cv;
+
+	/* Set when CM_Unregister_Notification failed: the OS-side registration may
+	   still be live, so the state its callbacks can touch is never destroyed */
+	unsigned char unregistration_failed;
+
 	/* Critical section (faster mutex substitute), for both cached device list and callback list changes */
 	CRITICAL_SECTION critical_section;
 
@@ -389,14 +404,22 @@ static void register_string_error(hid_device *dev, const WCHAR *string_error)
 
 static wchar_t *last_global_error_str = NULL;
 
+/* Serializes mutations of last_global_error_str: the hotplug API is
+   thread-safe and its failure paths may write the global error concurrently */
+static SRWLOCK global_error_lock = SRWLOCK_INIT;
+
 static void register_global_winapi_error(const WCHAR *op)
 {
+	AcquireSRWLockExclusive(&global_error_lock);
 	register_winapi_error_to_buffer(&last_global_error_str, op);
+	ReleaseSRWLockExclusive(&global_error_lock);
 }
 
 static void register_global_error(const WCHAR *string_error)
 {
+	AcquireSRWLockExclusive(&global_error_lock);
 	register_string_error_to_buffer(&last_global_error_str, string_error);
+	ReleaseSRWLockExclusive(&global_error_lock);
 }
 
 static HANDLE open_device(const wchar_t *path, BOOL open_rw)
@@ -426,8 +449,13 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 	return HID_API_VERSION_STR;
 }
 
+/* Serializes the bootstrap of the hotplug machinery: two racing first
+   registrations must not both initialize the critical section */
+static SRWLOCK hotplug_init_lock = SRWLOCK_INIT;
+
 static void hid_internal_hotplug_init()
 {
+	AcquireSRWLockExclusive(&hotplug_init_lock);
 	if (!hid_hotplug_context.mutex_ready) {
 		InitializeCriticalSection(&hid_hotplug_context.critical_section);
 
@@ -435,9 +463,11 @@ static void hid_internal_hotplug_init()
 		hid_hotplug_context.mutex_ready = 1;
 		hid_hotplug_context.mutex_in_use = 0;
 		hid_hotplug_context.cb_list_dirty = 0;
+		hid_hotplug_context.pending_unregistrations = 0;
 		if (hid_hotplug_context.next_handle < FIRST_HOTPLUG_CALLBACK_HANDLE)
 			hid_hotplug_context.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE;
 	}
+	ReleaseSRWLockExclusive(&hotplug_init_lock);
 }
 
 int HID_API_EXPORT hid_init(void)
@@ -526,24 +556,43 @@ static void hid_internal_hotplug_remove_postponed()
 	hid_hotplug_context.cb_list_dirty = 0;
 }
 
-static void hid_internal_hotplug_unregister_notification(HCMNOTIFICATION notify_handle)
+/* Completes the unregistration of a notification handle detached by
+   hid_internal_hotplug_cleanup. Must be called OUTSIDE the critical section:
+   CM_Unregister_Notification waits for in-progress notification callbacks,
+   which may themselves be blocked on the critical section. */
+static void hid_internal_hotplug_finish_unregistration(HCMNOTIFICATION notify_handle)
 {
+	CONFIGRET cr;
+
 	if (notify_handle == NULL) {
 		return;
 	}
 
-	if (CM_Unregister_Notification(notify_handle) != CR_SUCCESS) {
+	cr = CM_Unregister_Notification(notify_handle);
+
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
+	if (cr != CR_SUCCESS) {
+		/* The OS-side registration may still be live: taint the epoch so
+		   hid_exit() never destroys the state a late notification can touch */
+		hid_hotplug_context.unregistration_failed = 1;
+	}
+	hid_hotplug_context.pending_unregistrations--;
+	if (hid_hotplug_context.pending_unregistrations == 0) {
+		WakeAllConditionVariable(&hid_hotplug_context.unregistration_cv);
+	}
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
+
+	if (cr != CR_SUCCESS) {
 		register_global_error(L"CM_Unregister_Notification failed for Hotplug notification");
 	}
 }
 
 /* Always called inside a locked mutex.
    When the last callback is gone, tears the machinery down and returns the
-   Win32 notification handle: CM_Unregister_Notification waits for in-progress
-   notification callbacks, which in turn may be blocked on our critical
-   section, so the caller must invoke it only after leaving the critical
-   section (and never from the notification callback itself: the notification
-   callback defers the teardown to the threadpool work item instead). */
+   Win32 notification handle, which the caller MUST hand to
+   hid_internal_hotplug_finish_unregistration after leaving the critical
+   section (never under it, and never from the notification callback itself:
+   the notification callback defers the teardown to the threadpool work item). */
 static HCMNOTIFICATION hid_internal_hotplug_cleanup()
 {
 	HCMNOTIFICATION notify_handle;
@@ -568,6 +617,10 @@ static HCMNOTIFICATION hid_internal_hotplug_cleanup()
 
 	notify_handle = hid_hotplug_context.notify_handle;
 	hid_hotplug_context.notify_handle = NULL;
+	if (notify_handle != NULL) {
+		/* Balanced by hid_internal_hotplug_finish_unregistration */
+		hid_hotplug_context.pending_unregistrations++;
+	}
 	return notify_handle;
 }
 
@@ -622,16 +675,17 @@ static VOID CALLBACK hid_internal_hotplug_event_work(PTP_CALLBACK_INSTANCE insta
 
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
-	hid_internal_hotplug_unregister_notification(notify_handle);
+	hid_internal_hotplug_finish_unregistration(notify_handle);
 }
 
-static void hid_internal_hotplug_exit()
+static int hid_internal_hotplug_exit()
 {
 	HCMNOTIFICATION notify_handle;
+	int failed_epoch;
 
 	if (!hid_hotplug_context.mutex_ready) {
 		/* If the critical section is not initialized, we are safe to assume nothing else is */
-		return;
+		return 0;
 	}
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
@@ -645,7 +699,29 @@ static void hid_internal_hotplug_exit()
 	notify_handle = hid_internal_hotplug_cleanup();
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
-	hid_internal_hotplug_unregister_notification(notify_handle);
+	hid_internal_hotplug_finish_unregistration(notify_handle);
+
+	/* Quiescence: unregistrations started by concurrent (contract-legal)
+	   hid_hotplug_deregister_callback calls must complete before the state
+	   their notifications can still touch is destroyed. The sleep releases
+	   the critical section while waiting. */
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
+	while (hid_hotplug_context.pending_unregistrations > 0) {
+		if (!SleepConditionVariableCS(&hid_hotplug_context.unregistration_cv, &hid_hotplug_context.critical_section, INFINITE)) {
+			/* Should never happen; treat like a failed unregistration rather than spinning */
+			break;
+		}
+	}
+	failed_epoch = (hid_hotplug_context.unregistration_failed != 0) || (hid_hotplug_context.pending_unregistrations > 0);
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
+
+	if (failed_epoch) {
+		/* At least one notification may still be live at the OS level: keep the
+		   critical section and the work item alive (deliberately leaked), so a
+		   late callback touches valid, empty state instead of freed memory */
+		register_global_error(L"hid_exit: a hotplug notification could not be unregistered");
+		return -1;
+	}
 
 	if (hid_hotplug_context.event_work) {
 		/* Wait for any in-flight work item before the critical section goes away.
@@ -664,11 +740,19 @@ static void hid_internal_hotplug_exit()
 
 	hid_hotplug_context.mutex_ready = 0;
 	DeleteCriticalSection(&hid_hotplug_context.critical_section);
+
+	return 0;
 }
 
 int HID_API_EXPORT hid_exit(void)
 {
-    hid_internal_hotplug_exit();
+	if (hid_internal_hotplug_exit() < 0) {
+		/* A hotplug notification could not be unregistered and may still fire:
+		   keep the resolved DLLs loaded (deliberately leaked) so a late
+		   callback does not call into unloaded code.
+		   register_global_error: set by hid_internal_hotplug_exit */
+		return -1;
+	}
 
 #ifndef HIDAPI_USE_DDK
 	free_library_handles();
@@ -909,7 +993,9 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 	wchar_t *device_id = NULL, *compatible_ids = NULL;
 	CONFIGRET cr;
 	DEVINST dev_node;
-	hid_internal_detect_bus_type_result result = { 0 };
+	hid_internal_detect_bus_type_result result;
+
+	memset(&result, 0, sizeof(result));
 
 	/* Get the device id from interface path */
 	device_id = (wchar_t *)hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
@@ -1099,7 +1185,9 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	return dev;
 }
 
-struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned short vendor_id, unsigned short product_id)
+/* Same as hid_enumerate, but distinguishes a genuine failure (*failure set
+   to 1, error registered) from an empty result (NULL with *failure left 0) */
+static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, unsigned short product_id, int *failure)
 {
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
@@ -1107,6 +1195,8 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	CONFIGRET cr;
 	wchar_t* device_interface_list = NULL;
 	DWORD len;
+
+	*failure = 1;
 
 	if (hid_init() < 0) {
 		/* register_global_error: global error is reset by hid_init */
@@ -1145,6 +1235,8 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	if (cr != CR_SUCCESS) {
 		goto end_of_function;
 	}
+
+	*failure = 0;
 
 	/* Iterate over each device interface in the HID class, looking for the right one. */
 	for (wchar_t* device_interface = device_interface_list; *device_interface; device_interface += wcslen(device_interface) + 1) {
@@ -1203,6 +1295,12 @@ end_of_function:
 	return root;
 }
 
+struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned short vendor_id, unsigned short product_id)
+{
+	int failure = 0;
+	return hid_internal_enumerate(vendor_id, product_id, &failure);
+}
+
 void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *devs)
 {
 	/* TODO: Merge this with the Linux version. This function is platform-independent. */
@@ -1235,29 +1333,49 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
 	if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL) {
-		HANDLE read_handle;
+		char *path;
+		int known = 0;
 
 		hotplug_event = HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED;
 
-		/* Open read-only handle to the device */
-		read_handle = open_device(event_data->u.DeviceInterface.SymbolicLink, FALSE);
-
-		/* Check validity of read_handle. */
-		if (read_handle != INVALID_HANDLE_VALUE) {
-			device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink, read_handle);
-
-			/* Append to the end of the device list */
-			if (hid_hotplug_context.devs != NULL) {
-				struct hid_device_info *last = hid_hotplug_context.devs;
-				while (last->next != NULL) {
-					last = last->next;
+		/* An arrival for a path already in the cache is a duplicate: the
+		   registration-time enumeration overlaps with the already-armed
+		   notification, and a notification being unregistered may briefly
+		   coexist with its replacement. Deduplicating here keeps each
+		   connection reported (and cached) exactly once. */
+		path = hid_internal_UTF16toUTF8(event_data->u.DeviceInterface.SymbolicLink);
+		if (path != NULL) {
+			for (struct hid_device_info *current = hid_hotplug_context.devs; current != NULL; current = current->next) {
+				/* Case-independent path comparison is mandatory */
+				if (current->path != NULL && _stricmp(current->path, path) == 0) {
+					known = 1;
+					break;
 				}
-				last->next = device;
-			} else {
-				hid_hotplug_context.devs = device;
 			}
+			free(path);
+		}
 
-			CloseHandle(read_handle);
+		if (!known) {
+			/* Open read-only handle to the device */
+			HANDLE read_handle = open_device(event_data->u.DeviceInterface.SymbolicLink, FALSE);
+
+			/* Check validity of read_handle. */
+			if (read_handle != INVALID_HANDLE_VALUE) {
+				device = hid_internal_get_device_info(event_data->u.DeviceInterface.SymbolicLink, read_handle);
+
+				/* Append to the end of the device list */
+				if (hid_hotplug_context.devs != NULL) {
+					struct hid_device_info *last = hid_hotplug_context.devs;
+					while (last->next != NULL) {
+						last = last->next;
+					}
+					last->next = device;
+				} else {
+					hid_hotplug_context.devs = device;
+				}
+
+				CloseHandle(read_handle);
+			}
 		}
 	} else if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL) {
 		char *path;
@@ -1385,12 +1503,27 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
+	/* Handle values are never reused while the library remains initialized */
+	if (hid_hotplug_context.next_handle >= INT_MAX) {
+		LeaveCriticalSection(&hid_hotplug_context.critical_section);
+		free(hotplug_cb);
+		register_global_error(L"Hotplug callback handles exhausted");
+		return -1;
+	}
 	hotplug_cb->handle = hid_hotplug_context.next_handle++;
 
-	/* handle the unlikely case of handle overflow */
-	if (hid_hotplug_context.next_handle < 0)
-	{
-		hid_hotplug_context.next_handle = 1;
+	/* A notification detached by a concurrent deregistration may still be live
+	   at the OS until its unregistration completes; arming a replacement in
+	   that window would deliver every event twice. The sleep releases the
+	   critical section, so on wake the state is re-evaluated from scratch. */
+	while (hid_hotplug_context.hotplug_cbs == NULL && hid_hotplug_context.notify_handle == NULL
+	       && hid_hotplug_context.pending_unregistrations > 0) {
+		if (!SleepConditionVariableCS(&hid_hotplug_context.unregistration_cv, &hid_hotplug_context.critical_section, INFINITE)) {
+			LeaveCriticalSection(&hid_hotplug_context.critical_section);
+			free(hotplug_cb);
+			register_global_winapi_error(L"hid_hotplug_register_callback/SleepConditionVariableCS");
+			return -1;
+		}
 	}
 
 	/* Start the machinery with the first callback */
@@ -1407,25 +1540,17 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			if (hid_hotplug_context.event_work == NULL) {
 				LeaveCriticalSection(&hid_hotplug_context.critical_section);
 				free(hotplug_cb);
-				register_global_error(L"hid_hotplug_register_callback/CreateThreadpoolWork");
+				register_global_winapi_error(L"hid_hotplug_register_callback/CreateThreadpoolWork");
 				return -1;
 			}
 		}
 
-		/* Refresh the device cache: a teardown deferred to the work item may not have run yet */
-		if (hid_hotplug_context.devs != NULL) {
-			hid_free_enumeration(hid_hotplug_context.devs);
-			hid_hotplug_context.devs = NULL;
-		}
-
-		/* Fill already connected devices so we can use this info in disconnection
-		   notifications and HID_API_HOTPLUG_ENUMERATE passes (hid_enumerate also
-		   implicitly initializes the library, as if by hid_init) */
-		hid_hotplug_context.devs = hid_enumerate(0, 0);
-
 		if (hid_hotplug_context.notify_handle == NULL) {
 			GUID interface_class_guid;
-			CM_NOTIFY_FILTER notify_filter = { 0 };
+			CM_NOTIFY_FILTER notify_filter;
+			int enumerate_failure = 0;
+
+			memset(&notify_filter, 0, sizeof(notify_filter));
 
 			/* Retrieve HID Interface Class GUID
 				https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
@@ -1435,19 +1560,42 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			notify_filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
 			notify_filter.u.DeviceInterface.ClassGuid = interface_class_guid;
 
-			/* Register for a HID device notification when adding the first callback */
+			/* Register for a HID device notification when adding the first callback.
+			   Armed BEFORE the device cache is filled: a device connecting in
+			   between is then caught by the notification and deduplicated against
+			   the cache, instead of being missed by both. */
 			if (CM_Register_Notification(&notify_filter, NULL, hid_internal_notify_callback, &hid_hotplug_context.notify_handle) != CR_SUCCESS) {
 				hid_hotplug_context.notify_handle = NULL;
-				if (hid_hotplug_context.devs != NULL) {
-					hid_free_enumeration(hid_hotplug_context.devs);
-					hid_hotplug_context.devs = NULL;
-				}
 				LeaveCriticalSection(&hid_hotplug_context.critical_section);
 				free(hotplug_cb);
 				register_global_error(L"hid_hotplug_register_callback/CM_Register_Notification");
 				return -1;
 			}
+
+			/* Normally NULL already; an old notification may have appended
+			   entries between its detachment and the completion of its
+			   unregistration (or, after a failed unregistration, at any time) */
+			if (hid_hotplug_context.devs != NULL) {
+				hid_free_enumeration(hid_hotplug_context.devs);
+				hid_hotplug_context.devs = NULL;
+			}
+
+			/* Fill already connected devices so we can use this info in disconnection
+			   notifications and HID_API_HOTPLUG_ENUMERATE passes */
+			hid_hotplug_context.devs = hid_internal_enumerate(0, 0, &enumerate_failure);
+			if (enumerate_failure) {
+				/* An empty system is fine; a failed enumeration is not: the device
+				   cache and the ENUMERATE snapshot would misrepresent the system */
+				HCMNOTIFICATION notify_handle = hid_internal_hotplug_cleanup();
+				LeaveCriticalSection(&hid_hotplug_context.critical_section);
+				hid_internal_hotplug_finish_unregistration(notify_handle);
+				free(hotplug_cb);
+				/* register_global_error: set by hid_internal_enumerate */
+				return -1;
+			}
 		}
+		/* else: reuse the still-attached notification (its deferred teardown has
+		   not run yet); the device cache is kept current by that notification */
 	}
 
 	/* Take the registration-time snapshot to be replayed asynchronously
@@ -1465,7 +1613,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 				/* Tear the machinery down if this would-be-first callback was starting it */
 				notify_handle = hid_internal_hotplug_cleanup();
 				LeaveCriticalSection(&hid_hotplug_context.critical_section);
-				hid_internal_hotplug_unregister_notification(notify_handle);
+				hid_internal_hotplug_finish_unregistration(notify_handle);
 				free(hotplug_cb);
 				register_global_error(L"Failed to allocate memory for a device info snapshot");
 				return -1;
@@ -1497,6 +1645,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	}
 
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
+
+	/* A successful registration leaves no stale error behind (the internal
+	   enumeration of an empty system registers "No HID devices found") */
+	register_global_error(NULL);
 
 	return 0;
 }
@@ -1545,7 +1697,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
-	hid_internal_hotplug_unregister_notification(notify_handle);
+	hid_internal_hotplug_finish_unregistration(notify_handle);
 
 	if (result != 0) {
 		register_global_error(L"Invalid or unknown hotplug callback handle");
