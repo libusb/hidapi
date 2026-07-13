@@ -199,13 +199,7 @@ static struct hid_hotplug_context {
 	 * are performed while holding it. The teardown free runs in
 	 * hid_internal_hotplug_cleanup() after the hotplug threads have been joined. */
 	struct hid_device_info *devs;
-} hid_hotplug_context = {
-	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
-	.mutex_ready = 0,
-	.queue = NULL,
-	.hotplug_cbs = NULL,
-	.devs = NULL,
-};
+} hid_hotplug_context; /* zero-initialized (static storage); next_handle set on first init */
 
 uint16_t get_usb_code_for_current_locale(void);
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
@@ -725,6 +719,8 @@ static void hid_internal_hotplug_init()
 		hid_hotplug_context.mutex_ready = 1;
 		hid_hotplug_context.mutex_in_use = 0;
 		hid_hotplug_context.cb_list_dirty = 0;
+		if (hid_hotplug_context.next_handle < FIRST_HOTPLUG_CALLBACK_HANDLE)
+			hid_hotplug_context.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE;
 	}
 }
 
@@ -1275,7 +1271,7 @@ static int hid_libusb_hotplug_callback(libusb_context *ctx, libusb_device *devic
 	/* Make sure we HOLD the device until we are done with it - otherwise libusb would delete it the moment we exit this function */
 	libusb_ref_device(device);
 
-	struct hid_hotplug_queue* msg = calloc(1, sizeof(struct hid_hotplug_queue));
+	struct hid_hotplug_queue* msg = (struct hid_hotplug_queue*) calloc(1, sizeof(struct hid_hotplug_queue));
 	if (NULL == msg) {
 		libusb_unref_device(device);
 		return 0;

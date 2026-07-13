@@ -472,7 +472,7 @@ struct hid_hotplug_callback {
     hid_hotplug_callback_handle handle;
     unsigned short vendor_id;
     unsigned short product_id;
-    hid_hotplug_event events;
+    int events; /* bitmask of hid_hotplug_event */
     void *user_data;
     hid_hotplug_callback_fn callback;
 
@@ -497,7 +497,7 @@ static struct hid_hotplug_context {
 	CFRunLoopSourceRef source;
 	CFStringRef run_loop_mode;
 	pthread_barrier_t startup_barrier; /* Ensures correct startup sequence */
-	int thread_state;
+	int thread_state; /* 0 = starting (events ignored), 1 = running (events processed), 2 = shutting down */
 	
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
@@ -514,17 +514,7 @@ static struct hid_hotplug_context {
 
 	/* Linked list of the device infos (mandatory when the device is disconnected) */
 	struct hid_device_info *devs;
-} hid_hotplug_context = {
-	.manager = NULL,
-	.run_loop = NULL,
-	.run_loop_mode = NULL,
-	.source = NULL,
-	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
-	.mutex_ready = 0,
-	.thread_state = 0, /* 0 = starting (events ignored), 1 = running (events processed), 2 = shutting down */
-	.hotplug_cbs = NULL,
-	.devs = NULL
-};
+} hid_hotplug_context; /* zero-initialized (static storage); next_handle set on first init */
 
 static void hid_internal_hotplug_remove_postponed(void)
 {
@@ -593,6 +583,8 @@ static void hid_internal_hotplug_init(void)
 		hid_hotplug_context.mutex_ready = 1;
 		hid_hotplug_context.mutex_in_use = 0;
 		hid_hotplug_context.cb_list_dirty = 0;
+		if (hid_hotplug_context.next_handle < FIRST_HOTPLUG_CALLBACK_HANDLE)
+			hid_hotplug_context.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE;
 	}
 }
 

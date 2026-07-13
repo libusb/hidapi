@@ -236,13 +236,7 @@ static struct hid_hotplug_context {
 
 	/* Linked list of the device infos (mandatory when the device is disconnected) */
 	struct hid_device_info *devs;
-} hid_hotplug_context = {
-	.notify_handle = NULL,
-	.mutex_ready = 0,
-	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
-	.hotplug_cbs = NULL,
-	.devs = NULL
-};
+} hid_hotplug_context; /* zero-initialized (static storage); next_handle set on first init */
 
 static hid_device *new_hid_device()
 {
@@ -427,6 +421,8 @@ static void hid_internal_hotplug_init()
 		hid_hotplug_context.mutex_ready = 1;
 		hid_hotplug_context.mutex_in_use = 0;
 		hid_hotplug_context.cb_list_dirty = 0;
+		if (hid_hotplug_context.next_handle < FIRST_HOTPLUG_CALLBACK_HANDLE)
+			hid_hotplug_context.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE;
 	}
 }
 
@@ -451,7 +447,7 @@ struct hid_hotplug_callback {
     hid_hotplug_callback_handle handle;
     unsigned short vendor_id;
     unsigned short product_id;
-    hid_hotplug_event events;
+    int events; /* bitmask of hid_hotplug_event */
     void *user_data;
     hid_hotplug_callback_fn callback;
 
@@ -1090,7 +1086,7 @@ void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *d
 DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context, CM_NOTIFY_ACTION action, PCM_NOTIFY_EVENT_DATA event_data, DWORD event_data_size)
 {
 	struct hid_device_info *device = NULL;
-	hid_hotplug_event hotplug_event = 0;
+	hid_hotplug_event hotplug_event = (hid_hotplug_event)0;
 
 	(void)notify;
 	(void)context;

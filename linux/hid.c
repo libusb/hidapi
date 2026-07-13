@@ -942,20 +942,13 @@ static struct hid_hotplug_context {
 
 	/* Linked list of the device infos (mandatory when the device is disconnected) */
 	struct hid_device_info *devs;
-} hid_hotplug_context = {
-	.udev_ctx = NULL,
-	.monitor_fd = -1,
-	.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE,
-	.mutex_ready = 0,
-	.hotplug_cbs = NULL,
-	.devs = NULL
-};
+} hid_hotplug_context; /* zero-initialized (static storage); next_handle/monitor_fd set on first init */
 
 struct hid_hotplug_callback {
 	hid_hotplug_callback_handle handle;
 	unsigned short vendor_id;
 	unsigned short product_id;
-	hid_hotplug_event events;
+	int events; /* bitmask of hid_hotplug_event */
 	void *user_data;
 	hid_hotplug_callback_fn callback;
 
@@ -1018,6 +1011,9 @@ static void hid_internal_hotplug_init()
 		hid_hotplug_context.mutex_ready = 1;
 		hid_hotplug_context.mutex_in_use = 0;
 		hid_hotplug_context.cb_list_dirty = 0;
+		hid_hotplug_context.monitor_fd = -1;
+		if (hid_hotplug_context.next_handle < FIRST_HOTPLUG_CALLBACK_HANDLE)
+			hid_hotplug_context.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE;
 	}
 }
 
