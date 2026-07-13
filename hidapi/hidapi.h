@@ -358,10 +358,14 @@ extern "C" {
 			context.)
 
 			Every callback invocation holds an internal hotplug mutex for
-			its duration, which means that any other thread calling
+			its duration: any other thread calling
 			hid_hotplug_register_callback() or
 			hid_hotplug_deregister_callback() will block until the callback
-			returns. Keep the callback short.
+			returns. The mutex is re-entrant: calling those functions from
+			within the callback itself (i.e. on the event context, which
+			already holds the mutex) does not block and cannot deadlock -
+			that is what makes them safe to call from inside the callback
+			(see below). Keep the callback short.
 
 			When multiple callbacks are registered, each event is delivered
 			to every matching callback sequentially, in the order the
