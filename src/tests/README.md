@@ -43,8 +43,10 @@ for the per-push CI matrix:
 
 * **Windows** — the vhidmini2 driver must be built, self-signed and installed
   (via `devcon`, no reboot) before the test, and removed afterwards. The
-  `win-vhid-test` workflow does this end-to-end on a hosted `windows-latest`
-  runner. The driver under `windows/driver/` is derived from Microsoft's
+  `win-vhid-test` workflow does this end-to-end on hosted runners (built on
+  `windows-2022`, whose MSBuild matches the WDK's driver build tasks, then
+  installed and tested on `windows-latest`). The driver under `windows/driver/`
+  is derived from Microsoft's
   vhidmini2 sample and is licensed separately under the **MS-PL** (not HIDAPI's
   license); see `windows/driver/README.md` and `windows/driver/LICENSE.txt`.
 * **Linux / libusb** — needs the `raw_gadget` and `dummy_hcd` kernel modules,
