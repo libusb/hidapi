@@ -1,3 +1,9 @@
+# The build version is derived from the repo here, which overrides the
+# hard-coded "Build version format" in the AppVeyor project settings. The
+# {build} placeholder is replaced in before_build with the version read from
+# the VERSION file plus the short commit hash (see below).
+version: '{build}'
+
 environment:
   matrix:
   - BUILD_ENV: msbuild
@@ -5,6 +11,15 @@ environment:
   - BUILD_ENV: msbuild
     arch: Win32
   - BUILD_ENV: cygwin
+
+# Derive the build version from the repo: <VERSION>-<short commit>.<build number>,
+# e.g. 0.16.0-1a2b3c4.42. The build number keeps it unique even if the same
+# commit is built more than once.
+before_build:
+  - ps: |
+      $base  = (Get-Content -Raw "$env:APPVEYOR_BUILD_FOLDER/VERSION").Trim()
+      $short = git rev-parse --short HEAD
+      Update-AppveyorBuild -Version "$base-$short.$env:APPVEYOR_BUILD_NUMBER"
 
 for:
   -

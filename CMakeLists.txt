@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1.3...3.25 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.6.3...4.3 FATAL_ERROR)
 
 if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(src)
@@ -71,8 +71,12 @@ if(HIDAPI_ENABLE_ASAN)
 endif()
 
 if(WIN32)
-    # so far only Windows has tests
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
+    # Linux and macOS have virtual-device based tests (uhid / raw-gadget /
+    # IOHIDUserDevice). Off by default: they need a virtual device at runtime
+    # and otherwise self-skip.
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 else()
     set(HIDAPI_WITH_TESTS OFF)
 endif()
@@ -90,6 +94,10 @@ add_subdirectory(src)
 option(HIDAPI_BUILD_HIDTEST "Build small console test application hidtest" ${IS_DEBUG_BUILD})
 if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
+endif()
+
+if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
+    add_subdirectory(src/tests)
 endif()
 
 if(HIDAPI_ENABLE_ASAN)
