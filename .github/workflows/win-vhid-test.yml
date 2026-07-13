@@ -21,6 +21,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Sets up the MSVC developer environment (cl/msbuild on PATH) by locating
+    # the installed Visual Studio -- the image no longer has VS under the
+    # previously hard-coded "Enterprise" vcvars path (same fix as builds.yml).
+    - name: Set up MSVC developer environment
+      uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
+
     # The hosted runner ships the Windows SDK but not the WDK (no UMDF headers),
     # so the WDK must be obtained. Cache a self-contained offline installer
     # layout (the components, not just the bootstrapper) so it is downloaded only
@@ -57,8 +65,8 @@ jobs:
           Start-Process -FilePath "wdk-layout\wdksetup.exe" -ArgumentList '/quiet', '/norestart', '/ceip', 'off' -Wait
           $ver = "10.0.26100.0"
         }
-        $vcvars = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cmd /c "call `"$vcvars`" && msbuild $proj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$ver /v:minimal"
+        # msbuild comes from the MSVC developer environment set up above.
+        msbuild $proj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$ver /v:minimal
         if ($LASTEXITCODE -ne 0) { throw "vhidmini2 build failed (exit $LASTEXITCODE)." }
 
     - name: Trust the driver's test certificate
