@@ -29,12 +29,15 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_error.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <wchar.h>
 #include <locale.h>
 #include <pthread.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <errno.h>
 
 #include "hidapi_darwin.h"
 

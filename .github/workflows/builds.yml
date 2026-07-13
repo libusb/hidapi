@@ -200,7 +200,7 @@ jobs:
         ninja
 
 
-  windows-cmake:
+  windows-cmake-msvc:
 
     runs-on: windows-latest
 
@@ -214,6 +214,10 @@ jobs:
         choco install ninja
         pip3 install meson
         refreshenv
+    - name: Set up MSVC developer environment
+      uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
     - name: Configure CMake MSVC
       shell: cmd
       run: |
@@ -256,13 +260,11 @@ jobs:
     - name: Configure CMake NMake MSVC
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake -G"NMake Makefiles" -B build\nmake -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\nmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake NMake MSVC
       working-directory: build\nmake
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
     - name: Check artifacts CMake NMake MSVC
       uses: andstor/file-existence-action@v2
@@ -275,7 +277,6 @@ jobs:
     - name: Check CMake NMake MSVC Export Package
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake ^
           -G"NMake Makefiles" ^
           -B build\nmake_test ^
@@ -292,13 +293,11 @@ jobs:
     - name: Configure CMake NMake ClangCL
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake -G"NMake Makefiles" -B build\clang_cl -S hidapisrc -D CMAKE_C_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=OFF -DCMAKE_INSTALL_PREFIX=install\clang_cl -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake NMake ClangCL
       working-directory: build\clang_cl
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         nmake install
     - name: Check artifacts CMake NMake ClangCL
       uses: andstor/file-existence-action@v2
@@ -311,7 +310,6 @@ jobs:
     - name: Check CMake NMake ClangCL Export Package
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         cmake ^
           -G"NMake Makefiles" ^
           -B build\clang_cl_test ^
@@ -327,6 +325,25 @@ jobs:
       working-directory: build/clang_cl
       run: ctest -C RelWithDebInfo --no-compress-output --output-on-failure
 
+    - name: Check Meson build
+      shell: cmd
+      run: |
+        meson setup build_meson hidapisrc
+        cd build_meson
+        ninja
+
+
+  windows-cmake-mingw:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        path: hidapisrc
+    # MinGW builds with gcc and runs in its own job, deliberately without the
+    # MSVC developer environment (which would otherwise make CMake's "MinGW
+    # Makefiles" generator pick up cl).
     - name: Configure CMake MinGW
       shell: cmd
       run: |
@@ -357,14 +374,6 @@ jobs:
     - name: Run CTest MinGW
       working-directory: build\mingw
       run: ctest --no-compress-output --output-on-failure
-
-    - name: Check Meson build
-      shell: cmd
-      run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        meson setup build_meson hidapisrc
-        cd build_meson
-        ninja
 
 
   windows-msbuild:
