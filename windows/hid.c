@@ -209,6 +209,8 @@ struct hid_device_ {
 		DWORD write_timeout_ms;
 };
 
+static void free_hid_device(hid_device *dev);
+
 static hid_device *new_hid_device()
 {
 	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
@@ -233,6 +235,13 @@ static hid_device *new_hid_device()
 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	dev->interrupt_event = CreateEvent(NULL, TRUE /*manual reset*/, FALSE /*initial state nonsignaled*/, NULL);
+	if (dev->interrupt_event == NULL) {
+		/* A NULL handle would make WaitForMultipleObjects() in
+		   hid_read_timeout() fail instantly (busy-spinning a blocking read)
+		   instead of blocking, so fail the open instead. */
+		free_hid_device(dev);
+		return NULL;
+	}
 	dev->interrupted = 0;
 	dev->device_info = NULL;
 	dev->write_timeout_ms = 1000;

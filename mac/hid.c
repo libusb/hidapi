@@ -1268,6 +1268,17 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Lock the access to the report list. */
 	pthread_mutex_lock(&dev->mutex);
 
+	/* Once interrupted, fail immediately - even if input reports are queued -
+	   so a reader loop observes the interrupt no matter how busy the device
+	   is (this is what the hid_read_interrupt() contract promises, and what
+	   the other backends do). Queued reports remain readable after
+	   hid_read_clear_interrupt(). */
+	if (dev->read_interrupted) {
+		bytes_read = -1;
+		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+		goto ret;
+	}
+
 	/* There's an input report queued up. Return it. */
 	if (dev->input_reports) {
 		/* Return the first one */
@@ -1288,12 +1299,6 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		   be returned. */
 		bytes_read = -1;
 		register_error_str(&dev->last_read_error_str, "hid_read_timeout: thread shutdown");
-		goto ret;
-	}
-
-	if (dev->read_interrupted) {
-		bytes_read = -1;
-		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
 		goto ret;
 	}
 
