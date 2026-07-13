@@ -30,6 +30,14 @@ extern "C" {
 #undef WIN32_LEAN_AND_MEAN
 #endif
 
+/* The native threadpool API (CreateThreadpoolWork & co), used to deliver
+ * the HID_API_HOTPLUG_ENUMERATE pass asynchronously, is only declared
+ * for Windows Vista and up. */
+#if !defined(_WIN32_WINNT) || (_WIN32_WINNT < 0x0600)
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+
 #include "hidapi_winapi.h"
 
 #include <windows.h>
@@ -48,6 +56,7 @@ typedef LONG NTSTATUS;
 #include <ntdef.h>
 #include <wctype.h>
 #define _wcsdup wcsdup
+#define _strdup strdup
 #define _stricmp strcasecmp
 #endif
 
@@ -219,6 +228,11 @@ struct hid_device_ {
 static struct hid_hotplug_context {
 	/* Win32 notification handle */
 	HCMNOTIFICATION notify_handle;
+
+	/* Threadpool work item: delivers pending HID_API_HOTPLUG_ENUMERATE
+	   passes and performs cleanup deferred from the notification callback.
+	   Created with the first callback registration, closed by hid_exit(). */
+	PTP_WORK event_work;
 
 	/* Critical section (faster mutex substitute), for both cached device list and callback list changes */
 	CRITICAL_SECTION critical_section;
@@ -451,9 +465,40 @@ struct hid_hotplug_callback {
     void *user_data;
     hid_hotplug_callback_fn callback;
 
+    /* HID_API_HOTPLUG_ENUMERATE snapshot taken at registration time,
+       still to be replayed to this callback as synthetic
+       HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED events on the event context */
+    struct hid_device_info *replay;
+
     /* Pointer to the next notification */
     struct hid_hotplug_callback *next;
 };
+
+static struct hid_device_info *hid_internal_copy_device_info(const struct hid_device_info *src)
+{
+	struct hid_device_info *dst = (struct hid_device_info *)calloc(1, sizeof(struct hid_device_info));
+
+	if (dst == NULL) {
+		return NULL;
+	}
+
+	*dst = *src;
+	dst->next = NULL;
+	dst->path = NULL;
+	dst->serial_number = NULL;
+	dst->manufacturer_string = NULL;
+	dst->product_string = NULL;
+
+	if ((src->path && (dst->path = _strdup(src->path)) == NULL)
+	    || (src->serial_number && (dst->serial_number = _wcsdup(src->serial_number)) == NULL)
+	    || (src->manufacturer_string && (dst->manufacturer_string = _wcsdup(src->manufacturer_string)) == NULL)
+	    || (src->product_string && (dst->product_string = _wcsdup(src->product_string)) == NULL)) {
+		hid_free_enumeration(dst);
+		return NULL;
+	}
+
+	return dst;
+}
 
 static void hid_internal_hotplug_remove_postponed()
 {
@@ -470,29 +515,49 @@ static void hid_internal_hotplug_remove_postponed()
 		struct hid_hotplug_callback *callback = *current;
 		if (!callback->events) {
 			*current = (*current)->next;
+			hid_free_enumeration(callback->replay);
 			free(callback);
 			continue;
 		}
 		current = &callback->next;
 	}
-	
+
 	/* Clear the flag so we don't start the cycle unless necessary */
 	hid_hotplug_context.cb_list_dirty = 0;
 }
 
-static void hid_internal_hotplug_cleanup()
+static void hid_internal_hotplug_unregister_notification(HCMNOTIFICATION notify_handle)
 {
-	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
+	if (notify_handle == NULL) {
 		return;
+	}
+
+	if (CM_Unregister_Notification(notify_handle) != CR_SUCCESS) {
+		register_global_error(L"CM_Unregister_Notification failed for Hotplug notification");
+	}
+}
+
+/* Always called inside a locked mutex.
+   When the last callback is gone, tears the machinery down and returns the
+   Win32 notification handle: CM_Unregister_Notification waits for in-progress
+   notification callbacks, which in turn may be blocked on our critical
+   section, so the caller must invoke it only after leaving the critical
+   section (and never from the notification callback itself: the notification
+   callback defers the teardown to the threadpool work item instead). */
+static HCMNOTIFICATION hid_internal_hotplug_cleanup()
+{
+	HCMNOTIFICATION notify_handle;
+
+	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
+		return NULL;
 	}
 
 	/* Before checking if the list is empty, clear any entries whose removal was postponed first */
 	hid_internal_hotplug_remove_postponed();
 
 	/* Unregister the HID device connection notification when removing the last callback */
-	/* This function is always called inside a locked mutex */
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
-		return;
+		return NULL;
 	}
 
 	if (hid_hotplug_context.devs) {
@@ -501,32 +566,102 @@ static void hid_internal_hotplug_cleanup()
 		hid_hotplug_context.devs = NULL;
 	}
 
-	if (hid_hotplug_context.notify_handle) {
-		if (CM_Unregister_Notification(hid_hotplug_context.notify_handle) != CR_SUCCESS) {
-			/* We mark an error, but we proceed with the cleanup */
-			register_global_error(L"CM_Unregister_Notification failed for Hotplug notification");
+	notify_handle = hid_hotplug_context.notify_handle;
+	hid_hotplug_context.notify_handle = NULL;
+	return notify_handle;
+}
+
+/* Deliver (and consume) a callback's pending HID_API_HOTPLUG_ENUMERATE
+   snapshot. Always called inside a locked mutex, with mutex_in_use set. */
+static void hid_internal_hotplug_replay_flush(struct hid_hotplug_callback *callback)
+{
+	while (callback->replay != NULL) {
+		struct hid_device_info *device = callback->replay;
+		callback->replay = device->next;
+		device->next = NULL;
+
+		if (!callback->events) {
+			/* The callback was deregistered while the pass was pending */
+			hid_free_enumeration(device);
+			continue;
+		}
+
+		int result = (*callback->callback)(callback->handle, device, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, callback->user_data);
+		hid_free_enumeration(device);
+
+		/* A non-zero result stops the remainder of the pass and deregisters the callback */
+		if (result) {
+			callback->events = 0;
+			hid_hotplug_context.cb_list_dirty = 1;
+			hid_free_enumeration(callback->replay);
+			callback->replay = NULL;
 		}
 	}
+}
 
-	hid_hotplug_context.notify_handle = NULL;
+/* Threadpool work item: delivers pending HID_API_HOTPLUG_ENUMERATE passes
+   (unless a live event got to them first) and performs the cleanup the
+   notification callback is not allowed to perform itself. */
+static VOID CALLBACK hid_internal_hotplug_event_work(PTP_CALLBACK_INSTANCE instance, PVOID context, PTP_WORK work)
+{
+	HCMNOTIFICATION notify_handle;
+
+	(void)instance;
+	(void)context;
+	(void)work;
+
+	EnterCriticalSection(&hid_hotplug_context.critical_section);
+
+	hid_hotplug_context.mutex_in_use = 1;
+	for (struct hid_hotplug_callback *callback = hid_hotplug_context.hotplug_cbs; callback != NULL; callback = callback->next) {
+		hid_internal_hotplug_replay_flush(callback);
+	}
+	hid_hotplug_context.mutex_in_use = 0;
+
+	notify_handle = hid_internal_hotplug_cleanup();
+
+	LeaveCriticalSection(&hid_hotplug_context.critical_section);
+
+	hid_internal_hotplug_unregister_notification(notify_handle);
 }
 
 static void hid_internal_hotplug_exit()
 {
+	HCMNOTIFICATION notify_handle;
+
 	if (!hid_hotplug_context.mutex_ready) {
 		/* If the critical section is not initialized, we are safe to assume nothing else is */
 		return;
 	}
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
-	/* Remove all callbacks from the list */
+	/* Remove all callbacks from the list, including their undelivered HID_API_HOTPLUG_ENUMERATE snapshots */
 	while (*current) {
 		struct hid_hotplug_callback *next = (*current)->next;
+		hid_free_enumeration((*current)->replay);
 		free(*current);
 		*current = next;
 	}
-	hid_internal_hotplug_cleanup();
+	notify_handle = hid_internal_hotplug_cleanup();
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
+
+	hid_internal_hotplug_unregister_notification(notify_handle);
+
+	if (hid_hotplug_context.event_work) {
+		/* Wait for any in-flight work item before the critical section goes away.
+		   hid_exit() must not be called from a callback, so this cannot deadlock. */
+		WaitForThreadpoolWorkCallbacks(hid_hotplug_context.event_work, FALSE);
+		CloseThreadpoolWork(hid_hotplug_context.event_work);
+		hid_hotplug_context.event_work = NULL;
+	}
+
+	/* A last-gasp notification callback may have re-added a device between
+	   the cleanup and the unregistration; nothing can race us anymore here */
+	if (hid_hotplug_context.devs != NULL) {
+		hid_free_enumeration(hid_hotplug_context.devs);
+		hid_hotplug_context.devs = NULL;
+	}
+
 	hid_hotplug_context.mutex_ready = 0;
 	DeleteCriticalSection(&hid_hotplug_context.critical_section);
 }
@@ -1151,14 +1286,25 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 	if (device) {
 		/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
 		hid_hotplug_context.mutex_in_use = 1;
-		
+
+		/* Callbacks registered from inside a callback are appended to the list
+		   and see this device in their registration-time HID_API_HOTPLUG_ENUMERATE
+		   snapshot (or don't, for a removal): the live dispatch is bound to the
+		   callbacks present at event time, so the connection is reported exactly once */
+		struct hid_hotplug_callback *last_at_event = hid_hotplug_context.hotplug_cbs;
+		while (last_at_event != NULL && last_at_event->next != NULL) {
+			last_at_event = last_at_event->next;
+		}
+
 		/* Call the notifications for the device */
-		struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
-		while (*current) {
-			struct hid_hotplug_callback *callback = *current;
+		for (struct hid_hotplug_callback *callback = hid_hotplug_context.hotplug_cbs; callback != NULL; callback = callback->next) {
+			/* The registration-time enumeration pass is always delivered
+			   before any live events for the callback */
+			hid_internal_hotplug_replay_flush(callback);
+
 			if ((callback->events & hotplug_event) && hid_internal_match_device_id(device->vendor_id, device->product_id, callback->vendor_id, callback->product_id)) {
 				int result = (callback->callback)(callback->handle, device, hotplug_event, callback->user_data);
-				
+
 				/* If the result is non-zero, we MARK the callback for future removal and proceed */
 				/* We avoid changing the list until we are done calling the callbacks to simplify the process */
 				if (result) {
@@ -1166,7 +1312,10 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 					hid_hotplug_context.cb_list_dirty = 1;
 				}
 			}
-			current = &callback->next;
+
+			if (callback == last_at_event) {
+				break;
+			}
 		}
 
 		hid_hotplug_context.mutex_in_use = 0;
@@ -1176,8 +1325,13 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 			hid_free_enumeration(device);
 		}
 
-		/* Remove any callbacks that were marked for removal and stop the notification if none are left */
-		hid_internal_hotplug_cleanup();
+		/* Remove any callbacks that were marked for removal; if none are left,
+		   defer the teardown to the threadpool work item: unregistering the
+		   notification from its own callback is not allowed (deadlock) */
+		hid_internal_hotplug_remove_postponed();
+		if (hid_hotplug_context.hotplug_cbs == NULL && hid_hotplug_context.event_work != NULL) {
+			SubmitThreadpoolWork(hid_hotplug_context.event_work);
+		}
 	}
 
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
@@ -1189,17 +1343,30 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 {
 	struct hid_hotplug_callback* hotplug_cb;
 
+	/* No events can be delivered before the handle is written */
+	if (callback_handle != NULL) {
+		*callback_handle = 0;
+	}
+
 	/* Check params */
+	if (callback == NULL) {
+		register_global_error(L"Callback function is NULL");
+		return -1;
+	}
 	if (events == 0
-		|| (events & ~(HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT))
-		|| (flags & ~(HID_API_HOTPLUG_ENUMERATE))
-		|| callback == NULL) {
+		|| (events & ~(HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED | HID_API_HOTPLUG_EVENT_DEVICE_LEFT))) {
+		register_global_error(L"Invalid events mask");
+		return -1;
+	}
+	if (flags & ~(HID_API_HOTPLUG_ENUMERATE)) {
+		register_global_error(L"Invalid flags");
 		return -1;
 	}
 
 	hotplug_cb = (struct hid_hotplug_callback*)calloc(1, sizeof(struct hid_hotplug_callback));
 
 	if (hotplug_cb == NULL) {
+		register_global_error(L"Failed to allocate memory for a hotplug callback");
 		return -1;
 	}
 
@@ -1210,6 +1377,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	hotplug_cb->events = events;
 	hotplug_cb->user_data = user_data;
 	hotplug_cb->callback = callback;
+	hotplug_cb->replay = NULL;
 
 	/* Ensure we are ready to actually use the mutex */
 	hid_internal_hotplug_init();
@@ -1225,12 +1393,88 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		hid_hotplug_context.next_handle = 1;
 	}
 
-	/* Return allocated handle */
-	if (callback_handle != NULL) {
-		*callback_handle = hotplug_cb->handle;
+	/* Start the machinery with the first callback */
+	if (hid_hotplug_context.hotplug_cbs == NULL) {
+		if (hid_init() < 0) {
+			/* register_global_error: global error is already set by hid_init */
+			LeaveCriticalSection(&hid_hotplug_context.critical_section);
+			free(hotplug_cb);
+			return -1;
+		}
+
+		if (hid_hotplug_context.event_work == NULL) {
+			hid_hotplug_context.event_work = CreateThreadpoolWork(hid_internal_hotplug_event_work, NULL, NULL);
+			if (hid_hotplug_context.event_work == NULL) {
+				LeaveCriticalSection(&hid_hotplug_context.critical_section);
+				free(hotplug_cb);
+				register_global_error(L"hid_hotplug_register_callback/CreateThreadpoolWork");
+				return -1;
+			}
+		}
+
+		/* Refresh the device cache: a teardown deferred to the work item may not have run yet */
+		if (hid_hotplug_context.devs != NULL) {
+			hid_free_enumeration(hid_hotplug_context.devs);
+			hid_hotplug_context.devs = NULL;
+		}
+
+		/* Fill already connected devices so we can use this info in disconnection
+		   notifications and HID_API_HOTPLUG_ENUMERATE passes (hid_enumerate also
+		   implicitly initializes the library, as if by hid_init) */
+		hid_hotplug_context.devs = hid_enumerate(0, 0);
+
+		if (hid_hotplug_context.notify_handle == NULL) {
+			GUID interface_class_guid;
+			CM_NOTIFY_FILTER notify_filter = { 0 };
+
+			/* Retrieve HID Interface Class GUID
+				https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
+			HidD_GetHidGuid(&interface_class_guid);
+
+			notify_filter.cbSize = sizeof(notify_filter);
+			notify_filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
+			notify_filter.u.DeviceInterface.ClassGuid = interface_class_guid;
+
+			/* Register for a HID device notification when adding the first callback */
+			if (CM_Register_Notification(&notify_filter, NULL, hid_internal_notify_callback, &hid_hotplug_context.notify_handle) != CR_SUCCESS) {
+				hid_hotplug_context.notify_handle = NULL;
+				if (hid_hotplug_context.devs != NULL) {
+					hid_free_enumeration(hid_hotplug_context.devs);
+					hid_hotplug_context.devs = NULL;
+				}
+				LeaveCriticalSection(&hid_hotplug_context.critical_section);
+				free(hotplug_cb);
+				register_global_error(L"hid_hotplug_register_callback/CM_Register_Notification");
+				return -1;
+			}
+		}
 	}
 
-	/* Append a new callback to the end */
+	/* Take the registration-time snapshot to be replayed asynchronously
+	   on the event context, one exact copy per matching connected device */
+	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
+		struct hid_device_info **replay_tail = &hotplug_cb->replay;
+		for (struct hid_device_info *device = hid_hotplug_context.devs; device != NULL; device = device->next) {
+			if (!hid_internal_match_device_id(device->vendor_id, device->product_id, vendor_id, product_id)) {
+				continue;
+			}
+			*replay_tail = hid_internal_copy_device_info(device);
+			if (*replay_tail == NULL) {
+				HCMNOTIFICATION notify_handle;
+				hid_free_enumeration(hotplug_cb->replay);
+				/* Tear the machinery down if this would-be-first callback was starting it */
+				notify_handle = hid_internal_hotplug_cleanup();
+				LeaveCriticalSection(&hid_hotplug_context.critical_section);
+				hid_internal_hotplug_unregister_notification(notify_handle);
+				free(hotplug_cb);
+				register_global_error(L"Failed to allocate memory for a device info snapshot");
+				return -1;
+			}
+			replay_tail = &(*replay_tail)->next;
+		}
+	}
+
+	/* Append the new callback to the end of the list */
 	if (hid_hotplug_context.hotplug_cbs != NULL) {
 		struct hid_hotplug_callback *last = hid_hotplug_context.hotplug_cbs;
 		while (last->next != NULL) {
@@ -1239,57 +1483,19 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		last->next = hotplug_cb;
 	}
 	else {
-		GUID interface_class_guid;
-		CM_NOTIFY_FILTER notify_filter = { 0 };
-
-		/* Fill already connected devices so we can use this info in disconnection notification */
-		hid_hotplug_context.devs = hid_enumerate(0, 0);
-
 		hid_hotplug_context.hotplug_cbs = hotplug_cb;
-
-		if (hid_hotplug_context.notify_handle != NULL) {
-			register_global_error(L"Device notification have already been registered");
-			LeaveCriticalSection(&hid_hotplug_context.critical_section);
-			return -1;
-		}
-
-		/* Retrieve HID Interface Class GUID
-			https://docs.microsoft.com/windows-hardware/drivers/install/guid-devinterface-hid */
-		HidD_GetHidGuid(&interface_class_guid);
-
-		notify_filter.cbSize = sizeof(notify_filter);
-		notify_filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
-		notify_filter.u.DeviceInterface.ClassGuid = interface_class_guid;
-
-		/* Register for a HID device notification when adding the first callback */
-		if (CM_Register_Notification(&notify_filter, NULL, hid_internal_notify_callback, &hid_hotplug_context.notify_handle) != CR_SUCCESS) {
-			register_global_error(L"hid_hotplug_register_callback/CM_Register_Notification");
-			LeaveCriticalSection(&hid_hotplug_context.critical_section);
-			return -1;
-		}
 	}
 
-	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
-	unsigned char old_state = hid_hotplug_context.mutex_in_use;
-	hid_hotplug_context.mutex_in_use = 1;
-	
-	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
-		struct hid_device_info* device = hid_hotplug_context.devs;
-		/* Notify about already connected devices, if asked so */
-		while (device != NULL) {
-			if (hid_internal_match_device_id(device->vendor_id, device->product_id, hotplug_cb->vendor_id, hotplug_cb->product_id)) {
-				(*hotplug_cb->callback)(hotplug_cb->handle, device, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, hotplug_cb->user_data);
-			}
-
-			device = device->next;
-		}
+	/* Return allocated handle */
+	if (callback_handle != NULL) {
+		*callback_handle = hotplug_cb->handle;
 	}
 
-	hid_hotplug_context.mutex_in_use = old_state;
+	/* Have the snapshot delivered on the event context; never from within this call */
+	if (hotplug_cb->replay != NULL) {
+		SubmitThreadpoolWork(hid_hotplug_context.event_work);
+	}
 
-	/* Remove any callbacks that were marked for removal and stop the notification if none are left */
-	hid_internal_hotplug_cleanup();
-	
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	return 0;
@@ -1297,21 +1503,29 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle)
 {
+	int result = -1;
+	HCMNOTIFICATION notify_handle;
+
 	if (callback_handle <= 0 || !hid_hotplug_context.mutex_ready) {
+		register_global_error(L"Invalid or unknown hotplug callback handle");
 		return -1;
 	}
 
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
-	if (!hid_hotplug_context.hotplug_cbs) {
-		LeaveCriticalSection(&hid_hotplug_context.critical_section);
-		return -1;
-	}
-
 	/* Remove this notification */
 	for (struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs; *current != NULL; current = &(*current)->next) {
 		if ((*current)->handle == callback_handle) {
+			/* A callback already marked for removal counts as deregistered */
+			if (!(*current)->events) {
+				break;
+			}
+
+			/* Undelivered HID_API_HOTPLUG_ENUMERATE events must never fire after deregistration */
+			hid_free_enumeration((*current)->replay);
+			(*current)->replay = NULL;
+
 			/* Check if we were already in the critical section, as we are NOT allowed to remove any callbacks if we are */
 			if (hid_hotplug_context.mutex_in_use) {
 				/* If we are not allowed to remove the callback, we mark it as pending removal */
@@ -1322,15 +1536,22 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 				free(*current);
 				*current = next;
 			}
+			result = 0;
 			break;
 		}
 	}
 
-	hid_internal_hotplug_cleanup();
+	notify_handle = hid_internal_hotplug_cleanup();
 
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
-	return 0;
+	hid_internal_hotplug_unregister_notification(notify_handle);
+
+	if (result != 0) {
+		register_global_error(L"Invalid or unknown hotplug callback handle");
+	}
+
+	return result;
 }
 
 HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsigned short product_id, const wchar_t *serial_number)
