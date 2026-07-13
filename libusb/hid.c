@@ -1671,6 +1671,17 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	bytes_read = -1;
 
+	/* Once interrupted, fail immediately - even if input reports are queued -
+	   so a reader loop observes the interrupt no matter how busy the device
+	   is (this is what the hid_read_interrupt() contract promises, and what
+	   the other backends do). Queued reports remain readable after
+	   hid_read_clear_interrupt(). */
+	if (dev->read_interrupted) {
+		bytes_read = -1;
+		register_read_error(dev, "hid_read(_timeout): operation interrupted");
+		goto ret;
+	}
+
 	/* There's an input report queued up. Return it. */
 	if (dev->input_reports) {
 		/* Return the first one */
@@ -1684,12 +1695,6 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		   An error code of -1 should be returned. */
 		bytes_read = -1;
 		register_read_error(dev, "hid_read(_timeout): read thread terminated");
-		goto ret;
-	}
-
-	if (dev->read_interrupted) {
-		bytes_read = -1;
-		register_read_error(dev, "hid_read(_timeout): operation interrupted");
 		goto ret;
 	}
 

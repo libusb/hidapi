@@ -436,10 +436,12 @@ extern "C" {
 			hid_read_timeout() also return -1 immediately, until @ref
 			hid_read_clear_interrupt is called.
 
-			A hid_read*() call that observes data already buffered or
-			queued before the interrupt may return that data; otherwise it
-			returns -1. Eventually (within at most one further call) hid_read*()
-			will return -1.
+			A hid_read*() call already in progress when the interrupt arrives
+			may still return data that was already buffered or queued; any
+			call entered after the interrupt returns -1 immediately, without
+			draining queued data (it remains readable after
+			@ref hid_read_clear_interrupt). In either case, within at most
+			one further call hid_read*() returns -1.
 
 			Only the read pipeline is affected: hid_write(), hid_get_input_report(),
 			feature/output report functions, and all other operations on @p dev
