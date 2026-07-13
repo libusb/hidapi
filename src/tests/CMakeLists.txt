@@ -18,6 +18,14 @@
 # created or does not enumerate, the test returns CTest's SKIP code (77) instead
 # of failing, so ordinary builds on any host stay green.
 
+# SKIP_RETURN_CODE (used to report a provider self-skip as SKIP rather than
+# FAIL) needs CMake/CTest 3.16. With an older CMake a legitimate self-skip
+# would be mis-reported as a test failure, so don't add the tests at all.
+if(CMAKE_VERSION VERSION_LESS "3.16")
+    message(WARNING "HIDAPI_WITH_TESTS: the virtual-device tests require CMake >= 3.16 (SKIP_RETURN_CODE); not adding them.")
+    return()
+endif()
+
 find_package(Threads REQUIRED)
 
 # Define a device-I/O test <name> built from test_device_io.c + <provider>,

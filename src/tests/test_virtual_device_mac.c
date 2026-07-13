@@ -156,8 +156,13 @@ static IOReturn set_report_cb(void *refcon, IOHIDReportType type,
 	unsigned char command = TEST_VDEV_CMD_NONE;
 	CFIndex scan = reportLength > 4 ? 4 : reportLength;
 	CFIndex i;
-	(void)type;
 	(void)reportID;
+
+	/* Only a *Feature* SET_REPORT is a scenario trigger (per the shared
+	   contract and matching the other providers). hid_write() Output reports
+	   also arrive through this callback on macOS and must not replay. */
+	if (type != kIOHIDReportTypeFeature)
+		return kIOReturnSuccess;
 
 	for (i = 0; i < scan; i++) {
 		if (report[i] == TEST_VDEV_CMD_EMIT_A || report[i] == TEST_VDEV_CMD_EMIT_B) {

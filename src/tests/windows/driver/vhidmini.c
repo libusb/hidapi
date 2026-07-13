@@ -666,7 +666,11 @@ Return Value:
         return status;
     }
 
-    if (packet.reportId != CONTROL_COLLECTION_REPORT_ID) {
+    //
+    // HIDAPI test: the device is unnumbered (no Report ID in the descriptor),
+    // so hidclass passes report id 0 for every request.
+    //
+    if (packet.reportId != 0) {
         //
         // Return error for unknown collection
         //
@@ -740,11 +744,11 @@ Return Value:
         return status;
     }
 
-    if (packet.reportId != CONTROL_COLLECTION_REPORT_ID) {
-        //
-        // If collection ID is not for control collection then handle
-        // this request just as you would for a regular collection.
-        //
+    //
+    // HIDAPI test: the device is unnumbered (no Report ID in the descriptor),
+    // so hidclass passes report id 0 for every request.
+    //
+    if (packet.reportId != 0) {
         status = STATUS_INVALID_PARAMETER;
         KdPrint(("GetFeature: invalid report id %d\n", packet.reportId));
         return status;
@@ -898,11 +902,11 @@ Return Value:
         return status;
     }
 
-    if (packet.reportId != CONTROL_COLLECTION_REPORT_ID) {
-        //
-        // If collection ID is not for control collection then handle
-        // this request just as you would for a regular collection.
-        //
+    //
+    // HIDAPI test: the device is unnumbered (no Report ID in the descriptor),
+    // so hidclass passes report id 0 for every request.
+    //
+    if (packet.reportId != 0) {
         status = STATUS_INVALID_PARAMETER;
         KdPrint(("GetInputReport: invalid report id %d\n", packet.reportId));
         return status;
@@ -918,7 +922,7 @@ Return Value:
 
     reportBuffer = (PHIDMINI_INPUT_REPORT)(packet.reportBuffer);
 
-    reportBuffer->ReportId = CONTROL_COLLECTION_REPORT_ID;
+    reportBuffer->ReportId = 0; /* unnumbered device */
     reportBuffer->Data     = QueueContext->OutputReport;
 
     //
@@ -966,11 +970,11 @@ Return Value:
         return status;
     }
 
-    if (packet.reportId != CONTROL_COLLECTION_REPORT_ID) {
-        //
-        // If collection ID is not for control collection then handle
-        // this request just as you would for a regular collection.
-        //
+    //
+    // HIDAPI test: the device is unnumbered (no Report ID in the descriptor),
+    // so hidclass passes report id 0 for every request.
+    //
+    if (packet.reportId != 0) {
         status = STATUS_INVALID_PARAMETER;
         KdPrint(("SetOutputReport: unkown report id %d\n", packet.reportId));
         return status;

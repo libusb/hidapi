@@ -20,9 +20,6 @@
 #ifdef _WIN32
   #include <windows.h>
 #else
-  #ifndef _GNU_SOURCE
-  #define _GNU_SOURCE /* for pthread_timedjoin_np */
-  #endif
   #include <pthread.h>
   #include <time.h>
 #endif
@@ -60,6 +57,7 @@ typedef struct test_thread {
 	HANDLE handle;
 #else
 	pthread_t thread;
+	int done; /* set by the wrapper when fn returns; polled by the timed join */
 #endif
 } test_thread;
 
@@ -75,6 +73,7 @@ static void *test__thread_entry(void *p)
 {
 	test_thread *t = (test_thread *)p;
 	t->fn(t->arg);
+	__atomic_store_n(&t->done, 1, __ATOMIC_RELEASE);
 	return NULL;
 }
 #endif
@@ -88,6 +87,7 @@ static int test_thread_start(test_thread *t, void (*fn)(void *), void *arg)
 	t->handle = CreateThread(NULL, 0, test__thread_entry, t, 0, NULL);
 	return t->handle ? 0 : -1;
 #else
+	t->done = 0;
 	return pthread_create(&t->thread, NULL, test__thread_entry, t) == 0 ? 0 : -1;
 #endif
 }
@@ -104,15 +104,16 @@ static int test_thread_join_timeout(test_thread *t, int timeout_ms)
 	}
 	return -1;
 #else
-	struct timespec ts;
-	clock_gettime(CLOCK_REALTIME, &ts);
-	ts.tv_sec += timeout_ms / 1000;
-	ts.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
-	if (ts.tv_nsec >= 1000000000L) {
-		ts.tv_sec += 1;
-		ts.tv_nsec -= 1000000000L;
+	/* pthread_timedjoin_np() is a glibc/BSD extension that does not exist on
+	   macOS, so poll a completion flag set by the thread wrapper instead, and
+	   only pthread_join() (briefly) once the thread is known to be finishing. */
+	long long deadline = test_now_ms() + timeout_ms;
+	while (!__atomic_load_n(&t->done, __ATOMIC_ACQUIRE)) {
+		if (test_now_ms() >= deadline)
+			return -1;
+		test_sleep_ms(10);
 	}
-	return pthread_timedjoin_np(t->thread, NULL, &ts) == 0 ? 0 : -1;
+	return pthread_join(t->thread, NULL) == 0 ? 0 : -1;
 #endif
 }
 
