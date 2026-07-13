@@ -1,35 +1,40 @@
 name: Windows Virtual HID Device Test (manual)
 
-# Builds, self-signs and installs a modified vhidmini2 UMDF2 driver on a hosted
-# windows-latest runner, then runs the backend-agnostic device-I/O test against
-# that real virtual HID device (winapi backend). It installs a kernel driver, so
-# it is not part of the per-push CI matrix; run it on demand from the Actions
-# tab, or by adding the 'ci-virtual-device' label to a pull request.
+# Builds and self-signs a modified vhidmini2 UMDF2 driver, installs it on a
+# hosted runner, then runs the backend-agnostic device-I/O test against that
+# real virtual HID device (winapi backend). It installs a driver, so it is not
+# part of the per-push CI matrix; run it on demand from the Actions tab, or by
+# adding the 'ci-virtual-device' label to a pull request.
+#
+# The work is split across two runners because no single hosted image can do
+# both today:
+#   - build-driver runs on windows-2022: the cached WDK (10.0.26100.6584)
+#     ships DriverKit build tasks only up to MSBuild 17 (VS2022), which the
+#     windows-2025* images no longer carry (VS2026 / MSBuild 18 -> MSB4062).
+#   - win-vhid runs on windows-latest (Server 2025): the driver package's INF
+#     depends on MsHidUmdf.inf semantics introduced in build 22000, so it does
+#     not install on Server 2022 (build 20348).
+# Revisit once a WDK with 18.0 build tasks is cached here - then both jobs can
+# run on windows-latest again (and could be merged back into one).
 
 on:
   workflow_dispatch:
   # Also runs automatically on a pull request that carries the
-  # 'ci-virtual-device' label (the job below is gated on that label).
+  # 'ci-virtual-device' label (the build-driver job is gated on that label;
+  # win-vhid follows via needs:).
   pull_request:
     types: [opened, reopened, labeled, synchronize]
 
 jobs:
-  win-vhid:
+  build-driver:
     # workflow_dispatch always runs; on a PR, only when the label is present.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-virtual-device')
-    # Pinned (not -latest): the driver build needs an MSBuild whose DriverKit
-    # build tasks the WDK provides. The windows-2025* images now carry only
-    # Visual Studio 2026 / MSBuild 18, and the WDK 10.0.26100.6584 layout ships
-    # Microsoft.DriverKit.Build.Tasks only up to 17.0 -> error MSB4062.
-    # windows-2022 still has VS2022 (MSBuild 17). Revisit when a WDK that ships
-    # the 18.0 build tasks is cached here (then newer images work again).
     runs-on: windows-2022
     steps:
     - uses: actions/checkout@v4
 
     # Sets up the MSVC developer environment (cl/msbuild on PATH) by locating
-    # the installed Visual Studio -- the image no longer has VS under the
-    # previously hard-coded "Enterprise" vcvars path (same fix as builds.yml).
+    # the installed Visual Studio (no hard-coded path or edition).
     - name: Set up MSVC developer environment
       uses: TheMrMilchmann/setup-msvc-dev@v4
       with:
@@ -75,10 +80,39 @@ jobs:
         msbuild $proj /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$ver /v:minimal
         if ($LASTEXITCODE -ne 0) { throw "vhidmini2 build failed (exit $LASTEXITCODE)." }
 
+    - name: Stage driver package (+ devcon) for the test job
+      shell: pwsh
+      run: |
+        $out = "src/tests/windows/driver/x64/Release"
+        # devcon.exe ships with the WDK just installed; the test runner has no
+        # WDK, so carry the tool along with the driver package.
+        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        if (-not $devcon) { throw "devcon.exe not found in the installed WDK." }
+        Copy-Item $devcon $out\
+        Get-ChildItem -Recurse $out | Select-Object FullName
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: vhidmini-driver
+        path: src/tests/windows/driver/x64/Release/
+        if-no-files-found: error
+
+  win-vhid:
+    needs: build-driver
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: vhidmini-driver
+        path: driver-pkg
+
     - name: Trust the driver's test certificate
       shell: pwsh
       run: |
-        $cer = "src/tests/windows/driver/x64/Release/VhidminiUm.cer"
+        $cer = "driver-pkg/VhidminiUm.cer"
         Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
         Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
         Write-Host "Imported test cert into Root and TrustedPublisher."
@@ -86,13 +120,13 @@ jobs:
     - name: Install virtual HID device (devcon, root-enumerated)
       shell: pwsh
       run: |
-        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
-                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        $devcon = (Resolve-Path "driver-pkg/devcon.exe").Path
+        $inf = (Resolve-Path "driver-pkg/VhidminiUm/VhidminiUm.inf").Path
         Write-Host "devcon: $devcon"
-        $inf = (Resolve-Path "src/tests/windows/driver/x64/Release/VhidminiUm/VhidminiUm.inf").Path
         Write-Host "inf: $inf"
         & $devcon install $inf "root\VhidminiUm"
         Write-Host "devcon exit: $LASTEXITCODE"
+        if ($LASTEXITCODE -ne 0) { throw "devcon install failed (exit $LASTEXITCODE)." }
 
     - name: HID devices present (diagnostic)
       shell: pwsh
@@ -117,7 +151,6 @@ jobs:
       if: always()
       shell: pwsh
       run: |
-        $devcon = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
-                  Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
-        if ($devcon) { & $devcon remove "root\VhidminiUm" 2>$null }
+        $devcon = "driver-pkg/devcon.exe"
+        if (Test-Path $devcon) { & $devcon remove "root\VhidminiUm" 2>$null }
         Write-Host "cleanup done"
