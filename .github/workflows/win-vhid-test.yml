@@ -17,7 +17,13 @@ jobs:
   win-vhid:
     # workflow_dispatch always runs; on a PR, only when the label is present.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-virtual-device')
-    runs-on: windows-latest
+    # Pinned (not -latest): the driver build needs an MSBuild whose DriverKit
+    # build tasks the WDK provides. The windows-2025* images now carry only
+    # Visual Studio 2026 / MSBuild 18, and the WDK 10.0.26100.6584 layout ships
+    # Microsoft.DriverKit.Build.Tasks only up to 17.0 -> error MSB4062.
+    # windows-2022 still has VS2022 (MSBuild 17). Revisit when a WDK that ships
+    # the 18.0 build tasks is cached here (then newer images work again).
+    runs-on: windows-2022
     steps:
     - uses: actions/checkout@v4
 
