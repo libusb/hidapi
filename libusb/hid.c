@@ -995,7 +995,14 @@ static int hid_internal_hotplug_lock()
 static void hid_internal_hotplug_exit()
 {
 	if (hid_internal_hotplug_lock() < 0) {
-		/* The hotplug machinery was never used */
+		/* The hotplug machinery was never initialized, so nothing can race us for
+		 * `usb_context`: a registration is the only path that would, and it would
+		 * have initialized the machinery (and taken `mutex`) first. Destroy the
+		 * main context a plain hid_init() may have created and return. */
+		if (usb_context) {
+			libusb_exit(usb_context);
+			usb_context = NULL;
+		}
 		return;
 	}
 
@@ -1020,6 +1027,19 @@ static void hid_internal_hotplug_exit()
 
 		hid_free_enumeration(hid_hotplug_context.devs);
 		hid_hotplug_context.devs = NULL;
+	}
+
+	/* Destroy the main libusb context while STILL HOLDING `mutex`, so the whole
+	 * teardown is a single transaction. Doing it as a separate step - releasing
+	 * `mutex` here and re-acquiring it just to destroy the context - would open a
+	 * window in which a concurrent hid_hotplug_register_callback() could observe a
+	 * non-NULL usb_context with the machinery already gone, spin up a fresh
+	 * hotplug context and threads, and be orphaned when we then destroy the main
+	 * context: hid_exit() would return with those hotplug threads still running.
+	 * libusb_exit() does not re-enter HIDAPI, so it cannot take `mutex` again. */
+	if (usb_context) {
+		libusb_exit(usb_context);
+		usb_context = NULL;
 	}
 
 	/* `mutex` and the thread states are deliberately NOT destroyed: they are
@@ -1050,34 +1070,15 @@ int HID_API_EXPORT hid_init(void)
 	return 0;
 }
 
-/* Destroys the main libusb context under the hotplug `mutex`: a nested
- * hid_hotplug_register_callback() calls hid_init() while holding that mutex, so
- * it cannot create a new usb_context concurrently with this. */
-static void hid_internal_libusb_exit(void)
-{
-	int locked = (hid_internal_hotplug_lock() == 0);
-
-	if (usb_context) {
-		libusb_exit(usb_context);
-		usb_context = NULL;
-	}
-
-	if (locked) {
-		pthread_mutex_unlock(&hid_hotplug_context.mutex);
-	}
-}
-
 int HID_API_EXPORT hid_exit(void)
 {
-	/* Order matters: the hotplug machinery is torn down - and its event threads
-	 * are joined - BEFORE usb_context is destroyed. The other way around, a
-	 * callback still running on the callback thread could re-enter hid_init()
-	 * through a nested registration and create a NEW usb_context behind our
-	 * back: hid_exit() would return leaving a live context that nothing ever
-	 * frees, and the next hid_init() would silently be a no-op on it. */
+	/* A single transaction under the hotplug `mutex`: the hotplug machinery is
+	 * torn down - and its event threads joined - and the main usb_context is
+	 * destroyed without ever releasing the mutex in between. That keeps a
+	 * concurrent hid_hotplug_register_callback() from either resurrecting
+	 * usb_context behind our back or slipping into a window where the machinery
+	 * is gone but usb_context is not, leaving live hotplug threads orphaned. */
 	hid_internal_hotplug_exit();
-
-	hid_internal_libusb_exit();
 
 	/* Free global error state */
 	pthread_mutex_lock(&hid_global_error_mutex);
@@ -2541,6 +2542,24 @@ static void init_xboxone(libusb_device_handle *device_handle, unsigned short idV
 	}
 }
 
+/* Reattaches the kernel driver detached during a partial initialization, if any.
+ * Shared by every failure path in hidapi_initialize_device() so they cannot drift
+ * apart and leave the device with its kernel driver detached (unusable until
+ * replug). A no-op unless DETACH_KERNEL_DRIVER support actually detached it. */
+static void hidapi_reattach_kernel_driver(hid_device *dev, int interface_num)
+{
+#ifdef DETACH_KERNEL_DRIVER
+	if (dev->is_driver_detached) {
+		int res = libusb_attach_kernel_driver(dev->device_handle, interface_num);
+		if (res < 0)
+			LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
+	}
+#else
+	(void)dev;
+	(void)interface_num;
+#endif
+}
+
 static int hidapi_initialize_device(hid_device *dev, const struct libusb_interface_descriptor *intf_desc, const struct libusb_config_descriptor *conf_desc)
 {
 	int i =0;
@@ -2568,13 +2587,8 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	if (res < 0) {
 		LOG("can't claim interface %d: (%d) %s\n", intf_desc->bInterfaceNumber, res, libusb_error_name(res));
 
-#ifdef DETACH_KERNEL_DRIVER
-		if (dev->is_driver_detached) {
-			res = libusb_attach_kernel_driver(dev->device_handle, intf_desc->bInterfaceNumber);
-			if (res < 0)
-				LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
-		}
-#endif
+		/* The interface was never claimed; just undo the kernel-driver detach. */
+		hidapi_reattach_kernel_driver(dev, intf_desc->bInterfaceNumber);
 		return 0;
 	}
 
@@ -2638,8 +2652,13 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	if (hidapi_thread_create(&dev->thread_state, read_thread, dev) != 0) {
 		/* Without the read thread nothing would ever release the barrier below:
 		 * fail the open instead of blocking in it forever. The caller registers
-		 * the error and destroys the device. */
+		 * the error and destroys the device. Unwind the interface claim and the
+		 * kernel-driver detach we already performed - libusb_close() alone would
+		 * drop the claim but leave the kernel driver detached, i.e. the device
+		 * unusable by the kernel until it is replugged. */
 		LOG("hidapi_initialize_device: couldn't start the read thread\n");
+		libusb_release_interface(dev->device_handle, intf_desc->bInterfaceNumber);
+		hidapi_reattach_kernel_driver(dev, intf_desc->bInterfaceNumber);
 		return 0;
 	}
 
