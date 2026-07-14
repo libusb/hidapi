@@ -2041,15 +2041,6 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	/* Ensure we are ready to actually use the mutex, and lock it to avoid race conditions */
 	hid_internal_hotplug_init_and_lock();
 
-	/* Registration implicitly initializes HIDAPI (as if by hid_init());
-	 * done under the mutex so concurrent registrations do not race in it */
-	if (hid_init() < 0) {
-		/* register_global_error: global error is already set by hid_init */
-		free(hotplug_cb);
-		pthread_mutex_unlock(&hid_hotplug_context.mutex);
-		return -1;
-	}
-
 	/* If a previous generation of the event threads is still winding down (the
 	 * last callback was removed from the event thread itself, so its join had to
 	 * be deferred), finish it before starting a new one */
@@ -2061,6 +2052,26 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			/* Another thread has claimed the join: wait for it to be done */
 			hid_internal_hotplug_wait_shutdown();
 		}
+	}
+
+	/* Registration implicitly initializes HIDAPI (as if by hid_init()); done
+	 * under the mutex so concurrent registrations do not race in it.
+	 *
+	 * Deliberately AFTER the wind-down loop above: both finish_shutdown() and
+	 * wait_shutdown() release `mutex` while a concurrent hid_exit() runs, and that
+	 * teardown is a single transaction that NULLs usb_context before it hands the
+	 * mutex back. A registration that parked in the loop therefore resumes with
+	 * usb_context possibly already destroyed; (re)creating it here - after the wait
+	 * has returned, still under `mutex`, and before hid_internal_enumerate()
+	 * dereferences it through libusb_get_device_list(usb_context, ...) -
+	 * re-establishes a consistent context instead of proceeding against a NULL one.
+	 * hid_init() is idempotent, so this is a no-op on the common path where no
+	 * teardown intervened. */
+	if (hid_init() < 0) {
+		/* register_global_error: global error is already set by hid_init */
+		free(hotplug_cb);
+		pthread_mutex_unlock(&hid_hotplug_context.mutex);
+		return -1;
 	}
 
 	/* Handles are never reused, as a stale handle must not silently address a
