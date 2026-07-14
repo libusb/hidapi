@@ -661,7 +661,15 @@ next_line:
 
 /* quiet: don't touch the global error string - for the callers on HIDAPI's
    internal monitor thread, which never writes it (see hidapi.h) */
-static struct hid_device_info * create_device_info_for_device(struct udev_device *raw_dev, int quiet)
+/* Build the hid_device_info chain (one entry per usage) for a single udev device
+   node. Returns NULL both for benign exclusions (no HID parent, an unparseable
+   uevent, an unhandled bus type - exactly what hid_enumerate() would also skip)
+   and for genuine resource failures. When `failure` is non-NULL it is set to 1
+   ONLY in the latter case, so a caller that needs an authoritative, complete
+   enumeration (the monitor-thread reconcile) can tell a device that is
+   legitimately absent from one that merely failed to materialize. It is never
+   cleared here, so callers accumulate it across a whole enumeration. */
+static struct hid_device_info * create_device_info_for_device(struct udev_device *raw_dev, int quiet, int *failure)
 {
 	struct hid_device_info *root = NULL;
 	struct hid_device_info *cur_dev = NULL;
@@ -721,8 +729,14 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 
 	/* Create the record. */
 	root = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
-	if (!root)
+	if (!root) {
+		/* A genuine resource failure, unlike the benign NULL returns above:
+		   flag it for callers that require an all-or-nothing enumeration. */
+		if (failure) {
+			*failure = 1;
+		}
 		goto end;
+	}
 
 	cur_dev = root;
 
@@ -855,8 +869,14 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			struct hid_device_info *tmp = (struct hid_device_info*) calloc(1, sizeof(struct hid_device_info));
 			struct hid_device_info *prev_dev = cur_dev;
 
-			if (!tmp)
+			if (!tmp) {
+				/* Out of memory mid-device: the returned chain would be
+				   incomplete, so flag it for all-or-nothing callers. */
+				if (failure) {
+					*failure = 1;
+				}
 				break;
+			}
 			cur_dev->next = tmp;
 			cur_dev = tmp;
 
@@ -909,7 +929,7 @@ static struct hid_device_info * create_device_info_for_hid_device(hid_device *de
 	/* Open a udev device from the dev_t. 'c' means character device. */
 	udev_dev = udev_device_new_from_devnum(udev, 'c', s.st_rdev);
 	if (udev_dev) {
-		root = create_device_info_for_device(udev_dev, 0);
+		root = create_device_info_for_device(udev_dev, 0, NULL);
 	}
 
 	if (!root) {
@@ -950,7 +970,17 @@ enum hid_hotplug_thread_state {
 	   published its exit and hid_exit() returned, it could still be running its
 	   own epilogue (unlock/return) in the library's text when the application
 	   calls dlclose(), i.e. resume in unmapped code. */
-	HID_HOTPLUG_THREAD_FINISHED
+	HID_HOTPLUG_THREAD_FINISHED,
+	/* A reaper has claimed the finished thread and is joining its pthread_t
+	   with the hotplug mutex RELEASED (see hid_internal_hotplug_join_thread).
+	   The join must not run under the mutex: the exiting monitor thread may
+	   still run thread-specific-data destructors that a user callback armed
+	   while running on it, and such a destructor re-entering HIDAPI (taking the
+	   hotplug mutex) would deadlock a joiner that held it. Publishing this
+	   transient state under the mutex makes the claim exactly-once - a
+	   concurrent reaper observes it and backs off rather than joining the same
+	   pthread_t twice (which is undefined behavior). */
+	HID_HOTPLUG_THREAD_JOINING
 };
 
 static struct hid_hotplug_context {
@@ -1059,12 +1089,20 @@ static void hid_internal_hotplug_release_monitor(void)
    as its last write under the mutex) but has not been joined yet, turning its
    state to HID_HOTPLUG_THREAD_NONE. Called with the mutex held.
 
-   The join is performed WITH the mutex held: a finished thread needs nothing
-   further from the mutex (it released the monitoring context and published
-   FINISHED before unlocking, then only runs unlock/return), so joining under
-   the mutex cannot deadlock and naturally serializes concurrent reapers -
-   whoever loses the race for the mutex observes HID_HOTPLUG_THREAD_NONE and
-   returns, so the pthread_t is joined exactly once.
+   The claim on the finished thread is made under the mutex (FINISHED -> JOINING,
+   an exactly-once flip), but the pthread_join() itself runs with the mutex
+   RELEASED, then the mutex is re-acquired and the state advanced to NONE. The
+   join must not hold the mutex: the finished monitor thread has already released
+   everything it owned and published FINISHED, so all that can still execute on
+   it is its epilogue and any thread-specific-data destructors a user callback
+   armed while running on it - and such a destructor re-entering HIDAPI would
+   block on the hotplug mutex forever if the joiner held it, deadlocking the
+   join. With the mutex released the destructor takes it, runs, and the thread
+   terminates so the join can complete. A concurrent reaper observes JOINING (not
+   FINISHED) and backs off, so the pthread_t is joined exactly once; a caller in
+   hid_internal_hotplug_cleanup waits out the JOINING window before it can reach
+   NONE. Because the mutex is dropped, callers must re-validate cached state after
+   this returns (hid_internal_hotplug_cleanup already does).
 
    Never runs on the monitor thread itself: the thread becomes FINISHED only
    after it has stopped dispatching, and the callers below are gated by
@@ -1072,11 +1110,29 @@ static void hid_internal_hotplug_release_monitor(void)
    joiner. */
 static void hid_internal_hotplug_join_thread(void)
 {
+	pthread_t thread;
+
 	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_FINISHED) {
 		return;
 	}
 
-	pthread_join(hid_hotplug_context.thread, NULL);
+	/* Never join from the monitor thread itself. A thread-specific-data
+	   destructor armed by a user callback runs on the monitor thread AFTER it
+	   published FINISHED - so mutex_in_use (a dispatch in flight) no longer
+	   guards this path - and if that destructor re-enters HIDAPI and reaches
+	   here, joining would be a self-join (undefined behavior / EDEADLK). Leave
+	   the thread FINISHED for an application-thread reaper - hid_exit() or the
+	   next register/deregister - to join. */
+	if (pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
+		return;
+	}
+
+	/* Claim the join exactly-once under the mutex, then join WITHOUT it. */
+	thread = hid_hotplug_context.thread;
+	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_JOINING;
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	pthread_join(thread, NULL);
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
 }
 
@@ -1114,9 +1170,12 @@ static void hid_internal_hotplug_cleanup(void)
 			return;
 		}
 
-		/* HID_HOTPLUG_THREAD_RUNNING: drop the mutex so the thread can acquire
-		   it, observe the empty callback list, release the monitoring context
-		   and publish FINISHED; then re-evaluate and join from scratch */
+		/* HID_HOTPLUG_THREAD_RUNNING (the thread has not yet noticed the empty
+		   callback list) or HID_HOTPLUG_THREAD_JOINING (another reaper is joining
+		   the finished thread with the mutex released): drop the mutex so that
+		   thread / that reaper can make progress, then re-evaluate. The loser of
+		   a join race waits here until the winner publishes
+		   HID_HOTPLUG_THREAD_NONE, so the pthread_t is joined exactly once. */
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		poll(NULL, 0, 1);
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
@@ -1386,10 +1445,21 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 		}
 
 		raw_dev = udev_device_new_from_syspath(udev, sysfs_path);
-		if (!raw_dev)
+		if (!raw_dev) {
+			/* A path the scan just listed no longer resolves to a udev device:
+			   the enumeration is no longer a complete, authoritative snapshot.
+			   Flag it so an all-or-nothing caller (the monitor-thread reconcile
+			   in hid_internal_hotplug_recover_monitor) discards the partial
+			   result instead of mistaking the missing entries for departures.
+			   hid_enumerate() passes failure == NULL and keeps its long-standing
+			   best-effort behavior. */
+			if (failure) {
+				*failure = 1;
+			}
 			continue;
+		}
 
-		tmp = create_device_info_for_device(raw_dev, quiet);
+		tmp = create_device_info_for_device(raw_dev, quiet, failure);
 		if (tmp) {
 			if (cur_dev) {
 				cur_dev->next = tmp;
@@ -1570,6 +1640,56 @@ static struct hid_device_info *hid_internal_find_device_by_path(const char *path
 	return hid_internal_find_device_in_list(hid_hotplug_context.devs, path);
 }
 
+/* NULL-safe wide-string equality (two NULL pointers compare equal). */
+static int hid_internal_wcs_equal(const wchar_t *a, const wchar_t *b)
+{
+	if (a == NULL || b == NULL) {
+		return a == b;
+	}
+	return wcscmp(a, b) == 0;
+}
+
+/* Whether two device-info entries describe the SAME physical connection, not
+   merely the same devnode path. While the udev event transport is down, the
+   device on a given /dev/hidrawN may be unplugged and a different one plugged
+   into the same node: the path is then identical but the connection is not.
+   Reconcile must tell these apart - matching on the path alone would keep the
+   stale entry and miss BOTH the old device's LEFT and the new device's ARRIVED -
+   so it also compares the stable per-connection identity udev reports:
+   vid/pid/serial/release/interface/bus. Usage page and usage are deliberately
+   excluded, so that the several usage entries of one physical device all share a
+   single connection identity (they arrive and leave together). */
+static int hid_internal_same_connection(const struct hid_device_info *a, const struct hid_device_info *b)
+{
+	if (a->path == NULL || b->path == NULL) {
+		if (a->path != b->path) {
+			return 0;
+		}
+	} else if (strcmp(a->path, b->path) != 0) {
+		return 0;
+	}
+	return a->vendor_id == b->vendor_id
+		&& a->product_id == b->product_id
+		&& a->release_number == b->release_number
+		&& a->interface_number == b->interface_number
+		&& a->bus_type == b->bus_type
+		&& hid_internal_wcs_equal(a->serial_number, b->serial_number);
+}
+
+/* First entry in `list` describing the same physical connection as `entry`, or
+   NULL. Used only by reconcile (see hid_internal_same_connection); the live
+   add/remove paths match on the devnode path alone, since a udev "remove" event
+   carries only that. */
+static struct hid_device_info *hid_internal_find_same_connection(struct hid_device_info *list, const struct hid_device_info *entry)
+{
+	for (struct hid_device_info *device = list; device; device = device->next) {
+		if (hid_internal_same_connection(device, entry)) {
+			return device;
+		}
+	}
+	return NULL;
+}
+
 /* Handle a device arrival: update the connected-device cache and dispatch the
    callbacks. Takes ownership of the whole device chain (one entry per usage).
    Only ever runs on the monitor thread, with the mutex held. */
@@ -1690,6 +1810,7 @@ static void hid_internal_hotplug_reconcile(struct hid_device_info *fresh)
 	   (see hid_internal_hotplug_process_arrival). */
 	hid_hotplug_callback_handle dispatch_bound = hid_hotplug_context.next_handle - 1;
 	struct hid_device_info *old = hid_hotplug_context.devs;
+	struct hid_device_info **link;
 
 	/* Adopt the fresh enumeration as the cache up front: a callback registered
 	   from within one of the dispatches below (handle beyond dispatch_bound, so
@@ -1697,33 +1818,50 @@ static void hid_internal_hotplug_reconcile(struct hid_device_info *fresh)
 	   snapshot instead - keeping every arrival/departure exactly-once. */
 	hid_hotplug_context.devs = fresh;
 
-	/* ARRIVED for every fresh usage entry whose device was not cached. Membership
-	   is tested against the still-intact `old` cache. A COPY is dispatched (one
-	   entry, next == NULL) so the adopted cache chain stays walkable. */
-	for (struct hid_device_info *device = fresh; device != NULL; device = device->next) {
+	/* ARRIVED for every fresh usage entry whose connection was not cached.
+	   Membership is tested against the still-intact `old` cache on the stable
+	   connection identity, NOT the devnode path alone: a device swapped for a
+	   different one on the same /dev/hidrawN during the outage is thus reported
+	   as ARRIVED(new) here and LEFT(old) below, instead of being mistaken for the
+	   unchanged presence of the old device. A COPY (one entry, next == NULL) is
+	   dispatched so the adopted cache chain stays walkable. If the copy cannot be
+	   allocated the arrival cannot be announced, so the entry is DROPPED from the
+	   adopted cache as well: leaving it in would later fabricate a LEFT for a
+	   device the callbacks never saw arrive. */
+	link = &hid_hotplug_context.devs;
+	while (*link != NULL) {
+		struct hid_device_info *device = *link;
 		struct hid_device_info *copy;
-		if (hid_internal_find_device_in_list(old, device->path) != NULL) {
+		if (hid_internal_find_same_connection(old, device) != NULL) {
+			link = &device->next;
 			continue;
 		}
 		copy = hid_internal_copy_device_info(device);
 		if (copy == NULL) {
-			/* Out of memory: this arrival is simply not reported (as in
-			   hid_internal_hotplug_process_arrival) */
+			/* Out of memory: neither announce nor silently keep this arrival. */
+			*link = device->next;
+			device->next = NULL;
+			hid_free_enumeration(device);
 			continue;
 		}
 		copy->next = NULL;
 		hid_internal_invoke_callbacks(copy, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, dispatch_bound);
 		hid_free_enumeration(copy);
+		link = &device->next;
 	}
 
-	/* LEFT for every cached usage entry whose device is gone from `fresh`, then
-	   free the old cache. Membership is tested against `fresh`. */
+	/* LEFT for every cached usage entry whose connection is gone from the
+	   reconciled cache, then free the old cache. Membership is tested against the
+	   adopted cache (hid_hotplug_context.devs, not the possibly-dangling `fresh`
+	   head after a drop above) on the same connection identity. A dropped-on-OOM
+	   arrival was never in `old`, so it can never match one of these old entries -
+	   testing against the reduced cache cannot miss a real departure. */
 	while (old != NULL) {
 		struct hid_device_info *info = old;
 		old = info->next;
 		/* One usage entry per invocation: the callback always sees next == NULL */
 		info->next = NULL;
-		if (hid_internal_find_device_in_list(fresh, info->path) == NULL) {
+		if (hid_internal_find_same_connection(hid_hotplug_context.devs, info) == NULL) {
 			hid_internal_invoke_callbacks(info, HID_API_HOTPLUG_EVENT_DEVICE_LEFT, dispatch_bound);
 		}
 		hid_free_enumeration(info);
@@ -1747,8 +1885,27 @@ static int hid_internal_hotplug_recover_monitor(int *new_fd)
 	int failure = 0;
 	struct hid_device_info *fresh;
 
+	/* Re-enumerate FIRST, off an independent udev context, BEFORE any
+	   replacement monitor starts receiving. Doing it in this order means a
+	   monitor is enabled for receiving only on a path that goes on to commit, so
+	   a monitor that has begun queueing real events is never built and then
+	   thrown away (which would discard those events). A failure here - a broken
+	   udev, or a partial/non-authoritative enumeration (see
+	   hid_internal_enumerate): reconciling against an incomplete set would
+	   fabricate departures for still-present devices - aborts the attempt with
+	   the dead monitor and the cache left untouched for the caller to retry. An
+	   empty result is NOT a failure: it means every cached device genuinely left,
+	   which the reconcile below reports as real LEFTs. Quiet: this runs on the
+	   monitor thread, which never writes the global error string (see hidapi.h). */
+	fresh = hid_internal_enumerate(0, 0, 1 /* quiet */, &failure);
+	if (failure) {
+		hid_free_enumeration(fresh);
+		return -1;
+	}
+
 	udev_ctx = udev_new();
 	if (!udev_ctx) {
+		hid_free_enumeration(fresh);
 		return -1;
 	}
 	mon = udev_monitor_new_from_netlink(udev_ctx, "udev");
@@ -1760,18 +1917,7 @@ static int hid_internal_hotplug_recover_monitor(int *new_fd)
 			udev_monitor_unref(mon);
 		}
 		udev_unref(udev_ctx);
-		return -1;
-	}
-
-	/* Enumerate BEFORE committing anything: a failure here (a broken udev, not
-	   an empty system) leaves the dead monitor and the cache untouched so the
-	   caller can retry. An empty result is not a failure - it means every cached
-	   device genuinely left, which the reconcile below reports as real LEFTs. */
-	fresh = hid_internal_enumerate(0, 0, 1 /* quiet */, &failure);
-	if (failure) {
 		hid_free_enumeration(fresh);
-		udev_monitor_unref(mon);
-		udev_unref(udev_ctx);
 		return -1;
 	}
 
@@ -1808,7 +1954,7 @@ static void hid_internal_hotplug_process_event(struct udev_device *raw_dev)
 		   invisible to hid_enumerate(); there is nothing meaningful to
 		   deliver instead. quiet: this runs on the monitor thread, which
 		   never writes the global error string (see hidapi.h). */
-		hid_internal_hotplug_process_arrival(create_device_info_for_device(raw_dev, 1));
+		hid_internal_hotplug_process_arrival(create_device_info_for_device(raw_dev, 1, NULL));
 	} else if (!strcmp(action, "remove")) {
 		const char *devnode = udev_device_get_devnode(raw_dev);
 		char devnode_buf[32];
