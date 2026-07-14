@@ -476,10 +476,21 @@ extern "C" {
 			@par Thread safety
 
 			hid_hotplug_register_callback() and hid_hotplug_deregister_callback()
-			are thread-safe. They may be called from any thread, including
-			from within a hotplug callback. This is a deliberate exception
-			to HIDAPI's general "not thread-safe" rule (see the
+			are thread-safe with respect to each other and to HIDAPI's
+			internal hotplug machinery. They may be called from any thread,
+			including from within a hotplug callback. This is a deliberate
+			exception to HIDAPI's general "not thread-safe" rule (see the
 			Multi-threading Notes in the project wiki).
+
+			The one caveat is the global error string: on failure these two
+			functions set it, like every other HIDAPI function that reports
+			an error via hid_error(NULL). They therefore have to be
+			serialized against hid_error(NULL) - which the application is
+			already required to serialize across all threads - even though
+			they need no serialization against each other. HIDAPI's own
+			internal threads never write the global error string, so an
+			application that serializes its own hid_error(NULL) calls
+			against its other HIDAPI calls is safe.
 
 			The first successful call to hid_hotplug_register_callback()
 			starts HIDAPI's internal hotplug machinery (on most platforms an
