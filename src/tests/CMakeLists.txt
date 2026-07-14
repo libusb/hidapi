@@ -48,9 +48,59 @@ function(hidapi_add_vdev_test name provider backend)
     )
 endfunction()
 
+# Define a tier-1 hotplug-API test <name> built from test_hotplug_api.c only
+# (NO virtual-device provider: it needs no device and no privileges, so it runs
+# in the ordinary CI matrix), linked against the HIDAPI <backend>. It
+# self-skips (77) when the backend reports hotplug as unsupported at runtime
+# (e.g. a libusb without LIBUSB_CAP_HAS_HOTPLUG).
+function(hidapi_add_hotplug_api_test name backend)
+    add_executable(${name} test_hotplug_api.c)
+    set_target_properties(${name} PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED TRUE
+    )
+    target_link_libraries(${name} PRIVATE ${backend} Threads::Threads)
+    if(HIDAPI_ENABLE_ASAN AND NOT MSVC)
+        target_link_options(${name} PRIVATE -fsanitize=address)
+    endif()
+    add_test(NAME ${name} COMMAND ${name})
+    set_tests_properties(${name} PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 120
+    )
+endfunction()
+
+# Define a tier-2 (device-backed) hotplug test <name> built from
+# test_hotplug.c + <provider>. Self-skips when no virtual device can be
+# created here, when the backend reports hotplug as unsupported, or when the
+# provider cannot toggle device presence (test_virtual_device_unplug/_replug);
+# currently only the uhid provider implements presence toggling.
+# <event_timeout_ms> is the per-event wait budget inside the test;
+# <ctest_timeout> bounds the whole run.
+function(hidapi_add_hotplug_test name provider backend event_timeout_ms ctest_timeout)
+    add_executable(${name} test_hotplug.c ${provider})
+    set_target_properties(${name} PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED TRUE
+    )
+    target_compile_definitions(${name} PRIVATE
+        TEST_HOTPLUG_EVENT_TIMEOUT_MS=${event_timeout_ms})
+    target_link_libraries(${name} PRIVATE ${backend} Threads::Threads)
+    if(HIDAPI_ENABLE_ASAN AND NOT MSVC)
+        target_link_options(${name} PRIVATE -fsanitize=address)
+    endif()
+    add_test(NAME ${name} COMMAND ${name})
+    set_tests_properties(${name} PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT ${ctest_timeout}
+    )
+endfunction()
+
 # --- Linux: hidraw backend via /dev/uhid -----------------------------------
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND TARGET hidapi_hidraw)
     hidapi_add_vdev_test(DeviceIO_hidraw test_virtual_device_uhid.c hidapi_hidraw)
+    hidapi_add_hotplug_api_test(HotplugAPI_hidraw hidapi_hidraw)
+    hidapi_add_hotplug_test(Hotplug_hidraw test_virtual_device_uhid.c hidapi_hidraw 10000 120)
 endif()
 
 # --- Linux: libusb backend via /dev/raw-gadget (+ dummy_hcd) ----------------
@@ -58,22 +108,30 @@ endif()
 # self-skips unless the raw-gadget virtual device has been set up (CI job).
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND TARGET hidapi_libusb)
     hidapi_add_vdev_test(DeviceIO_libusb test_virtual_device_rawgadget.c hidapi_libusb)
+    hidapi_add_hotplug_api_test(HotplugAPI_libusb hidapi_libusb)
+    # Self-skips until the rawgadget provider implements unplug/replug; the
+    # generous budgets anticipate the full (virtual) USB stack round trips.
+    hidapi_add_hotplug_test(Hotplug_libusb test_virtual_device_rawgadget.c hidapi_libusb 30000 300)
 endif()
 
 # --- Windows: winapi backend via a modified vhidmini2 UMDF driver -----------
 if(WIN32 AND TARGET hidapi_winapi)
     hidapi_add_vdev_test(DeviceIO_winapi test_virtual_device_win.c hidapi_winapi)
+    hidapi_add_hotplug_api_test(HotplugAPI_winapi hidapi_winapi)
+    # Self-skips until the vhidmini2 provider implements unplug/replug.
+    hidapi_add_hotplug_test(Hotplug_winapi test_virtual_device_win.c hidapi_winapi 30000 300)
     # HidD_GetPreparsedData / HidP_GetCaps used by the Windows provider.
     target_link_libraries(DeviceIO_winapi PRIVATE hid)
+    target_link_libraries(Hotplug_winapi PRIVATE hid)
     # Run from the directory holding the hidapi DLL so a shared build can find
     # it at launch (there is no rpath on Windows).
-    set_tests_properties(DeviceIO_winapi PROPERTIES
+    set_tests_properties(DeviceIO_winapi HotplugAPI_winapi Hotplug_winapi PROPERTIES
         WORKING_DIRECTORY "$<TARGET_FILE_DIR:hidapi_winapi>")
     # With ASan (MSVC) the test exe needs the ASan runtime DLL, which lives next
     # to the MSVC tools; add it to PATH (CMake >= 3.22).
     if(HIDAPI_ENABLE_ASAN AND MSVC AND NOT CMAKE_VERSION VERSION_LESS "3.22")
         get_filename_component(MSVC_BUILD_TOOLS_DIR "${CMAKE_LINKER}" DIRECTORY)
-        set_property(TEST DeviceIO_winapi PROPERTY
+        set_property(TEST DeviceIO_winapi HotplugAPI_winapi Hotplug_winapi PROPERTY
             ENVIRONMENT_MODIFICATION "PATH=path_list_append:${MSVC_BUILD_TOOLS_DIR}")
     endif()
 endif()
@@ -83,6 +141,11 @@ endif()
 # available (e.g. hosted CI runners); usable locally / on a self-hosted Mac.
 if(APPLE AND TARGET hidapi_darwin)
     hidapi_add_vdev_test(DeviceIO_darwin test_virtual_device_mac.c hidapi_darwin)
+    hidapi_add_hotplug_api_test(HotplugAPI_darwin hidapi_darwin)
+    # Self-skips until the IOHIDUserDevice provider implements unplug/replug.
+    hidapi_add_hotplug_test(Hotplug_darwin test_virtual_device_mac.c hidapi_darwin 30000 300)
     target_link_libraries(DeviceIO_darwin PRIVATE
+        "-framework IOKit" "-framework CoreFoundation")
+    target_link_libraries(Hotplug_darwin PRIVATE
         "-framework IOKit" "-framework CoreFoundation")
 endif()

@@ -96,6 +96,26 @@ hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeou
 void test_virtual_device_destroy(test_virtual_device *dev);
 
 /*
+ * Make the device disappear from the system (as if physically unplugged)
+ * WITHOUT destroying the test_virtual_device context: the context stays valid
+ * and the device can be re-plugged later with test_virtual_device_replug().
+ * Used by the hotplug tests to generate disconnect/reconnect events.
+ *
+ * Returns TEST_VDEV_OK on success, TEST_VDEV_UNAVAILABLE when this provider
+ * cannot toggle device presence (the caller should then skip the test), or
+ * TEST_VDEV_ERROR on a hard failure.
+ */
+int test_virtual_device_unplug(test_virtual_device *dev);
+
+/*
+ * Make an unplugged device reappear, with the same VID/PID/serial (the
+ * platform device path MAY differ from the previous appearance). Only valid
+ * after a successful test_virtual_device_unplug(). Same return codes as
+ * test_virtual_device_unplug().
+ */
+int test_virtual_device_replug(test_virtual_device *dev);
+
+/*
  * Trigger a pre-recorded scenario on the device by sending the given command
  * as the first byte of a Feature report, using the ordinary public HIDAPI
  * hid_send_feature_report(). The exact wire length of a feature report is

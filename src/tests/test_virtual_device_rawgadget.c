@@ -808,3 +808,17 @@ void test_virtual_device_destroy(test_virtual_device *dev)
 	pthread_mutex_destroy(&dev->lock);
 	free(dev);
 }
+
+/* Unplug/replug (device-presence toggling for the hotplug tests) is not
+ * implemented for this provider yet; the hotplug tests self-skip here. */
+int test_virtual_device_unplug(test_virtual_device *dev)
+{
+	(void)dev;
+	return TEST_VDEV_UNAVAILABLE;
+}
+
+int test_virtual_device_replug(test_virtual_device *dev)
+{
+	(void)dev;
+	return TEST_VDEV_UNAVAILABLE;
+}

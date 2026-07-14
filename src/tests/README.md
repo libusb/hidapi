@@ -22,6 +22,47 @@ command bytes, expected payloads).
 | Test | What it exercises |
 |------|-------------------|
 | `test_device_io.c` | open → write an output report → trigger+read input reports (Feature-report write, then input-report read-back) → close |
+| `test_hotplug_api.c` | tier-1 hotplug API contract, no device needed: argument validation, handle properties, implicit init, `hid_exit()` teardown, register/deregister thread churn |
+| `test_hotplug.c` | tier-2 hotplug scenarios against a virtual device whose presence is toggled: async delivery, exactly-once ENUMERATE pass, callback-return deregistration, pass-before-live ordering, payloads, filtering, dispatch order, deregistration post-condition, re-entrant registration |
+
+## Hotplug tests
+
+The hotplug tests come in two tiers:
+
+* **Tier 1 — `HotplugAPI_<backend>`** (`test_hotplug_api.c`): everything in the
+  hotplug contract observable *without* a device event. Needs no virtual
+  device, no privileges, so it runs against **every** backend in the ordinary
+  per-push CI matrix. Self-skips (77) when the backend reports hotplug as
+  unsupported at runtime (e.g. a libusb without `LIBUSB_CAP_HAS_HOTPLUG`).
+* **Tier 2 — `Hotplug_<backend>`** (`test_hotplug.c`): device-backed hotplug
+  scenarios. On top of a virtual device, the provider must be able to *toggle
+  the device's presence* (`test_virtual_device_unplug()` /
+  `test_virtual_device_replug()` in `test_virtual_device.h`). Currently only
+  the **uhid** provider implements toggling (a `UHID_DESTROY` /
+  `UHID_CREATE2` pair on the same open `/dev/uhid` fd), so `Hotplug_hidraw`
+  is the one tier-2 test that actually runs (in `builds.yml`'s ubuntu-cmake
+  job, like `DeviceIO_hidraw`); the other providers return
+  `TEST_VDEV_UNAVAILABLE` from the toggle calls and their `Hotplug_*` tests
+  self-skip everywhere until presence toggling is implemented for them.
+
+| Test | Runs per-push in `builds.yml` | Notes |
+|------|-------------------------------|-------|
+| `HotplugAPI_hidraw` | yes (ubuntu-cmake) | |
+| `HotplugAPI_libusb` | yes (ubuntu-cmake) | needs libusb hotplug support at runtime |
+| `HotplugAPI_winapi` | yes (windows-cmake, MSVC/NMake/ClangCL/MinGW) | |
+| `HotplugAPI_darwin` | yes (macos-cmake) | |
+| `Hotplug_hidraw` | yes (ubuntu-cmake, via `uhid`) | the only tier-2 test that runs today |
+| `Hotplug_libusb` | builds, self-skips | needs rawgadget unplug/replug (future) |
+| `Hotplug_winapi` | builds, self-skips | needs driver-side presence toggling (future) |
+| `Hotplug_darwin` | builds, self-skips | needs `IOHIDUserDevice` re-creation (future) |
+
+The tier-2 test is written against strict synchronization rules (hotplug tests
+are notoriously flaky otherwise): callbacks only deep-copy the event into a
+log under a lock; every expectation is awaited with a deadline-based predicate
+poll (never a bare sleep); the *absence* of an event is asserted behind an
+**event barrier** — a later event that is provably ordered after the missing
+one — never behind a time window; and a missed event within the (generous)
+budget is treated as a bug, not retried.
 
 ## Providers
 
@@ -90,6 +131,9 @@ cmake -B build -S . -DHIDAPI_WITH_TESTS=ON
 cmake --build build
 sudo modprobe uhid
 sudo ctest --test-dir build -R DeviceIO_hidraw --output-on-failure
+sudo ctest --test-dir build -R Hotplug_hidraw --output-on-failure
+# tier-1 hotplug API tests need no device and no root:
+ctest --test-dir build -R HotplugAPI --output-on-failure
 ```
 
 On Windows/macOS configure with `-DHIDAPI_WITH_TESTS=ON` and run `ctest`; the
