@@ -940,10 +940,7 @@ enum hid_hotplug_thread_state {
 	/* No monitor thread, nothing to join */
 	HID_HOTPLUG_THREAD_NONE,
 	/* The monitor thread is running */
-	HID_HOTPLUG_THREAD_RUNNING,
-	/* The monitor thread has released the monitoring context, announced its
-	   exit and no longer touches any shared state; it awaits pthread_join */
-	HID_HOTPLUG_THREAD_FINISHED
+	HID_HOTPLUG_THREAD_RUNNING
 };
 
 static struct hid_hotplug_context {
@@ -973,12 +970,6 @@ static struct hid_hotplug_context {
 	unsigned char exiting;
 	/* The udev monitor socket died; no more events (see hotplug_thread) */
 	unsigned char monitor_dead;
-
-	/* The number of threads waiting inside hid_internal_hotplug_cleanup() for
-	   the monitor thread to wind down. While it is non-zero, the thread stays
-	   joinable and one of the waiters joins it; with nobody waiting, it
-	   detaches itself instead (see hotplug_thread) */
-	unsigned int thread_waiters;
 
 	/* HIDAPI unique callback handle counter */
 	hid_hotplug_callback_handle next_handle;
@@ -1054,10 +1045,11 @@ static void hid_internal_hotplug_release_monitor(void)
 	hid_hotplug_context.monitor_fd = -1;
 }
 
-/* Reaps the monitor thread and releases the monitoring context once the last
-   callback is gone. Called with the mutex held exactly once (and not in use);
-   the mutex is temporarily dropped while waiting for/joining the thread, so
-   the caller must re-validate any cached state after this returns. */
+/* Waits for the monitor thread to wind down once the last callback is gone (it
+   releases the monitoring context itself: it is detached, and nothing can
+   join it - see hotplug_thread). Called with the mutex held exactly once (and
+   not in use); the mutex is temporarily dropped while waiting for the thread,
+   so the caller must re-validate any cached state after this returns. */
 static void hid_internal_hotplug_cleanup(void)
 {
 	if (hid_hotplug_context.mutex_in_use) {
@@ -1065,47 +1057,23 @@ static void hid_internal_hotplug_cleanup(void)
 	}
 
 	for (;;) {
-		pthread_t thread;
-
 		/* Before checking if the list is empty, clear any entries whose removal was postponed first */
 		hid_internal_hotplug_remove_postponed();
 
 		if (hid_hotplug_context.hotplug_cbs != NULL || hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_NONE) {
-			/* Still serving callbacks, no thread to reap, or a concurrent
-			   caller reaped it already (and possibly started a new context) */
-			return;
-		}
-
-		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
-			/* Claim the join, so no concurrent caller joins the thread twice */
-			thread = hid_hotplug_context.thread;
-			hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
-
-			/* The thread no longer touches the shared state once it has
-			   announced itself FINISHED (under this mutex) */
-			hid_internal_hotplug_release_monitor();
-
-			/* Never block in pthread_join while holding the mutex */
-			pthread_mutex_unlock(&hid_hotplug_context.mutex);
-			pthread_join(thread, NULL);
-			pthread_mutex_lock(&hid_hotplug_context.mutex);
+			/* Still serving callbacks, or no thread is running - either it
+			   never started, or it has released the monitoring context and
+			   announced its exit (and a concurrent caller may already have
+			   started a new one) */
 			return;
 		}
 
 		/* HID_HOTPLUG_THREAD_RUNNING: drop the mutex so the thread can acquire
-		   it, observe the empty callback list and announce its exit, then
-		   re-evaluate from scratch.
-		   Announcing the wait keeps the thread joinable: with nobody waiting
-		   for it, it detaches itself (see hotplug_thread). The thread reads
-		   the counter under this mutex, which is held continuously from the
-		   decrement below to the next increment (or to a return, which leaves
-		   the list non-empty or the thread already reaped), so it can never
-		   observe a waiter that is in fact waiting. */
-		hid_hotplug_context.thread_waiters++;
+		   it, observe the empty callback list, release the monitoring context
+		   and announce its exit; then re-evaluate from scratch */
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		poll(NULL, 0, 1);
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
-		hid_hotplug_context.thread_waiters--;
 	}
 }
 
@@ -1714,14 +1682,20 @@ static void hid_internal_hotplug_process_event(struct udev_device *raw_dev)
 
 static void* hotplug_thread(void* user_data)
 {
-	/* The monitor file descriptor is immutable while this thread runs: it is
-	   set up before the thread starts and released only after it is joined
-	   (or by this thread itself, once it stops polling the descriptor) */
-	const int monitor_fd = hid_hotplug_context.monitor_fd;
+	int monitor_fd;
 	int socket_error_polls = 0;
 	int socket_dead = 0;
 
 	(void) user_data;
+
+	/* The monitor file descriptor is immutable while this thread runs: it is
+	   set up before the thread is started and released either by this thread
+	   itself or after it announced its exit. It is read under the mutex all
+	   the same: an unsynchronized read here would race the setup of the next
+	   monitoring context (whose registration this thread cannot have seen). */
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	monitor_fd = hid_hotplug_context.monitor_fd;
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	/* This thread takes the mutex with trylock only: it must never block on
 	   the mutex, so that it always makes progress towards its exit check
@@ -1753,22 +1727,10 @@ static void* hotplug_thread(void* user_data)
 			   claimant repeating it is a no-op. */
 			hid_internal_hotplug_release_monitor();
 			hid_hotplug_context.monitor_dead = 0;
-			if (hid_hotplug_context.thread_waiters > 0) {
-				/* A hotplug call is waiting inside
-				   hid_internal_hotplug_cleanup() to reap this thread: stay
-				   joinable and let it claim the join */
-				hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_FINISHED;
-			}
-			else {
-				/* Nobody is waiting for this thread, and nobody ever may: the
-				   last callback can have deregistered itself from within a
-				   callback - i.e. on this very thread - after which the
-				   application is not required to make any further hotplug
-				   call. Release the thread instead of leaving it unjoined
-				   forever: nothing is left to reap */
-				pthread_detach(pthread_self());
-				hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
-			}
+			/* This thread is detached: nothing is left to reap once it
+			   announces its exit (it touches no shared state below this
+			   point, and everything it owned has just been released) */
+			hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
 			stop = 1;
 		} else {
 			if (socket_dead && !hid_hotplug_context.monitor_dead) {
@@ -2062,8 +2024,25 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		/* Don't forget to actually register the callback */
 		hid_hotplug_context.hotplug_cbs = hotplug_cb;
 
-		/* Start the thread that will be doing the event scanning */
-		if (pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL) != 0) {
+		/* Start the thread that will be doing the event scanning.
+		   The thread is detached: when the last callback deregisters itself
+		   from within a callback, the thread winds down on its own and no
+		   further hotplug call - which is what would join it - is guaranteed
+		   to ever come. It releases the monitoring context and announces
+		   HID_HOTPLUG_THREAD_NONE under the mutex before it returns, so
+		   nothing it owns or touches can outlive hid_exit(). */
+		pthread_attr_t attr;
+		int thread_error = 1;
+
+		if (pthread_attr_init(&attr) == 0) {
+			if (pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED) == 0
+				&& pthread_create(&hid_hotplug_context.thread, &attr, &hotplug_thread, NULL) == 0) {
+				thread_error = 0;
+			}
+			pthread_attr_destroy(&attr);
+		}
+
+		if (thread_error) {
 			hid_hotplug_context.hotplug_cbs = NULL;
 			/* The handle never became visible: return it to the counter */
 			hid_hotplug_context.next_handle--;
