@@ -1356,7 +1356,11 @@ static int match_ref_to_info(IOHIDDeviceRef device, struct hid_device_info *info
 	struct hid_device_info_ex* ex = (struct hid_device_info_ex*)info;
 	io_service_t service = IOHIDDeviceGetService(device);
 
-	return (service == ex->service);
+	/* MACH_PORT_NULL is not a valid identity: two devices that both lack a
+	   service must not be treated as the same device (that would make the
+	   arrival dedupe suppress the second one, and a removal evict the wrong
+	   cache entry). */
+	return (service != MACH_PORT_NULL && service == ex->service);
 }
 
 /* Returns non-zero when the device is already in the hotplug device cache.
