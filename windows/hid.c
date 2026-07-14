@@ -239,21 +239,6 @@ static SubmitThreadpoolWork_ hid_internal_SubmitThreadpoolWork = NULL;
 static CloseThreadpoolWork_ hid_internal_CloseThreadpoolWork = NULL;
 static WaitForThreadpoolWorkCallbacks_ hid_internal_WaitForThreadpoolWorkCallbacks = NULL;
 
-/* An interface path captured by the registration-time enumeration whose arrival
-   notification may still be in flight. See hid_internal_hotplug_record_pending_arrivals. */
-struct hid_hotplug_path {
-	char *path;
-	struct hid_hotplug_path *next;
-};
-
-/* How long (in milliseconds) the pending-arrivals list stays authoritative.
-   The duplicate arrival it suppresses was already queued by the OS when the
-   list was recorded and is delivered about as soon as the registration releases
-   the critical section, so anything this old is not that duplicate - it is a
-   genuine re-arrival on a path whose removal notification was missed (see
-   hid_internal_hotplug_take_pending_arrival). */
-#define HID_HOTPLUG_PENDING_ARRIVALS_TTL_MS 10000
-
 static struct hid_hotplug_context {
 	/* Win32 notification handle */
 	HCMNOTIFICATION notify_handle;
@@ -298,15 +283,10 @@ static struct hid_hotplug_context {
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
 
-	/* Linked list of the device infos (mandatory when the device is disconnected) */
+	/* Linked list of the device infos (mandatory when the device is disconnected).
+	   Doubles as the arrival dedupe set: an arrival for a path that is already in
+	   here has already been reported (see hid_internal_notify_callback). */
 	struct hid_device_info *devs;
-
-	/* Paths whose arrival notification may still be in flight while it has
-	   already been reported by the registration-time enumeration, and the
-	   GetTickCount() timestamp of the moment they were recorded (see
-	   HID_HOTPLUG_PENDING_ARRIVALS_TTL_MS) */
-	struct hid_hotplug_path *pending_arrivals;
-	DWORD pending_arrivals_tick;
 } hid_hotplug_context; /* zero-initialized (static storage); next_handle set on first init */
 
 static hid_device *new_hid_device()
@@ -809,88 +789,26 @@ static void hid_internal_hotplug_pin_module(void)
 		(LPCWSTR)(void *)&hid_hotplug_context, &module);
 }
 
-/* Always called inside a locked mutex */
-static void hid_internal_hotplug_free_pending_arrivals(void)
+/* Tells whether an interface path is already in the device cache - i.e. whether
+   its connection has already been reported. Always called inside a locked mutex.
+
+   This is the whole arrival dedupe. The notification is armed BEFORE the
+   registration-time enumeration runs (a device connecting in between must not be
+   missed by both), so a device that arrives in that window is captured by the
+   enumeration AND has an arrival notification in flight; that notification must
+   not report - or cache - the same connection a second time.
+
+   The cache decides it, with no timing assumption anywhere: the OS delivers
+   exactly one arrival notification per interface instance, so that overlap is the
+   only way an arrival can be a duplicate - and in that case the enumeration has,
+   by construction, already put the device in the cache. Conversely the removal
+   notification is authoritative and drops the cache entry, so a genuine re-plug
+   (even onto the same, reused path) is NOT cached and IS reported. */
+static int hid_internal_hotplug_is_cached(const char *path)
 {
-	struct hid_hotplug_path *current = hid_hotplug_context.pending_arrivals;
-
-	hid_hotplug_context.pending_arrivals = NULL;
-
-	while (current != NULL) {
-		struct hid_hotplug_path *next = current->next;
-		free(current->path);
-		free(current);
-		current = next;
-	}
-}
-
-/* Records the interface paths the registration-time enumeration has just captured.
-   Always called inside a locked mutex; returns -1 on allocation failure.
-
-   The notification is armed BEFORE the enumeration runs (a device connecting in
-   between must not be missed by both), so a device that arrives in that window is
-   picked up by the enumeration AND has an arrival notification in flight. That
-   notification must not report - or cache - the same connection a second time.
-
-   This window is the only place where a duplicate arrival can occur, so the
-   suppression is scoped to it: a recorded path swallows at most one arrival and is
-   dropped as soon as the device leaves. Outside of it, an arrival for a path that
-   is still cached is NOT a duplicate: an interface path is reused when a device is
-   replugged into the same port, so suppressing it would swallow a real connection. */
-static int hid_internal_hotplug_record_pending_arrivals(void)
-{
-	hid_hotplug_context.pending_arrivals_tick = GetTickCount();
-
 	for (struct hid_device_info *device = hid_hotplug_context.devs; device != NULL; device = device->next) {
-		struct hid_hotplug_path *entry = (struct hid_hotplug_path *)calloc(1, sizeof(struct hid_hotplug_path));
-
-		if (entry == NULL) {
-			return -1;
-		}
-
-		/* Cached devices always have a path (hid_internal_get_device_info fails without one) */
-		entry->path = _strdup(device->path);
-		if (entry->path == NULL) {
-			free(entry);
-			return -1;
-		}
-
-		entry->next = hid_hotplug_context.pending_arrivals;
-		hid_hotplug_context.pending_arrivals = entry;
-	}
-
-	return 0;
-}
-
-/* Consumes the pending-arrival record for this path, if there is one.
-   Always called inside a locked mutex.
-   Returns 1 when this arrival was already reported by the registration-time
-   enumeration (see hid_internal_hotplug_record_pending_arrivals) and must be
-   dropped, 0 when it is a genuine new connection. */
-static int hid_internal_hotplug_take_pending_arrival(const char *path)
-{
-	/* An expired list suppresses nothing: the duplicate it exists for would have
-	   long been delivered (see HID_HOTPLUG_PENDING_ARRIVALS_TTL_MS). Devices
-	   whose records outlive the window are devices whose removal notification
-	   was missed - consuming the record on their eventual re-arrival would
-	   swallow a genuine connection and keep the stale-record recovery in
-	   hid_internal_notify_callback from ever running. Between the two failure
-	   modes the expiry errs towards the recoverable one: a duplicate that
-	   somehow outlives the window is reported as a spurious LEFT+ARRIVED pair
-	   instead of a connection being silently dropped. */
-	if (hid_hotplug_context.pending_arrivals != NULL
-	    && GetTickCount() - hid_hotplug_context.pending_arrivals_tick > HID_HOTPLUG_PENDING_ARRIVALS_TTL_MS) {
-		hid_internal_hotplug_free_pending_arrivals();
-		return 0;
-	}
-
-	for (struct hid_hotplug_path **current = &hid_hotplug_context.pending_arrivals; *current != NULL; current = &(*current)->next) {
 		/* Case-independent path comparison is mandatory */
-		if (_stricmp((*current)->path, path) == 0) {
-			struct hid_hotplug_path *entry = *current;
-			*current = entry->next;
-			free(entry->path);
-			free(entry);
+		if (device->path != NULL && _stricmp(device->path, path) == 0) {
 			return 1;
 		}
 	}
@@ -1026,8 +944,6 @@ static HCMNOTIFICATION hid_internal_hotplug_cleanup()
 		hid_free_enumeration(hid_hotplug_context.devs);
 		hid_hotplug_context.devs = NULL;
 	}
-
-	hid_internal_hotplug_free_pending_arrivals();
 
 	notify_handle = hid_hotplug_context.notify_handle;
 	hid_hotplug_context.notify_handle = NULL;
@@ -1215,7 +1131,6 @@ static int hid_internal_hotplug_exit(void)
 	   cleanup and the completion of the unregistration */
 	hid_free_enumeration(hid_hotplug_context.devs);
 	hid_hotplug_context.devs = NULL;
-	hid_internal_hotplug_free_pending_arrivals();
 	LeaveCriticalSection(&hid_hotplug_context.critical_section);
 
 	if (!keep_machinery) {
@@ -1963,9 +1878,13 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		if (path == NULL) {
 			/* Out of memory: there is nothing to report the connection with, and
 			   nothing is cached, so the cache stays consistent */
-		} else if (hid_internal_hotplug_take_pending_arrival(path)) {
-			/* Already reported (and cached) by the registration-time enumeration:
-			   see hid_internal_hotplug_record_pending_arrivals */
+		} else if (hid_internal_hotplug_is_cached(path)) {
+			/* This connection is already known - and therefore already reported.
+			   The only way that happens is the arm-before-enumerate window at
+			   registration, where the enumeration cached the device and the OS had
+			   already queued this arrival for it (see
+			   hid_internal_hotplug_is_cached). Drop it whole: no second cache
+			   entry, no second dispatch. */
 		} else {
 			/* Open read-only handle to the device */
 			HANDLE read_handle = open_device(event_data->u.DeviceInterface.SymbolicLink, FALSE);
@@ -1977,25 +1896,6 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 			}
 
 			if (device != NULL) {
-				/* An interface path is reused when a device is replugged into the
-				   same port, so an arrival for a path that is still cached means the
-				   removal of the previous connection was missed. The previous
-				   connection is owed a DEVICE_LEFT (the header promises one for every
-				   matching device that disconnects while a callback is registered):
-				   deliver it synthetically from the stale record, then drop that
-				   record - a second record for the same path would never be removed -
-				   and report the new connection as the arrival it is. */
-				struct hid_device_info *stale_device = hid_internal_hotplug_take_cached_device(device->path);
-				if (stale_device != NULL) {
-					/* Dispatched before the new device is cached: a callback
-					   registered from inside one of these callbacks takes its
-					   HID_API_HOTPLUG_ENUMERATE snapshot from the cache, and must
-					   not see the new connection there AND as the live arrival
-					   dispatched below. */
-					hid_internal_hotplug_dispatch(stale_device, HID_API_HOTPLUG_EVENT_DEVICE_LEFT);
-					hid_free_enumeration(stale_device);
-				}
-
 				/* Append to the end of the device list */
 				if (hid_hotplug_context.devs != NULL) {
 					struct hid_device_info *last = hid_hotplug_context.devs;
@@ -2025,11 +1925,10 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 		path = hid_internal_UTF16toUTF8(event_data->u.DeviceInterface.SymbolicLink, NULL);
 
 		if (path != NULL) {
-			/* The device is gone: a later arrival on the same path is a new
-			   connection and must not be mistaken for a pending duplicate */
-			hid_internal_hotplug_take_pending_arrival(path);
-
-			/* Get and remove this device from the device list */
+			/* Get and remove this device from the device list. Dropping the entry is
+			   what makes a later arrival on the same path (an interface path is
+			   reused when a device is replugged into the same port) a new connection
+			   rather than a duplicate - see hid_internal_hotplug_is_cached. */
 			device = hid_internal_hotplug_take_cached_device(path);
 
 			free(path);
@@ -2168,8 +2067,8 @@ static int hid_internal_hotplug_register_counted(struct hid_hotplug_callback *ho
 			/* Register for a HID device notification when adding the first callback.
 			   Armed BEFORE the device cache is filled: a device connecting in between
 			   is then caught by the notification instead of being missed by both, and
-			   the duplicate that this creates is suppressed exactly once
-			   (see hid_internal_hotplug_record_pending_arrivals). */
+			   the duplicate that this creates is suppressed by the cache itself
+			   (see hid_internal_hotplug_is_cached). */
 			if (CM_Register_Notification(&notify_filter, NULL, hid_internal_notify_callback, &hid_hotplug_context.notify_handle) != CR_SUCCESS) {
 				register_global_error(L"hid_hotplug_register_callback/CM_Register_Notification");
 				hid_hotplug_context.notify_handle = NULL;
@@ -2182,15 +2081,10 @@ static int hid_internal_hotplug_register_counted(struct hid_hotplug_callback *ho
 			   between its detachment and the completion of its unregistration */
 			hid_free_enumeration(hid_hotplug_context.devs);
 			hid_hotplug_context.devs = NULL;
-			hid_internal_hotplug_free_pending_arrivals();
 
 			/* Fill already connected devices so we can use this info in disconnection
 			   notifications and HID_API_HOTPLUG_ENUMERATE passes */
 			hid_hotplug_context.devs = hid_internal_enumerate(0, 0, &enumerate_failure);
-			if (!enumerate_failure && hid_internal_hotplug_record_pending_arrivals() < 0) {
-				register_global_error(L"Failed to allocate memory for the hotplug device cache");
-				enumerate_failure = 1;
-			}
 			if (enumerate_failure) {
 				/* An empty system is fine; a failed enumeration is not: the device
 				   cache and the ENUMERATE snapshot would misrepresent the system.
