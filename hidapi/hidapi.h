@@ -382,6 +382,16 @@ extern "C" {
 			  - hid_error(dev)   with a non-NULL device handle, provided no
 			                     other thread uses that same handle concurrently
 
+			HIDAPI calls made from within the callback do not update the
+			global error string: the callback runs on HIDAPI's internal
+			event context, and internal contexts never write that string
+			(an application has no way to serialize against them, so writing
+			it there would be a use-after-free waiting to happen). Failures
+			are still reported through return values as usual, and
+			hid_error(dev) still works for a device handle - only
+			hid_error(NULL) is left untouched by calls made from the
+			callback.
+
 			Any other HIDAPI function follows HIDAPI's general thread-safety
 			rule (see the Multi-threading Notes in the project wiki): it is
 			the application's responsibility to serialize hid_init / hid_exit /
