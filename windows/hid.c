@@ -49,7 +49,6 @@ typedef LONG NTSTATUS;
 #include <wctype.h>
 #define _wcsdup wcsdup
 #define _strdup strdup
-#define _stricmp strcasecmp
 #endif
 
 /*#define HIDAPI_USE_DDK*/
@@ -789,6 +788,88 @@ static void hid_internal_hotplug_pin_module(void)
 		(LPCWSTR)(void *)&hid_hotplug_context, &module);
 }
 
+/* ASCII case folding: locale-independent, and all an interface path needs
+   (this is also all the _stricmp() below used to do, in the C locale) */
+static unsigned char hid_internal_ascii_tolower(unsigned char c)
+{
+	return (c >= 'A' && c <= 'Z') ? (unsigned char)(c - 'A' + 'a') : c;
+}
+
+/* Compares a cached (UTF-8) interface path with the (UTF-16) one a notification
+   carries, WITHOUT ALLOCATING: it encodes the UTF-16 path to UTF-8 on the fly, one
+   code point at a time, and matches it against the bytes of the cached one.
+
+   Both hotplug cache lookups need this comparison, and both used to convert the
+   notification's symbolic link to UTF-8 first - which allocates. That allocation
+   failing in the REMOVAL lookup would process the removal but leave its cache
+   record behind, and a stale record is unrecoverable: it is the arrival dedupe, so
+   the next connection on that interface path (paths are reused when a device is
+   replugged into the same port) would be classified as a duplicate and suppressed
+   forever, for every callback, including later HID_API_HOTPLUG_ENUMERATE passes.
+   With no allocation on either lookup, an out-of-memory condition can no longer
+   desynchronize the cache from the system: the only allocation left is the one that
+   describes an arriving device, and failing it simply does not cache the device
+   (nothing was reported for it either - see hid_internal_notify_callback).
+
+   The comparison is case-independent for ASCII, exactly like the _stricmp() it
+   replaces. A cached path is always a WC_ERR_INVALID_CHARS conversion of an
+   interface path (see hid_internal_UTF16toUTF8 and hid_internal_get_device_info),
+   so it always encodes well-formed UTF-16: an ill-formed symbolic link cannot be in
+   the cache, and comparing unequal is the correct answer for it - which is what the
+   failing conversion used to yield as well. */
+static int hid_internal_path_equals(const char *cached_path, const wchar_t *interface_path)
+{
+	const unsigned char *cached = (const unsigned char *)cached_path;
+
+	while (*interface_path != L'\0') {
+		unsigned long code_point = (unsigned long)*interface_path++;
+		unsigned char utf8[4];
+		size_t len, i;
+
+		if (code_point >= 0xD800UL && code_point <= 0xDBFFUL) {
+			/* A high surrogate must be followed by a low one */
+			if (*interface_path < 0xDC00 || *interface_path > 0xDFFF) {
+				return 0;
+			}
+			code_point = 0x10000UL + ((code_point - 0xD800UL) << 10) + (unsigned long)(*interface_path++ - 0xDC00);
+		} else if (code_point >= 0xDC00UL && code_point <= 0xDFFFUL) {
+			/* An unpaired low surrogate */
+			return 0;
+		}
+
+		if (code_point < 0x80UL) {
+			utf8[0] = (unsigned char)code_point;
+			len = 1;
+		} else if (code_point < 0x800UL) {
+			utf8[0] = (unsigned char)(0xC0UL | (code_point >> 6));
+			utf8[1] = (unsigned char)(0x80UL | (code_point & 0x3FUL));
+			len = 2;
+		} else if (code_point < 0x10000UL) {
+			utf8[0] = (unsigned char)(0xE0UL | (code_point >> 12));
+			utf8[1] = (unsigned char)(0x80UL | ((code_point >> 6) & 0x3FUL));
+			utf8[2] = (unsigned char)(0x80UL | (code_point & 0x3FUL));
+			len = 3;
+		} else {
+			utf8[0] = (unsigned char)(0xF0UL | (code_point >> 18));
+			utf8[1] = (unsigned char)(0x80UL | ((code_point >> 12) & 0x3FUL));
+			utf8[2] = (unsigned char)(0x80UL | ((code_point >> 6) & 0x3FUL));
+			utf8[3] = (unsigned char)(0x80UL | (code_point & 0x3FUL));
+			len = 4;
+		}
+
+		/* No byte of an encoded code point is ever '\0', so a cached path that ends
+		   early simply compares unequal here: the walk cannot run past its end */
+		for (i = 0; i < len; ++i) {
+			if (hid_internal_ascii_tolower(*cached) != hid_internal_ascii_tolower(utf8[i])) {
+				return 0;
+			}
+			++cached;
+		}
+	}
+
+	return *cached == '\0';
+}
+
 /* Tells whether an interface path is already in the device cache - i.e. whether
    its connection has already been reported. Always called inside a locked mutex.
 
@@ -804,11 +885,11 @@ static void hid_internal_hotplug_pin_module(void)
    by construction, already put the device in the cache. Conversely the removal
    notification is authoritative and drops the cache entry, so a genuine re-plug
    (even onto the same, reused path) is NOT cached and IS reported. */
-static int hid_internal_hotplug_is_cached(const char *path)
+static int hid_internal_hotplug_is_cached(const wchar_t *interface_path)
 {
 	for (struct hid_device_info *device = hid_hotplug_context.devs; device != NULL; device = device->next) {
 		/* Case-independent path comparison is mandatory */
-		if (device->path != NULL && _stricmp(device->path, path) == 0) {
+		if (device->path != NULL && hid_internal_path_equals(device->path, interface_path)) {
 			return 1;
 		}
 	}
@@ -816,13 +897,14 @@ static int hid_internal_hotplug_is_cached(const char *path)
 	return 0;
 }
 
-/* Unlinks the cached device with this path, if there is one, and hands it to the
-   caller (who owns it). Always called inside a locked mutex. */
-static struct hid_device_info *hid_internal_hotplug_take_cached_device(const char *path)
+/* Unlinks the cached device with this interface path, if there is one, and hands
+   it to the caller (who owns it). Always called inside a locked mutex. Allocates
+   nothing: see hid_internal_path_equals. */
+static struct hid_device_info *hid_internal_hotplug_take_cached_device(const wchar_t *interface_path)
 {
 	for (struct hid_device_info **current = &hid_hotplug_context.devs; *current != NULL; current = &(*current)->next) {
 		/* Case-independent path comparison is mandatory */
-		if ((*current)->path != NULL && _stricmp((*current)->path, path) == 0) {
+		if ((*current)->path != NULL && hid_internal_path_equals((*current)->path, interface_path)) {
 			struct hid_device_info *device = *current;
 			*current = device->next;
 			device->next = NULL;
@@ -1871,14 +1953,9 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 
 	if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL) {
-		char *path = hid_internal_UTF16toUTF8(event_data->u.DeviceInterface.SymbolicLink, NULL);
-
 		hotplug_event = HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED;
 
-		if (path == NULL) {
-			/* Out of memory: there is nothing to report the connection with, and
-			   nothing is cached, so the cache stays consistent */
-		} else if (hid_internal_hotplug_is_cached(path)) {
+		if (hid_internal_hotplug_is_cached(event_data->u.DeviceInterface.SymbolicLink)) {
 			/* This connection is already known - and therefore already reported.
 			   The only way that happens is the arm-before-enumerate window at
 			   registration, where the enumeration cached the device and the OS had
@@ -1915,24 +1992,16 @@ DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context,
 			   report it with; the cache is left consistent either way, as only fully
 			   described devices are ever cached. */
 		}
-
-		free(path);
 	} else if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL) {
-		char *path;
-
 		hotplug_event = HID_API_HOTPLUG_EVENT_DEVICE_LEFT;
 
-		path = hid_internal_UTF16toUTF8(event_data->u.DeviceInterface.SymbolicLink, NULL);
-
-		if (path != NULL) {
-			/* Get and remove this device from the device list. Dropping the entry is
-			   what makes a later arrival on the same path (an interface path is
-			   reused when a device is replugged into the same port) a new connection
-			   rather than a duplicate - see hid_internal_hotplug_is_cached. */
-			device = hid_internal_hotplug_take_cached_device(path);
-
-			free(path);
-		}
+		/* Get and remove this device from the device list. Dropping the entry is
+		   what makes a later arrival on the same path (an interface path is reused
+		   when a device is replugged into the same port) a new connection rather
+		   than a duplicate - see hid_internal_hotplug_is_cached. The lookup cannot
+		   fail for lack of memory (it allocates nothing), so a removal can never
+		   leave its record behind. */
+		device = hid_internal_hotplug_take_cached_device(event_data->u.DeviceInterface.SymbolicLink);
 	}
 
 	if (device) {
