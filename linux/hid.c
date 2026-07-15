@@ -665,8 +665,9 @@ next_line:
    node. Returns NULL both for benign exclusions (no HID parent, an unparseable
    uevent, an unhandled bus type - exactly what hid_enumerate() would also skip)
    and for genuine resource failures. When `failure` is non-NULL it is set to 1
-   ONLY in the latter case, so a caller that needs an authoritative, complete
-   enumeration (the monitor-thread reconcile) can tell a device that is
+   ONLY in the latter case, so a caller that needs an all-or-nothing enumeration
+   (the initial hotplug-registration snapshot, which must fail rather than arm the
+   callbacks against an incomplete device set) can tell a device that is
    legitimately absent from one that merely failed to materialize. It is never
    cleared here, so callers accumulate it across a whole enumeration. */
 static struct hid_device_info * create_device_info_for_device(struct udev_device *raw_dev, int quiet, int *failure)
@@ -961,26 +962,20 @@ enum hid_hotplug_thread_state {
 	HID_HOTPLUG_THREAD_NONE,
 	/* The monitor thread is running */
 	HID_HOTPLUG_THREAD_RUNNING,
-	/* The monitor thread has returned - it published this state as its last
-	   write under the mutex, immediately before unlocking and returning - but
-	   its pthread_t has not been joined yet. The thread is JOINABLE, not
-	   detached: hid_exit() (and the next register/deregister) join it, so once
-	   hid_exit() returns no monitor-thread instruction can still be executing
-	   inside the library. A detached thread could not guarantee that - after it
-	   published its exit and hid_exit() returned, it could still be running its
-	   own epilogue (unlock/return) in the library's text when the application
-	   calls dlclose(), i.e. resume in unmapped code. */
-	HID_HOTPLUG_THREAD_FINISHED,
-	/* A reaper has claimed the finished thread and is joining its pthread_t
-	   with the hotplug mutex RELEASED (see hid_internal_hotplug_join_thread).
-	   The join must not run under the mutex: the exiting monitor thread may
-	   still run thread-specific-data destructors that a user callback armed
-	   while running on it, and such a destructor re-entering HIDAPI (taking the
-	   hotplug mutex) would deadlock a joiner that held it. Publishing this
-	   transient state under the mutex makes the claim exactly-once - a
-	   concurrent reaper observes it and backs off rather than joining the same
-	   pthread_t twice (which is undefined behavior). */
-	HID_HOTPLUG_THREAD_JOINING
+	/* The monitor thread has returned - it published this state as its LAST
+	   write to shared state under the mutex, immediately before unlocking and
+	   returning - but its pthread_t has not been joined yet. The thread is
+	   JOINABLE, not detached: hid_exit() (and the next register/deregister)
+	   reap it (see hid_internal_hotplug_reap_thread), so once hid_exit() returns
+	   no monitor-thread instruction can still be executing inside the library. A
+	   detached thread could not guarantee that - after it published its exit and
+	   hid_exit() returned, it could still be running its own epilogue
+	   (unlock/return) in the library's text when the application calls
+	   dlclose(), i.e. resume in unmapped code. The reap is coordinated by the
+	   join_in_progress flag and the thread_cond condition variable rather than a
+	   distinct state, so a concurrent reaper waits for the join instead of
+	   joining the same pthread_t twice. */
+	HID_HOTPLUG_THREAD_FINISHED
 };
 
 static struct hid_hotplug_context {
@@ -1000,6 +995,12 @@ static struct hid_hotplug_context {
 
 	pthread_mutex_t mutex;
 
+	/* Signaled when a monitor-thread reap completes (thread_state returns to
+	   NONE and join_in_progress clears): lets a second reaper wait out an
+	   in-flight join instead of joining the same pthread_t twice. Process-
+	   lifetime, like the mutex: never destroyed. */
+	pthread_cond_t thread_cond;
+
 	/* Boolean flags */
 	/* The one-time initialization of the mutex succeeded (written once, under
 	   pthread_once); the mutex lives for the rest of the process */
@@ -1008,6 +1009,10 @@ static struct hid_hotplug_context {
 	unsigned char cb_list_dirty;
 	/* hid_exit() is tearing the hotplug machinery down */
 	unsigned char exiting;
+	/* A reaper has claimed the FINISHED monitor thread and is joining its
+	   pthread_t with the mutex released; set/cleared under the mutex, cleared
+	   with a thread_cond broadcast (see hid_internal_hotplug_reap_thread) */
+	unsigned char join_in_progress;
 	/* The udev monitor socket died; no more events (see hotplug_thread) */
 	unsigned char monitor_dead;
 
@@ -1086,63 +1091,70 @@ static void hid_internal_hotplug_release_monitor(void)
 }
 
 /* Reaps a monitor thread that has finished (published HID_HOTPLUG_THREAD_FINISHED
-   as its last write under the mutex) but has not been joined yet, turning its
-   state to HID_HOTPLUG_THREAD_NONE. Called with the mutex held.
+   as its last write to shared state under the mutex) but has not been joined yet,
+   turning its state to HID_HOTPLUG_THREAD_NONE. Called with the mutex held
+   exactly once.
 
-   The claim on the finished thread is made under the mutex (FINISHED -> JOINING,
-   an exactly-once flip), but the pthread_join() itself runs with the mutex
-   RELEASED, then the mutex is re-acquired and the state advanced to NONE. The
-   join must not hold the mutex: the finished monitor thread has already released
-   everything it owned and published FINISHED, so all that can still execute on
-   it is its epilogue and any thread-specific-data destructors a user callback
-   armed while running on it - and such a destructor re-entering HIDAPI would
-   block on the hotplug mutex forever if the joiner held it, deadlocking the
-   join. With the mutex released the destructor takes it, runs, and the thread
-   terminates so the join can complete. A concurrent reaper observes JOINING (not
-   FINISHED) and backs off, so the pthread_t is joined exactly once; a caller in
-   hid_internal_hotplug_cleanup waits out the JOINING window before it can reach
-   NONE. Because the mutex is dropped, callers must re-validate cached state after
-   this returns (hid_internal_hotplug_cleanup already does).
+   pthread_join() must NOT run under the mutex: the finished monitor thread has
+   already released everything it owned and published FINISHED, but its epilogue
+   and any thread-specific-data destructors a user callback armed while running on
+   it may still execute - and such a destructor re-entering HIDAPI would block on
+   the hotplug mutex forever if the joiner held it, deadlocking the join. So the
+   reaper sets join_in_progress, RELEASES the mutex for the join, then RE-ACQUIRES
+   it, advances the state to NONE, clears join_in_progress and broadcasts
+   thread_cond. A second reaper that finds join_in_progress set waits on
+   thread_cond instead of joining the same pthread_t twice (undefined behavior),
+   and wakes to observe NONE. Because the mutex is dropped, callers must
+   re-validate cached state after this returns (hid_internal_hotplug_cleanup
+   does).
 
-   Never runs on the monitor thread itself: the thread becomes FINISHED only
-   after it has stopped dispatching, and the callers below are gated by
-   mutex_in_use (a dispatch in flight), so a thread can never be its own
-   joiner. */
-static void hid_internal_hotplug_join_thread(void)
+   The monitor thread never joins itself: a thread-specific-data destructor armed
+   by a user callback runs on the monitor thread AFTER it published FINISHED (so
+   mutex_in_use no longer guards this path), and if that destructor re-enters
+   HIDAPI and reaches here a self-join would be undefined behavior / EDEADLK. The
+   pthread_equal guard makes such a re-entrant attempt defer, leaving the thread
+   FINISHED for an application-thread reaper - hid_exit() or the next
+   register/deregister. */
+static void hid_internal_hotplug_reap_thread(void)
 {
 	pthread_t thread;
 
-	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_FINISHED) {
-		return;
-	}
-
-	/* Never join from the monitor thread itself. A thread-specific-data
-	   destructor armed by a user callback runs on the monitor thread AFTER it
-	   published FINISHED - so mutex_in_use (a dispatch in flight) no longer
-	   guards this path - and if that destructor re-enters HIDAPI and reaches
-	   here, joining would be a self-join (undefined behavior / EDEADLK). Leave
-	   the thread FINISHED for an application-thread reaper - hid_exit() or the
-	   next register/deregister - to join. */
+	/* A re-entrant reap from the monitor thread itself cannot join itself:
+	   defer to the next application-thread reaper / hid_exit(). */
 	if (pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
 		return;
 	}
 
-	/* Claim the join exactly-once under the mutex, then join WITHOUT it. */
+	/* Another reaper already claimed the join: wait it out (thread_cond is
+	   broadcast when the join completes) instead of joining twice. */
+	while (hid_hotplug_context.join_in_progress) {
+		pthread_cond_wait(&hid_hotplug_context.thread_cond, &hid_hotplug_context.mutex);
+	}
+
+	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_FINISHED) {
+		/* Nothing to reap: never finished, or the reaper we waited on already
+		   advanced it to NONE. */
+		return;
+	}
+
+	/* Claim the join, drop the mutex for it, then re-acquire and publish NONE. */
 	thread = hid_hotplug_context.thread;
-	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_JOINING;
+	hid_hotplug_context.join_in_progress = 1;
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 	pthread_join(thread, NULL);
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
+	hid_hotplug_context.join_in_progress = 0;
+	pthread_cond_broadcast(&hid_hotplug_context.thread_cond);
 }
 
-/* Winds the monitor thread down once the last callback is gone and joins it, so
+/* Winds the monitor thread down once the last callback is gone and reaps it, so
    that no monitor-thread code is still executing once this returns. The thread
-   releases the monitoring context itself, then publishes FINISHED; this joins
-   the FINISHED thread. Called with the mutex held exactly once (and not in
-   use); the mutex is temporarily dropped while waiting for a still-RUNNING
-   thread to notice the empty list, so the caller must re-validate any cached
-   state after this returns. */
+   releases the monitoring context itself, then publishes FINISHED; this reaps
+   the FINISHED thread (see hid_internal_hotplug_reap_thread). Called with the
+   mutex held exactly once (and not in use); the mutex is temporarily dropped
+   while waiting for a still-RUNNING thread to notice the empty list and while
+   joining, so the caller must re-validate any cached state after this returns. */
 static void hid_internal_hotplug_cleanup(void)
 {
 	if (hid_hotplug_context.mutex_in_use) {
@@ -1165,17 +1177,24 @@ static void hid_internal_hotplug_cleanup(void)
 		}
 
 		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
-			/* The thread released the monitoring context and returned: join it */
-			hid_internal_hotplug_join_thread();
-			return;
+			/* On the monitor thread itself (a thread-specific-data destructor
+			   re-entering HIDAPI after FINISHED was published) the reap defers
+			   without joining - leave the pthread_t for an application-thread
+			   reaper / hid_exit() and return, rather than spin here. */
+			if (pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
+				return;
+			}
+			/* The thread released the monitoring context and returned: reap it
+			   (joining, or waiting out a concurrent reaper on thread_cond, both
+			   with the mutex released), then re-evaluate. With hotplug_cbs still
+			   NULL no new thread can have appeared, so the loop settles on NONE. */
+			hid_internal_hotplug_reap_thread();
+			continue;
 		}
 
-		/* HID_HOTPLUG_THREAD_RUNNING (the thread has not yet noticed the empty
-		   callback list) or HID_HOTPLUG_THREAD_JOINING (another reaper is joining
-		   the finished thread with the mutex released): drop the mutex so that
-		   thread / that reaper can make progress, then re-evaluate. The loser of
-		   a join race waits here until the winner publishes
-		   HID_HOTPLUG_THREAD_NONE, so the pthread_t is joined exactly once. */
+		/* HID_HOTPLUG_THREAD_RUNNING: the thread has not yet noticed the empty
+		   callback list. Drop the mutex so it can make progress towards
+		   publishing FINISHED, then re-evaluate. */
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		poll(NULL, 0, 1);
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
@@ -1205,6 +1224,13 @@ static void hid_internal_hotplug_init_once(void)
 		return;
 	}
 	pthread_mutexattr_destroy(&attr);
+
+	/* Process-lifetime, like the mutex (never destroyed): coordinates the
+	   monitor-thread reap so concurrent reapers never double-join. */
+	if (pthread_cond_init(&hid_hotplug_context.thread_cond, NULL) != 0) {
+		pthread_mutex_destroy(&hid_hotplug_context.mutex);
+		return;
+	}
 
 	hid_hotplug_context.monitor_fd = -1;
 	/* The handles are monotonic and never reused (see hidapi.h); the counter
@@ -1346,14 +1372,11 @@ static int hid_internal_match_device_id(unsigned short vendor_id, unsigned short
 }
 
 /* Same as hid_enumerate, but distinguishes a genuine failure from an empty
-   system: *failure (when non-NULL) is set to 1 only when the enumeration
-   itself failed (with the global error set accordingly). */
-/* quiet: don't touch the global error string - for the caller on HIDAPI's
-   internal monitor thread (the hotplug re-enumeration after a monitor rebuild),
-   which never writes it (see hidapi.h). A quiet caller must already have
-   initialized the library, so hid_init() is skipped too (it resets the global
-   error). An empty result is not a failure in either mode. */
-static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, unsigned short product_id, int quiet, int *failure)
+   system: *failure (when non-NULL) is set to 1 only when the enumeration itself
+   failed (with the global error set accordingly). An empty result is not a
+   failure. Used by the initial hotplug-registration snapshot, which must fail
+   rather than arm the callbacks against an incomplete device set. */
+static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, unsigned short product_id, int *failure)
 {
 	struct udev *udev;
 	struct udev_enumerate *enumerate;
@@ -1366,17 +1389,13 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 		*failure = 0;
 	}
 
-	if (!quiet) {
-		hid_init();
-		/* register_global_error: global error is reset by hid_init */
-	}
+	hid_init();
+	/* register_global_error: global error is reset by hid_init */
 
 	/* Create the udev object */
 	udev = udev_new();
 	if (!udev) {
-		if (!quiet) {
-			register_global_error("Couldn't create udev context");
-		}
+		register_global_error("Couldn't create udev context");
 		if (failure) {
 			*failure = 1;
 		}
@@ -1387,9 +1406,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	enumerate = udev_enumerate_new(udev);
 	if (!enumerate) {
 		udev_unref(udev);
-		if (!quiet) {
-			register_global_error("Couldn't create udev enumeration");
-		}
+		register_global_error("Couldn't create udev enumeration");
 		if (failure) {
 			*failure = 1;
 		}
@@ -1398,9 +1415,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	if (udev_enumerate_add_match_subsystem(enumerate, "hidraw") < 0) {
 		udev_enumerate_unref(enumerate);
 		udev_unref(udev);
-		if (!quiet) {
-			register_global_error("Couldn't add the hidraw subsystem match to the udev enumeration");
-		}
+		register_global_error("Couldn't add the hidraw subsystem match to the udev enumeration");
 		if (failure) {
 			*failure = 1;
 		}
@@ -1409,9 +1424,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	if (udev_enumerate_scan_devices(enumerate) < 0) {
 		udev_enumerate_unref(enumerate);
 		udev_unref(udev);
-		if (!quiet) {
-			register_global_error("Couldn't scan the udev devices");
-		}
+		register_global_error("Couldn't scan the udev devices");
 		if (failure) {
 			*failure = 1;
 		}
@@ -1448,18 +1461,18 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 		if (!raw_dev) {
 			/* A path the scan just listed no longer resolves to a udev device:
 			   the enumeration is no longer a complete, authoritative snapshot.
-			   Flag it so an all-or-nothing caller (the monitor-thread reconcile
-			   in hid_internal_hotplug_recover_monitor) discards the partial
-			   result instead of mistaking the missing entries for departures.
-			   hid_enumerate() passes failure == NULL and keeps its long-standing
-			   best-effort behavior. */
+			   Flag it so an all-or-nothing caller (the initial hotplug-
+			   registration snapshot) discards the partial result instead of
+			   mistaking the missing entries for departures. hid_enumerate()
+			   passes failure == NULL and keeps its long-standing best-effort
+			   behavior. */
 			if (failure) {
 				*failure = 1;
 			}
 			continue;
 		}
 
-		tmp = create_device_info_for_device(raw_dev, quiet, failure);
+		tmp = create_device_info_for_device(raw_dev, 0, failure);
 		if (tmp) {
 			if (cur_dev) {
 				cur_dev->next = tmp;
@@ -1481,7 +1494,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	udev_enumerate_unref(enumerate);
 	udev_unref(udev);
 
-	if (root == NULL && !quiet) {
+	if (root == NULL) {
 		if (vendor_id == 0 && product_id == 0) {
 			register_global_error("No HID devices found in the system.");
 		} else {
@@ -1494,7 +1507,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
-	return hid_internal_enumerate(vendor_id, product_id, 0, NULL);
+	return hid_internal_enumerate(vendor_id, product_id, NULL);
 }
 
 void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
@@ -1640,56 +1653,6 @@ static struct hid_device_info *hid_internal_find_device_by_path(const char *path
 	return hid_internal_find_device_in_list(hid_hotplug_context.devs, path);
 }
 
-/* NULL-safe wide-string equality (two NULL pointers compare equal). */
-static int hid_internal_wcs_equal(const wchar_t *a, const wchar_t *b)
-{
-	if (a == NULL || b == NULL) {
-		return a == b;
-	}
-	return wcscmp(a, b) == 0;
-}
-
-/* Whether two device-info entries describe the SAME physical connection, not
-   merely the same devnode path. While the udev event transport is down, the
-   device on a given /dev/hidrawN may be unplugged and a different one plugged
-   into the same node: the path is then identical but the connection is not.
-   Reconcile must tell these apart - matching on the path alone would keep the
-   stale entry and miss BOTH the old device's LEFT and the new device's ARRIVED -
-   so it also compares the stable per-connection identity udev reports:
-   vid/pid/serial/release/interface/bus. Usage page and usage are deliberately
-   excluded, so that the several usage entries of one physical device all share a
-   single connection identity (they arrive and leave together). */
-static int hid_internal_same_connection(const struct hid_device_info *a, const struct hid_device_info *b)
-{
-	if (a->path == NULL || b->path == NULL) {
-		if (a->path != b->path) {
-			return 0;
-		}
-	} else if (strcmp(a->path, b->path) != 0) {
-		return 0;
-	}
-	return a->vendor_id == b->vendor_id
-		&& a->product_id == b->product_id
-		&& a->release_number == b->release_number
-		&& a->interface_number == b->interface_number
-		&& a->bus_type == b->bus_type
-		&& hid_internal_wcs_equal(a->serial_number, b->serial_number);
-}
-
-/* First entry in `list` describing the same physical connection as `entry`, or
-   NULL. Used only by reconcile (see hid_internal_same_connection); the live
-   add/remove paths match on the devnode path alone, since a udev "remove" event
-   carries only that. */
-static struct hid_device_info *hid_internal_find_same_connection(struct hid_device_info *list, const struct hid_device_info *entry)
-{
-	for (struct hid_device_info *device = list; device; device = device->next) {
-		if (hid_internal_same_connection(device, entry)) {
-			return device;
-		}
-	}
-	return NULL;
-}
-
 /* Handle a device arrival: update the connected-device cache and dispatch the
    callbacks. Takes ownership of the whole device chain (one entry per usage).
    Only ever runs on the monitor thread, with the mutex held. */
@@ -1796,148 +1759,6 @@ static void hid_internal_hotplug_process_removal(const char *devnode)
 	}
 }
 
-/* Reconcile the device cache with a fresh enumeration after the udev monitor
-   was rebuilt, delivering ONLY the real deltas that happened while the transport
-   was down: DEVICE_ARRIVED for a device present now but not cached, DEVICE_LEFT
-   for a cached device genuinely absent now. A device present in both is left
-   untouched - no event is fabricated for a device that never went anywhere.
-   The fresh enumeration is adopted as the new cache. Takes ownership of `fresh`
-   and of the previous cache. Only ever runs on the monitor thread, with the
-   mutex held. */
-static void hid_internal_hotplug_reconcile(struct hid_device_info *fresh)
-{
-	/* Freeze the dispatch to the callbacks registered up to this point
-	   (see hid_internal_hotplug_process_arrival). */
-	hid_hotplug_callback_handle dispatch_bound = hid_hotplug_context.next_handle - 1;
-	struct hid_device_info *old = hid_hotplug_context.devs;
-	struct hid_device_info **link;
-
-	/* Adopt the fresh enumeration as the cache up front: a callback registered
-	   from within one of the dispatches below (handle beyond dispatch_bound, so
-	   excluded from them) then captures the reconciled set in its ENUMERATE
-	   snapshot instead - keeping every arrival/departure exactly-once. */
-	hid_hotplug_context.devs = fresh;
-
-	/* ARRIVED for every fresh usage entry whose connection was not cached.
-	   Membership is tested against the still-intact `old` cache on the stable
-	   connection identity, NOT the devnode path alone: a device swapped for a
-	   different one on the same /dev/hidrawN during the outage is thus reported
-	   as ARRIVED(new) here and LEFT(old) below, instead of being mistaken for the
-	   unchanged presence of the old device. A COPY (one entry, next == NULL) is
-	   dispatched so the adopted cache chain stays walkable. If the copy cannot be
-	   allocated the arrival cannot be announced, so the entry is DROPPED from the
-	   adopted cache as well: leaving it in would later fabricate a LEFT for a
-	   device the callbacks never saw arrive. */
-	link = &hid_hotplug_context.devs;
-	while (*link != NULL) {
-		struct hid_device_info *device = *link;
-		struct hid_device_info *copy;
-		if (hid_internal_find_same_connection(old, device) != NULL) {
-			link = &device->next;
-			continue;
-		}
-		copy = hid_internal_copy_device_info(device);
-		if (copy == NULL) {
-			/* Out of memory: neither announce nor silently keep this arrival. */
-			*link = device->next;
-			device->next = NULL;
-			hid_free_enumeration(device);
-			continue;
-		}
-		copy->next = NULL;
-		hid_internal_invoke_callbacks(copy, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, dispatch_bound);
-		hid_free_enumeration(copy);
-		link = &device->next;
-	}
-
-	/* LEFT for every cached usage entry whose connection is gone from the
-	   reconciled cache, then free the old cache. Membership is tested against the
-	   adopted cache (hid_hotplug_context.devs, not the possibly-dangling `fresh`
-	   head after a drop above) on the same connection identity. A dropped-on-OOM
-	   arrival was never in `old`, so it can never match one of these old entries -
-	   testing against the reduced cache cannot miss a real departure. */
-	while (old != NULL) {
-		struct hid_device_info *info = old;
-		old = info->next;
-		/* One usage entry per invocation: the callback always sees next == NULL */
-		info->next = NULL;
-		if (hid_internal_find_same_connection(hid_hotplug_context.devs, info) == NULL) {
-			hid_internal_invoke_callbacks(info, HID_API_HOTPLUG_EVENT_DEVICE_LEFT, dispatch_bound);
-		}
-		hid_free_enumeration(info);
-	}
-}
-
-/* Attempt to rebuild the udev monitor after its socket failed, then reconcile
-   the device cache against the current reality. Each call is all-or-nothing: on
-   success the context's udev monitor/fd are replaced with a fresh, receiving
-   monitor, *new_fd holds the new descriptor, the cache is reconciled (only real
-   deltas dispatched) and 0 is returned; on any failure nothing observable
-   changes - the old (dead) monitor and the cache are left untouched for the
-   caller to retry or release - and -1 is returned. The re-enumeration is quiet:
-   this runs on the monitor thread, which never writes the global error string
-   (see hidapi.h). Only ever runs on the monitor thread, with the mutex held. */
-static int hid_internal_hotplug_recover_monitor(int *new_fd)
-{
-	struct udev *udev_ctx;
-	struct udev_monitor *mon;
-	int fd;
-	int failure = 0;
-	struct hid_device_info *fresh;
-
-	/* Re-enumerate FIRST, off an independent udev context, BEFORE any
-	   replacement monitor starts receiving. Doing it in this order means a
-	   monitor is enabled for receiving only on a path that goes on to commit, so
-	   a monitor that has begun queueing real events is never built and then
-	   thrown away (which would discard those events). A failure here - a broken
-	   udev, or a partial/non-authoritative enumeration (see
-	   hid_internal_enumerate): reconciling against an incomplete set would
-	   fabricate departures for still-present devices - aborts the attempt with
-	   the dead monitor and the cache left untouched for the caller to retry. An
-	   empty result is NOT a failure: it means every cached device genuinely left,
-	   which the reconcile below reports as real LEFTs. Quiet: this runs on the
-	   monitor thread, which never writes the global error string (see hidapi.h). */
-	fresh = hid_internal_enumerate(0, 0, 1 /* quiet */, &failure);
-	if (failure) {
-		hid_free_enumeration(fresh);
-		return -1;
-	}
-
-	udev_ctx = udev_new();
-	if (!udev_ctx) {
-		hid_free_enumeration(fresh);
-		return -1;
-	}
-	mon = udev_monitor_new_from_netlink(udev_ctx, "udev");
-	if (!mon
-	    || udev_monitor_filter_add_match_subsystem_devtype(mon, "hidraw", NULL) < 0
-	    || udev_monitor_enable_receiving(mon) < 0
-	    || (fd = udev_monitor_get_fd(mon)) < 0) {
-		if (mon) {
-			udev_monitor_unref(mon);
-		}
-		udev_unref(udev_ctx);
-		hid_free_enumeration(fresh);
-		return -1;
-	}
-
-	/* Commit: swap in the fresh monitor, releasing the dead one. */
-	if (hid_hotplug_context.mon) {
-		udev_monitor_unref(hid_hotplug_context.mon);
-	}
-	if (hid_hotplug_context.udev_ctx) {
-		udev_unref(hid_hotplug_context.udev_ctx);
-	}
-	hid_hotplug_context.mon = mon;
-	hid_hotplug_context.udev_ctx = udev_ctx;
-	hid_hotplug_context.monitor_fd = fd;
-	*new_fd = fd;
-
-	/* Reconcile the cache with reality and resume monitoring on the new fd. */
-	hid_internal_hotplug_reconcile(fresh);
-	return 0;
-}
-
 /* Dispatch one udev monitor event.
    Only ever runs on the monitor thread, with the mutex held. */
 static void hid_internal_hotplug_process_event(struct udev_device *raw_dev)
@@ -1985,18 +1806,11 @@ static void hid_internal_hotplug_process_event(struct udev_device *raw_dev)
    attempt, so a bounded number of retries filters those out. */
 #define HID_HOTPLUG_SOCKET_ERROR_POLL_LIMIT 100
 
-/* Consecutive attempts to rebuild the udev monitor after its socket died before
-   the machinery gives up. Each attempt is a full udev context + monitor
-   recreation and a re-enumeration, paced one per loop iteration; a small bound
-   rides out a transient failure without spinning on a genuinely broken udev. */
-#define HID_HOTPLUG_MONITOR_RECOVER_LIMIT 5
-
 static void* hotplug_thread(void* user_data)
 {
 	int monitor_fd;
 	int socket_error_polls = 0;
 	int socket_dead = 0;
-	int recover_attempts = 0;
 
 	(void) user_data;
 
@@ -2043,7 +1857,7 @@ static void* hotplug_thread(void* user_data)
 			   touches no shared state below this point, and everything it owned
 			   has just been released), then unlock and return. The pthread_t
 			   stays JOINABLE: hid_exit() - and the next register/deregister -
-			   join it (see hid_internal_hotplug_join_thread), so no
+			   reap it (see hid_internal_hotplug_reap_thread), so no
 			   monitor-thread instruction is still running inside the library
 			   once hid_exit() returns. When the last callback deregistered
 			   itself from within a callback and the application then never calls
@@ -2054,39 +1868,25 @@ static void* hotplug_thread(void* user_data)
 			stop = 1;
 		} else {
 			if (socket_dead && !hid_hotplug_context.monitor_dead) {
-				/* The udev monitor socket died. Losing the event transport is
-				   NOT evidence that the devices disappeared, so DO NOT fabricate
-				   removals for the cached (still-connected) devices. Instead try
-				   to rebuild the transport a bounded number of times; a
-				   successful rebuild re-enumerates and dispatches only the real
-				   deltas that occurred while the socket was down. */
-				if (recover_attempts < HID_HOTPLUG_MONITOR_RECOVER_LIMIT) {
-					int new_fd = -1;
-					++recover_attempts;
-					if (hid_internal_hotplug_recover_monitor(&new_fd) == 0) {
-						/* Transport rebuilt and cache reconciled: resume
-						   monitoring on the fresh descriptor. */
-						monitor_fd = new_fd;
-						socket_dead = 0;
-						socket_error_polls = 0;
-						recover_attempts = 0;
-					}
-					/* else: the dead monitor and the cache are untouched; retry
-					   on a later iteration until the bound is reached */
-				} else {
-					/* Unrecoverable: stop monitoring WITHOUT synthesizing any
-					   removal - the cached devices really are still connected,
-					   so the cache is left exactly as it is. Mark the machinery
-					   dead so new registrations are refused
-					   (hid_hotplug_register_callback) - that refusal is the
-					   observable failure; the global error string is NOT written
-					   from this thread (see hidapi.h). After this, no hotplug
-					   event is ever delivered again for this machinery
-					   generation: the thread idles until its callbacks are
-					   deregistered, then winds down and releases everything
-					   (the dead monitor included). */
-					hid_hotplug_context.monitor_dead = 1;
-				}
+				/* The udev monitor socket died unrecoverably (see the poll()
+				   handling below). Stop delivering events cleanly: losing the
+				   event transport is NOT evidence that the devices left, so do
+				   NOT fabricate removals and do NOT re-enumerate or diff. The
+				   device cache is left exactly as it is and the application's
+				   open handles are untouched (those devices are still physically
+				   connected). Mark the machinery dead so new registrations are
+				   refused (hid_hotplug_register_callback) - that refusal is the
+				   observable failure; the global error string is NOT written
+				   from this thread (see hidapi.h).
+
+				   After an unrecoverable monitor failure, no further hotplug
+				   event is delivered for this machinery generation; devices
+				   already reported remain in the cache and open handles are
+				   unaffected. The thread keeps idling (still flushing any pending
+				   initial ENUMERATE passes) until its callbacks are deregistered,
+				   then winds down and releases everything (the dead monitor
+				   included). */
+				hid_hotplug_context.monitor_dead = 1;
 			}
 
 			/* Deliver the pending initial passes of HID_API_HOTPLUG_ENUMERATE
@@ -2343,7 +2143,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			   here would leave pre-connected devices without their "left"
 			   events later, so it fails the registration (unlike an empty
 			   system, which is not an error) */
-			hid_hotplug_context.devs = hid_internal_enumerate(0, 0, 0, &enumerate_failure);
+			hid_hotplug_context.devs = hid_internal_enumerate(0, 0, &enumerate_failure);
 			if (!enumerate_failure) {
 				register_global_error(NULL);
 			}
@@ -2366,15 +2166,22 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		hid_hotplug_context.hotplug_cbs = hotplug_cb;
 
 		/* Start the thread that will be doing the event scanning.
-		   The thread is JOINABLE. When it winds down (the last callback is
-		   gone) it releases the monitoring context and publishes
+		   hid_internal_hotplug_cleanup() above ran with the callback list empty,
+		   so it wound any previous monitor thread all the way down to
+		   HID_HOTPLUG_THREAD_NONE - reaping a FINISHED one and waiting out any
+		   in-flight join on thread_cond - before we reach here. The state is
+		   therefore NONE and the mutex has been held continuously since, so this
+		   pthread_create never overwrites a context.thread that still labels a
+		   live or unreaped thread.
+		   The thread is JOINABLE. When it winds down (the last callback is gone)
+		   it releases the monitoring context and publishes
 		   HID_HOTPLUG_THREAD_FINISHED under the mutex before it returns; the
-		   pthread_t is then reaped by hid_exit() or the next
-		   register/deregister (see hid_internal_hotplug_join_thread), so no
-		   monitor-thread code is still executing inside the library once
-		   hid_exit() returns - which a detached thread could not guarantee.
-		   Joining is done by ANOTHER thread, never the monitor thread itself,
-		   so it is ThreadSanitizer-clean (unlike pthread_detach(self)). */
+		   pthread_t is then reaped by hid_exit() or the next register/deregister
+		   (see hid_internal_hotplug_reap_thread), so no monitor-thread code is
+		   still executing inside the library once hid_exit() returns - which a
+		   detached thread could not guarantee. Joining is done by ANOTHER thread,
+		   never the monitor thread itself, so it is ThreadSanitizer-clean (unlike
+		   pthread_detach(self)). */
 		int thread_error = pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
 
 		if (thread_error) {
