@@ -1026,6 +1026,15 @@ static struct hid_hotplug_context {
 
 	enum hid_hotplug_thread_state thread_state;
 
+	/* The retired-list node the current generation owns, pre-allocated at
+	   pthread_create time and non-NULL exactly while thread_state is RUNNING or
+	   FINISHED. hid_internal_hotplug_retire_current() splices this already-owned
+	   node onto `retired` instead of allocating, so retiring a finished
+	   generation can never fail - which is why hid_exit() needs no in-place-join
+	   backstop. Freed when its thread is finally joined (reaped off `retired`),
+	   or on the register failure path if the thread is never created. */
+	struct hid_hotplug_monitor_thread *thread_node;
+
 	/* Monitor threads created but not yet joined that are no longer the current
 	   generation (superseded/orphaned). Their pthread_t is moved here instead of
 	   being dropped; every entry is joined before hid_exit() returns. */
@@ -1128,21 +1137,22 @@ static void hid_internal_hotplug_release_monitor(void)
 /* Moves the current generation onto the retired list once it has published
    FINISHED, so its pthread_t is tracked (never dropped) and the current slot is
    free for a new generation. The generation is identified by its stable id token,
-   not by its pthread_t. Called with the mutex held. Returns -1 only if the
-   (small) retired-list node cannot be allocated - leaving the thread FINISHED for
-   a later retry; it never drops or overwrites a live pthread_t. */
-static int hid_internal_hotplug_retire_current(void)
+   not by its pthread_t. Called with the mutex held. This only splices the
+   generation's OWN pre-allocated node (hid_hotplug_context.thread_node, reserved
+   at pthread_create time) onto the list - no allocation - so it CANNOT fail and
+   never drops or overwrites a live pthread_t. */
+static void hid_internal_hotplug_retire_current(void)
 {
 	struct hid_hotplug_monitor_thread *node;
 
 	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_FINISHED) {
-		return 0;
+		return;
 	}
 
-	node = (struct hid_hotplug_monitor_thread *)calloc(1, sizeof(*node));
-	if (node == NULL) {
-		return -1;
-	}
+	/* Splice the generation's own pre-allocated node (never NULL while a
+	   generation exists) onto the retired list: a pointer move, no allocation,
+	   so this can never fail. */
+	node = hid_hotplug_context.thread_node;
 	node->thread = hid_hotplug_context.thread;
 	node->id = hid_hotplug_context.thread_id;
 	node->being_joined = 0;
@@ -1150,9 +1160,9 @@ static int hid_internal_hotplug_retire_current(void)
 	hid_hotplug_context.retired = node;
 
 	/* The current slot no longer names a live-or-finished thread. */
+	hid_hotplug_context.thread_node = NULL;
 	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
 	hid_hotplug_context.thread_id = 0;
-	return 0;
 }
 
 /* Reaps monitor threads: first RETIRES the current generation if it has finished
@@ -1181,10 +1191,10 @@ static int hid_internal_hotplug_retire_current(void)
 static void hid_internal_hotplug_reap_thread(void)
 {
 	/* Retire the finished current generation so it is tracked on the list and
-	   joined below (or by a later reaper / hid_exit). On allocation failure it
-	   stays FINISHED: no pthread_t is dropped, and the pthread_create() site
-	   refuses to overwrite a non-NONE slot, so no generation is orphaned. */
-	(void)hid_internal_hotplug_retire_current();
+	   joined below (or by a later reaper / hid_exit). This only splices the
+	   generation's pre-allocated node onto the list, so it cannot fail: a
+	   finished generation is always retired and never left FINISHED here. */
+	hid_internal_hotplug_retire_current();
 
 	for (;;) {
 		struct hid_hotplug_monitor_thread **link;
@@ -1390,21 +1400,11 @@ static void hid_internal_hotplug_exit(void)
 		   dropped, so from here the retired list only ever shrinks. */
 		hid_internal_hotplug_cleanup();
 
-		/* Backstop for a current generation cleanup could not retire because the
-		   (tiny) retired-list node would not allocate: join it in place. Safe
-		   precisely because `exiting` is set - no thread-specific-data destructor
-		   can start a new generation over the slot while the mutex is dropped, and
-		   hid_exit() is never the monitor thread - so after the join the slot
-		   still names the joined thread and is simply cleared. */
-		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
-			pthread_t thread = hid_hotplug_context.thread;
-			pthread_mutex_unlock(&hid_hotplug_context.mutex);
-			pthread_join(thread, NULL);
-			pthread_mutex_lock(&hid_hotplug_context.mutex);
-			hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
-			hid_hotplug_context.thread_id = 0;
-			continue;
-		}
+		/* No in-place-join backstop is needed here: retiring a finished
+		   generation only splices its pre-allocated node onto the retired list
+		   and can never fail, so hid_internal_hotplug_cleanup() above always
+		   drove the current slot to NONE (the finished generation is now on the
+		   retired list) rather than leaving a published FINISHED slot to join. */
 
 		/* EVERY generation must be joined before hid_exit() returns. cleanup's
 		   reap joined every retired thread it could; anything still on the list is
@@ -2270,10 +2270,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		   thread-specific-data destructor re-registers on the very monitor thread
 		   that just finished: that generation is RETIRED (self-skipped for the
 		   join), never dropped. The mutex has been held continuously since, so the
-		   slot is NONE here; the guard below only fires if retiring the
-		   predecessor could not allocate its (tiny) list node, in which case the
-		   registration fails rather than overwrite - and thereby orphan - a
-		   pthread_t that is still unjoined.
+		   slot is NONE here. The new generation's retired-list node is
+		   pre-allocated below BEFORE the thread is created, so retiring a finished
+		   generation only splices an already-owned node onto the list and can never
+		   fail - which is why hid_exit() needs no in-place-join backstop.
 		   The thread is JOINABLE. When it winds down (the last callback is gone)
 		   it releases the monitoring context and publishes
 		   HID_HOTPLUG_THREAD_FINISHED under the mutex before it returns; the
@@ -2283,21 +2283,37 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		   hid_exit() returns - which a detached thread could not guarantee.
 		   Joining is done by ANOTHER thread, never the monitor thread itself, so
 		   it is ThreadSanitizer-clean (unlike pthread_detach(self)). */
-		if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_NONE
-		    && hid_internal_hotplug_retire_current() != 0) {
+		/* Pre-allocate the retired-list node this new generation will own for its
+		   whole life, BEFORE creating the thread. Retiring a finished generation
+		   (hid_internal_hotplug_retire_current) then only splices this
+		   already-owned node onto the retired list and can never fail, so a
+		   finished generation is ALWAYS tracked and joined and hid_exit() needs no
+		   in-place-join backstop. An allocation failure here is handled cleanly by
+		   failing the registration WITHOUT creating the thread: no orphan is
+		   possible, and there is nothing to unwind beyond the normal path. */
+		struct hid_hotplug_monitor_thread *thread_node =
+			(struct hid_hotplug_monitor_thread *)calloc(1, sizeof(*thread_node));
+		if (thread_node == NULL) {
 			hid_hotplug_context.hotplug_cbs = NULL;
 			/* The handle never became visible: return it to the counter */
 			hid_hotplug_context.next_handle--;
 			hid_internal_hotplug_release_monitor();
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			free(hotplug_cb);
-			register_global_error("Couldn't retire the previous hotplug monitor thread");
+			register_global_error("Couldn't allocate the hotplug monitor thread record");
 			return -1;
 		}
+
+		/* Retire any finished predecessor generation onto the retired list (a
+		   pointer splice of its own pre-allocated node - cannot fail). After the
+		   cleanup above the slot is NONE in the common case, so this usually
+		   no-ops; it never overwrites or drops an unjoined pthread_t. */
+		hid_internal_hotplug_retire_current();
 
 		int thread_error = pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
 
 		if (thread_error) {
+			free(thread_node);
 			hid_hotplug_context.hotplug_cbs = NULL;
 			/* The handle never became visible: return it to the counter */
 			hid_hotplug_context.next_handle--;
@@ -2307,8 +2323,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			register_global_error("Couldn't create the hotplug monitor thread");
 			return -1;
 		}
-		/* Stamp the new generation with a fresh stable id token, then publish it
-		   RUNNING (both under the mutex, before the thread can do anything). */
+		/* The new generation now owns its pre-allocated retired-list node. Stamp
+		   it with a fresh stable id token, then publish it RUNNING (all under the
+		   mutex, before the thread can do anything). */
+		hid_hotplug_context.thread_node = thread_node;
 		hid_hotplug_context.thread_id = hid_hotplug_context.next_thread_id++;
 		hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_RUNNING;
 	}
