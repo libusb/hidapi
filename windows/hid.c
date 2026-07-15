@@ -475,9 +475,11 @@ static wchar_t *last_global_error_str = NULL;
    hands the raw string pointer out to the application without any lock, which
    is why the header requires the application to serialize hid_error(NULL)
    against the hotplug API. HIDAPI's own code on the internal event context
-   never writes the global error; a user callback that calls the public hotplug
-   API from the event context does, and that same serialization requirement in
-   the header covers it. */
+   never writes the global error - not even a user callback that re-enters the
+   public hotplug API from that context: register_global_error_message() drops
+   those writes (see the mutex_in_use guard there). An application therefore
+   never has to serialize hid_error(NULL) against a write it could not see
+   coming, matching the other backends (libusb, linux, mac). */
 static hid_internal_lock global_error_lock = 0;
 
 /* Publishes a message (built by the caller, ownership taken) as the global
@@ -486,6 +488,19 @@ static hid_internal_lock global_error_lock = 0;
 static void register_global_error_message(wchar_t *msg)
 {
 	wchar_t *old_msg;
+
+	/* A user callback runs on HIDAPI's internal event context (a threadpool
+	   work item or the CM notification callback), where mutex_in_use is set for
+	   the whole dispatch. A nested public hotplug call made from such a callback
+	   must not touch last_global_error_str - success clear included: the write
+	   happens on the event context, and the application cannot serialize its
+	   lock-free hid_error(NULL) read against it. Drop the write instead. This is
+	   a cheap byte read of a flag the dispatching thread itself set (and the same
+	   thread holds the critical section), so it adds no lock-order edge. */
+	if (hid_hotplug_context.mutex_in_use) {
+		free(msg);
+		return;
+	}
 
 	hid_internal_lock_acquire(&global_error_lock);
 	old_msg = last_global_error_str;
@@ -2947,6 +2962,11 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 
 	if (!container_id) {
 		register_string_error(dev, L"Invalid Container ID");
+		return -1;
+	}
+
+	if (!dev->device_info) {
+		register_string_error(dev, L"NULL device info");
 		return -1;
 	}
 
