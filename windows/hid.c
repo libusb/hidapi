@@ -469,6 +469,15 @@ static void hid_internal_lock_release(hid_internal_lock *lock)
 
 static wchar_t *last_global_error_str = NULL;
 
+/* Thread-local: true only while THIS thread is inside a user hotplug callback,
+   i.e. it is HIDAPI's internal event context. Thread-specific on purpose - the
+   event context is not a single fixed thread (a threadpool work item or the CM
+   notification callback), so a stored thread id would be fragile, and the flag
+   must be true for the dispatching thread alone, never for a concurrent
+   application thread. This is how mac/libusb detect the event context (they
+   compare its thread identity). */
+static __declspec(thread) int hid_in_hotplug_callback = 0;
+
 /* Serializes mutations of last_global_error_str: the hotplug API is
    thread-safe and its failure paths may write the global error concurrently.
    Note that this only protects writers against each other: hid_error(NULL)
@@ -477,9 +486,9 @@ static wchar_t *last_global_error_str = NULL;
    against the hotplug API. HIDAPI's own code on the internal event context
    never writes the global error - not even a user callback that re-enters the
    public hotplug API from that context: register_global_error_message() drops
-   those writes (see the mutex_in_use guard there). An application therefore
-   never has to serialize hid_error(NULL) against a write it could not see
-   coming, matching the other backends (libusb, linux, mac). */
+   those writes (see hid_in_hotplug_callback). An application therefore never
+   has to serialize hid_error(NULL) against a write it could not see coming,
+   matching the other backends (libusb, linux, mac). */
 static hid_internal_lock global_error_lock = 0;
 
 /* Publishes a message (built by the caller, ownership taken) as the global
@@ -490,14 +499,15 @@ static void register_global_error_message(wchar_t *msg)
 	wchar_t *old_msg;
 
 	/* A user callback runs on HIDAPI's internal event context (a threadpool
-	   work item or the CM notification callback), where mutex_in_use is set for
-	   the whole dispatch. A nested public hotplug call made from such a callback
-	   must not touch last_global_error_str - success clear included: the write
-	   happens on the event context, and the application cannot serialize its
-	   lock-free hid_error(NULL) read against it. Drop the write instead. This is
-	   a cheap byte read of a flag the dispatching thread itself set (and the same
-	   thread holds the critical section), so it adds no lock-order edge. */
-	if (hid_hotplug_context.mutex_in_use) {
+	   work item or the CM notification callback). A nested public hotplug call
+	   made from such a callback must not touch last_global_error_str - success
+	   clear included: the write happens on the event context, and the
+	   application cannot serialize its lock-free hid_error(NULL) read against it.
+	   hid_in_hotplug_callback is thread-local and set only around the callback
+	   invocation, so this drops writes on the dispatching thread alone. A
+	   concurrent application thread (its own flag is 0) still records its errors,
+	   and reading a thread-local is not a shared-memory data race. */
+	if (hid_in_hotplug_callback) {
 		free(msg);
 		return;
 	}
@@ -1067,7 +1077,13 @@ static void hid_internal_hotplug_replay_flush(struct hid_hotplug_callback *callb
 			continue;
 		}
 
+		/* Mark this thread as the event context for the duration of the call, so a
+		   nested public hotplug call does not write the global error (save/restore
+		   keeps nested callbacks composing correctly). */
+		int prev_in_cb = hid_in_hotplug_callback;
+		hid_in_hotplug_callback = 1;
 		int result = (*callback->callback)(callback->handle, device, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, callback->user_data);
+		hid_in_hotplug_callback = prev_in_cb;
 		hid_free_enumeration(device);
 
 		/* A non-zero result stops the remainder of the pass and deregisters the callback */
@@ -1933,7 +1949,12 @@ static void hid_internal_hotplug_dispatch(struct hid_device_info *device, hid_ho
 		hid_internal_hotplug_replay_flush(callback);
 
 		if ((callback->events & hotplug_event) && hid_internal_match_device_id(device->vendor_id, device->product_id, callback->vendor_id, callback->product_id)) {
+			/* Mark this thread as the event context for the duration of the call
+			   (see hid_in_hotplug_callback); save/restore for nested callbacks. */
+			int prev_in_cb = hid_in_hotplug_callback;
+			hid_in_hotplug_callback = 1;
 			int result = (callback->callback)(callback->handle, device, hotplug_event, callback->user_data);
+			hid_in_hotplug_callback = prev_in_cb;
 
 			/* If the result is non-zero, we MARK the callback for future removal and proceed */
 			/* We avoid changing the list until we are done calling the callbacks to simplify the process */
