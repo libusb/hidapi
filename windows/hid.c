@@ -476,7 +476,12 @@ static wchar_t *last_global_error_str = NULL;
    must be true for the dispatching thread alone, never for a concurrent
    application thread. This is how mac/libusb detect the event context (they
    compare its thread identity). */
-static __declspec(thread) int hid_in_hotplug_callback = 0;
+#if defined(_MSC_VER)
+#define HID_THREAD_LOCAL __declspec(thread)
+#else
+#define HID_THREAD_LOCAL __thread /* GCC/Clang (MinGW, Cygwin): __declspec(thread) is ignored there */
+#endif
+static HID_THREAD_LOCAL int hid_in_hotplug_callback = 0;
 
 /* Serializes mutations of last_global_error_str: the hotplug API is
    thread-safe and its failure paths may write the global error concurrently.
