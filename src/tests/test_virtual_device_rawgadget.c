@@ -627,39 +627,82 @@ static void *int_in_thread_fn(void *arg)
 	return NULL;
 }
 
-int test_virtual_device_create(test_virtual_device **out_dev,
-                               unsigned short vendor_id,
-                               unsigned short product_id,
-                               const char *serial)
+/* rg_unplug()/rg_plug() are the repeatable "presence toggle" machinery factored
+   out of destroy()/create(): a plug (re)binds the gadget to the dummy_hcd UDC
+   and starts the workers (USB attach -> libusb ARRIVED); an unplug stops the
+   workers and closes the fd (USB detach -> libusb LEFT). Neither touches the
+   mutex/cond or the identity fields (vendor_id/product_id/serial), so the same
+   dev struct survives an unplug/replug cycle with its identity intact. */
+
+/* The teardown half of the "plug": stop the worker threads and unbind the
+   gadget from the UDC. Closing the fd performs the USB detach. Leaves the
+   mutex/cond and the dev struct intact so the same dev can be replugged.
+   Idempotent: safe to call when already unplugged (fd == -1, no threads). */
+static void rg_unplug(struct test_virtual_device *dev)
 {
-	struct test_virtual_device *dev;
+	dev->stop = 1;
+	pthread_mutex_lock(&dev->lock);
+	pthread_cond_broadcast(&dev->cond);
+	pthread_mutex_unlock(&dev->lock);
+
+	/* The ep0 thread is parked in the blocking EVENT_FETCH ioctl (and the
+	   int_in thread may be in EP_WRITE); interrupt them with SIGUSR1 until the
+	   ep0 thread reports it has left its loop, so the joins below don't hang. */
+	{
+		int spins = 0;
+		while (dev->ep0_started && !dev->ep0_exited && spins++ < 500) {
+			pthread_kill(dev->ep0_thread, SIGUSR1);
+			if (dev->int_in_started)
+				pthread_kill(dev->int_in_thread, SIGUSR1);
+			sleep_ms(10);
+		}
+	}
+
+	if (dev->int_in_started) {
+		pthread_join(dev->int_in_thread, NULL);
+		dev->int_in_started = 0;
+	}
+	if (dev->ep0_started) {
+		pthread_join(dev->ep0_thread, NULL);
+		dev->ep0_started = 0;
+	}
+
+	if (dev->fd >= 0) {
+		close(dev->fd);
+		dev->fd = -1;
+	}
+}
+
+/* (Re-)bind the gadget to the dummy_hcd UDC and start the worker threads. This
+   is the "plug": open + INIT + RUN performs the USB attach and the ep0 thread
+   answers enumeration. Returns TEST_VDEV_UNAVAILABLE when there is no raw-gadget
+   node or no dummy_hcd UDC to bind (INIT/RUN failure, e.g. the UDC is already
+   bound by another gadget). On any failure it cleans up like the old create()
+   fail path and leaves dev in the unplugged state (fd == -1, threads stopped). */
+static int rg_plug(struct test_virtual_device *dev)
+{
 	struct usb_raw_init init;
 	int rc;
 
-	if (!out_dev)
-		return TEST_VDEV_ERROR;
-	*out_dev = NULL;
-
-	dev = (struct test_virtual_device *)calloc(1, sizeof(*dev));
-	if (!dev)
-		return TEST_VDEV_ERROR;
-
+	/* Reset every per-plug field so a 2nd/3rd plug behaves exactly like the
+	   first. The signal handler being (re)installed is harmless, and ep0_exited
+	   MUST be 0 here so rg_unplug's SIGUSR1 spin drives the *new* ep0 thread.
+	   The mutex/cond and identity (vendor/product/serial) are intentionally
+	   left untouched -- they persist across the unplug/replug cycle. */
+	dev->stop = 0;
 	dev->fd = -1;
 	dev->int_in_ep = -1;
 	dev->int_in_addr = 0x81;
+	dev->configured = 0;
+	dev->ep0_started = 0;
+	dev->int_in_started = 0;
+	dev->ep0_exited = 0;
 	dev->pending = TEST_VDEV_CMD_NONE;
-	dev->vendor_id = vendor_id;
-	dev->product_id = product_id;
-	snprintf(dev->serial, sizeof(dev->serial), "%s", serial ? serial : "");
-	pthread_mutex_init(&dev->lock, NULL);
-	pthread_cond_init(&dev->cond, NULL);
 
 	dev->fd = open("/dev/raw-gadget", O_RDWR);
 	if (dev->fd < 0) {
 		int e = errno;
-		pthread_cond_destroy(&dev->cond);
-		pthread_mutex_destroy(&dev->lock);
-		free(dev);
+		dev->fd = -1;
 		if (e == ENOENT || e == EACCES || e == EPERM || e == ENODEV)
 			return TEST_VDEV_UNAVAILABLE;
 		return TEST_VDEV_ERROR;
@@ -672,11 +715,9 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	init.speed = USB_SPEED_HIGH;
 	if (ioctl(dev->fd, USB_RAW_IOCTL_INIT, &init) < 0 ||
 	    ioctl(dev->fd, USB_RAW_IOCTL_RUN, 0) < 0) {
-		/* No dummy_hcd UDC present -> nothing to emulate on; skip. */
+		/* No dummy_hcd UDC to bind (absent, or already in use) -> skip. */
 		close(dev->fd);
-		pthread_cond_destroy(&dev->cond);
-		pthread_mutex_destroy(&dev->lock);
-		free(dev);
+		dev->fd = -1;
 		return TEST_VDEV_UNAVAILABLE;
 	}
 
@@ -692,27 +733,49 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 		goto fail_threads;
 	dev->int_in_started = 1;
 
-	*out_dev = dev;
 	return TEST_VDEV_OK;
 
 fail_threads:
-	dev->stop = 1;
-	pthread_mutex_lock(&dev->lock);
-	pthread_cond_broadcast(&dev->cond);
-	pthread_mutex_unlock(&dev->lock);
-	if (dev->ep0_started) {
-		int spins = 0;
-		while (!dev->ep0_exited && spins++ < 500) {
-			pthread_kill(dev->ep0_thread, SIGUSR1);
-			sleep_ms(10);
-		}
-		pthread_join(dev->ep0_thread, NULL);
-	}
-	close(dev->fd);
-	pthread_cond_destroy(&dev->cond);
-	pthread_mutex_destroy(&dev->lock);
-	free(dev);
+	/* Stop+join whatever started and close the fd; rg_unplug leaves dev in the
+	   unplugged state (fd == -1, *_started == 0), ready for a later replug. */
+	rg_unplug(dev);
 	return TEST_VDEV_ERROR;
+}
+
+int test_virtual_device_create(test_virtual_device **out_dev,
+                               unsigned short vendor_id,
+                               unsigned short product_id,
+                               const char *serial)
+{
+	struct test_virtual_device *dev;
+	int rc;
+
+	if (!out_dev)
+		return TEST_VDEV_ERROR;
+	*out_dev = NULL;
+
+	dev = (struct test_virtual_device *)calloc(1, sizeof(*dev));
+	if (!dev)
+		return TEST_VDEV_ERROR;
+
+	/* Identity + lifetime state: these outlive any unplug/replug. The per-plug
+	   fields are (re)initialised by rg_plug. */
+	dev->vendor_id = vendor_id;
+	dev->product_id = product_id;
+	snprintf(dev->serial, sizeof(dev->serial), "%s", serial ? serial : "");
+	pthread_mutex_init(&dev->lock, NULL);
+	pthread_cond_init(&dev->cond, NULL);
+
+	rc = rg_plug(dev);
+	if (rc != TEST_VDEV_OK) {
+		pthread_cond_destroy(&dev->cond);
+		pthread_mutex_destroy(&dev->lock);
+		free(dev);
+		return rc;
+	}
+
+	*out_dev = dev;
+	return TEST_VDEV_OK;
 }
 
 hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeout_ms)
@@ -771,54 +834,26 @@ void test_virtual_device_destroy(test_virtual_device *dev)
 {
 	if (!dev)
 		return;
-
-	dev->stop = 1;
-	pthread_mutex_lock(&dev->lock);
-	pthread_cond_broadcast(&dev->cond);
-	pthread_mutex_unlock(&dev->lock);
-
-	/* The ep0 thread is parked in the blocking EVENT_FETCH ioctl (and the
-	   int_in thread may be in EP_WRITE); interrupt them with SIGUSR1 until the
-	   ep0 thread reports it has left its loop, so the joins below don't hang. */
-	{
-		int spins = 0;
-		while (dev->ep0_started && !dev->ep0_exited && spins++ < 500) {
-			pthread_kill(dev->ep0_thread, SIGUSR1);
-			if (dev->int_in_started)
-				pthread_kill(dev->int_in_thread, SIGUSR1);
-			sleep_ms(10);
-		}
-	}
-
-	if (dev->int_in_started) {
-		pthread_join(dev->int_in_thread, NULL);
-		dev->int_in_started = 0;
-	}
-	if (dev->ep0_started) {
-		pthread_join(dev->ep0_thread, NULL);
-		dev->ep0_started = 0;
-	}
-
-	if (dev->fd >= 0) {
-		close(dev->fd);
-		dev->fd = -1;
-	}
-
+	rg_unplug(dev);
 	pthread_cond_destroy(&dev->cond);
 	pthread_mutex_destroy(&dev->lock);
 	free(dev);
 }
 
-/* Unplug/replug (device-presence toggling for the hotplug tests) is not
- * implemented for this provider yet; the hotplug tests self-skip here. */
+/* Device-presence toggling for the hotplug tests: unplug detaches the gadget
+ * (USB disconnect -> libusb LEFT) while keeping dev alive; replug re-attaches it
+ * with the same VID/PID/serial (USB connect -> libusb ARRIVED). */
 int test_virtual_device_unplug(test_virtual_device *dev)
 {
-	(void)dev;
-	return TEST_VDEV_UNAVAILABLE;
+	if (!dev)
+		return TEST_VDEV_ERROR;
+	rg_unplug(dev);
+	return TEST_VDEV_OK;
 }
 
 int test_virtual_device_replug(test_virtual_device *dev)
 {
-	(void)dev;
-	return TEST_VDEV_UNAVAILABLE;
+	if (!dev)
+		return TEST_VDEV_ERROR;
+	return rg_plug(dev);
 }
