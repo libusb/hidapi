@@ -137,6 +137,38 @@ static CONFIGRET locate_vhid_devnode(DEVINST *out_devinst)
 	return CR_NO_SUCH_DEVNODE;
 }
 
+/* Find the HID child PDO of the vhidmini function devnode. Presence toggling acts
+   on this leaf (not the function device): disabling/enabling it raises the HID
+   interface removal/arrival the winapi backend watches, while leaving the UMDF
+   host running - disabling the function device instead re-creates the child in a
+   non-started state, so its HID interface never comes back. Prefers the child
+   whose instance id is under the HID enumerator; falls back to the first child. */
+static CONFIGRET find_hid_child(DEVINST func, DEVINST *out_child)
+{
+	DEVINST child, first;
+	CONFIGRET cr;
+
+	cr = CM_Get_Child(&child, func, 0);
+	if (cr != CR_SUCCESS)
+		return cr; /* CR_NO_SUCH_DEVNODE if the function device has no child */
+
+	first = child; /* fallback: the function device's first child */
+	for (;;) {
+		char cid[MAX_DEVICE_ID_LEN];
+
+		if (CM_Get_Device_IDA(child, cid, (ULONG)sizeof(cid), 0) == CR_SUCCESS &&
+		    strncmp(cid, "HID\\", 4) == 0) {
+			*out_child = child;
+			return CR_SUCCESS;
+		}
+		if (CM_Get_Sibling(&child, child, 0) != CR_SUCCESS)
+			break;
+	}
+
+	*out_child = first;
+	return CR_SUCCESS;
+}
+
 int test_virtual_device_create(test_virtual_device **out_dev,
                                unsigned short vendor_id,
                                unsigned short product_id,
@@ -237,32 +269,33 @@ int test_virtual_device_trigger(test_virtual_device *dev, hid_device *handle,
 void test_virtual_device_destroy(test_virtual_device *dev)
 {
 	/* The harness (CI) uninstalls the driver/device after the test. But if a
-	   test unplugged (disabled the devnode) and exited before replugging it,
-	   re-enable it best-effort so a later run on the same host is not left with
-	   a disabled devnode. Locating/enabling an absent, already-enabled, or
-	   access-denied node is harmless, so the CONFIGRETs are intentionally
-	   ignored here. */
-	DEVINST devinst;
-	if (locate_vhid_devnode(&devinst) == CR_SUCCESS)
-		(void)CM_Enable_DevNode(devinst, 0);
+	   test unplugged (disabled the HID child) and exited before replugging it,
+	   re-enable the child best-effort so a later run on the same host is not left
+	   with a disabled device. Locating/enabling an absent, already-enabled, or
+	   access-denied node is harmless, so the CONFIGRETs are intentionally ignored
+	   here. */
+	DEVINST func, child;
+	if (locate_vhid_devnode(&func) == CR_SUCCESS &&
+	    find_hid_child(func, &child) == CR_SUCCESS)
+		(void)CM_Enable_DevNode(child, 0);
 	free(dev);
 }
 
-/* Unplug = disable the root devnode. This tears down the HIDClass child PDO, so
- * the GUID_DEVINTERFACE_HID interface disappears and the winapi backend's PnP
- * notification fires a removal (the test then sees the device LEFT / gone from
- * hid_enumerate). This is also the hotplug test's capability probe, so a devnode
- * that cannot be located (driver/device not installed) or that cannot be
- * disabled for lack of elevation (CR_ACCESS_DENIED) returns UNAVAILABLE, which
- * makes the test skip cleanly instead of failing. */
+/* Unplug = disable the HID child PDO. Its GUID_DEVINTERFACE_HID interface
+ * disappears and the winapi backend's PnP notification fires a removal (the test
+ * then sees the device LEFT / gone from hid_enumerate), while the UMDF function
+ * device keeps running. This is also the hotplug test's capability probe, so a
+ * function devnode that cannot be located (driver/device not installed) or a
+ * child that cannot be disabled for lack of elevation (CR_ACCESS_DENIED) returns
+ * UNAVAILABLE, which makes the test skip cleanly instead of failing. */
 int test_virtual_device_unplug(test_virtual_device *dev)
 {
-	DEVINST devinst;
+	DEVINST func, child;
 	CONFIGRET cr;
 
 	(void)dev; /* the devnode is installed out-of-band by the CI job */
 
-	cr = locate_vhid_devnode(&devinst);
+	cr = locate_vhid_devnode(&func);
 	if (cr == CR_NO_SUCH_DEVNODE) {
 		fprintf(stderr, "[win-vdev] no ROOT devnode with hardware id '%s' "
 		                "(driver/device not installed) -> hotplug test skips\n",
@@ -275,68 +308,67 @@ int test_virtual_device_unplug(test_virtual_device *dev)
 		return TEST_VDEV_ERROR;
 	}
 
-	cr = CM_Disable_DevNode(devinst, 0);
+	cr = find_hid_child(func, &child);
+	if (cr != CR_SUCCESS)
+		return TEST_VDEV_OK; /* no HID child -> already absent, nothing to disable */
+
+	cr = CM_Disable_DevNode(child, 0);
 	if (cr == CR_SUCCESS)
 		return TEST_VDEV_OK;
 	if (cr == CR_ACCESS_DENIED) {
-		fprintf(stderr, "[win-vdev] CM_Disable_DevNode -> CR_ACCESS_DENIED "
-		                "(not elevated, or devnode not disableable) -> hotplug test skips\n");
+		fprintf(stderr, "[win-vdev] CM_Disable_DevNode(child) -> CR_ACCESS_DENIED "
+		                "(not elevated) -> hotplug test skips\n");
 		return TEST_VDEV_UNAVAILABLE; /* not elevated -> skip, don't fail */
 	}
-	fprintf(stderr, "[win-vdev] CM_Disable_DevNode failed: CONFIGRET 0x%lX\n",
+	fprintf(stderr, "[win-vdev] CM_Disable_DevNode(child) failed: CONFIGRET 0x%lX\n",
 	        (unsigned long)cr);
 	return TEST_VDEV_ERROR;
 }
 
-/* Replug = re-enable the root devnode. The HIDClass child PDO and its HID
- * interface are re-created, so the backend sees an arrival (the device is back
- * in hid_enumerate). Failure here is a hard error, not a skip: if unplug()
- * disabled the devnode we must be able to re-enable it. */
+/* Replug = re-enable the HID child PDO disabled by unplug(). Its HID interface is
+ * re-created, so the backend sees an arrival (the device is back in
+ * hid_enumerate). Failure here is a hard error, not a skip: if unplug() disabled
+ * the child we must be able to re-enable it. */
 int test_virtual_device_replug(test_virtual_device *dev)
 {
-	DEVINST devinst, child;
+	DEVINST func, child;
 	CONFIGRET cr;
 	ULONG status = 0, problem = 0;
 
 	(void)dev;
 
-	cr = locate_vhid_devnode(&devinst);
+	cr = locate_vhid_devnode(&func);
 	if (cr != CR_SUCCESS) {
 		fprintf(stderr, "[win-vdev] replug locate failed: CONFIGRET 0x%lX\n",
 		        (unsigned long)cr);
 		return TEST_VDEV_ERROR;
 	}
 
-	cr = CM_Enable_DevNode(devinst, 0);
+	cr = find_hid_child(func, &child);
 	if (cr != CR_SUCCESS) {
-		fprintf(stderr, "[win-vdev] CM_Enable_DevNode failed: CONFIGRET 0x%lX\n",
+		/* The child devnode is gone entirely (not merely disabled); ask the
+		   function device to re-report it, then retry. */
+		(void)CM_Reenumerate_DevNode(func, CM_REENUMERATE_SYNCHRONOUS);
+		cr = find_hid_child(func, &child);
+		if (cr != CR_SUCCESS) {
+			fprintf(stderr, "[win-vdev] replug: no HID child to enable: CONFIGRET 0x%lX\n",
+			        (unsigned long)cr);
+			return TEST_VDEV_ERROR;
+		}
+	}
+
+	cr = CM_Enable_DevNode(child, 0);
+	if (cr != CR_SUCCESS) {
+		fprintf(stderr, "[win-vdev] CM_Enable_DevNode(child) failed: CONFIGRET 0x%lX\n",
 		        (unsigned long)cr);
 		return TEST_VDEV_ERROR;
 	}
 
-	/* Enabling the function devnode restarts it (its status shows DN_STARTED),
-	   but its child HID PDO is not always rebuilt automatically. Re-enumerate the
-	   function devnode itself - not its parent - so PnP re-queries *its* children
-	   and the vhidmini driver re-reports the HID collection, making the
-	   GUID_DEVINTERFACE_HID interface reappear (the caller then polls
-	   hid_enumerate for it). */
-	(void)CM_Reenumerate_DevNode(devinst, CM_REENUMERATE_SYNCHRONOUS);
-
-	/* Diagnostics: function-device health plus its children after re-enable. A
-	   non-zero problem code, or no HID child listed, explains an enumerate
-	   timeout in the caller. */
-	if (CM_Get_DevNode_Status(&status, &problem, devinst, 0) == CR_SUCCESS)
-		fprintf(stderr, "[win-vdev] after enable: status=0x%lX problem=0x%lX\n",
+	/* Diagnostic: child health after re-enable; a non-zero problem code explains
+	   an enumerate timeout in the caller. */
+	if (CM_Get_DevNode_Status(&status, &problem, child, 0) == CR_SUCCESS)
+		fprintf(stderr, "[win-vdev] child after enable: status=0x%lX problem=0x%lX\n",
 		        (unsigned long)status, (unsigned long)problem);
-	if (CM_Get_Child(&child, devinst, 0) == CR_SUCCESS) {
-		do {
-			char cid[MAX_DEVICE_ID_LEN];
-			if (CM_Get_Device_IDA(child, cid, (ULONG)sizeof(cid), 0) == CR_SUCCESS)
-				fprintf(stderr, "[win-vdev]   child: %s\n", cid);
-		} while (CM_Get_Sibling(&child, child, 0) == CR_SUCCESS);
-	} else {
-		fprintf(stderr, "[win-vdev]   no child devnode after enable\n");
-	}
 
 	return TEST_VDEV_OK;
 }
