@@ -6,8 +6,8 @@
 
  Copyright 2026.
 
- Test support: tiny cross-platform helpers (threads, timing)
- so the HIDAPI unit tests stay platform-neutral.
+ Test support: tiny cross-platform helpers (threads, mutexes,
+ timing) so the HIDAPI unit tests stay platform-neutral.
 
  The contents of this file may be used by anyone for any
  reason without any conditions and may be used as a
@@ -21,11 +21,12 @@
   #include <windows.h>
 #else
   #include <pthread.h>
+  #include <stdint.h>
   #include <time.h>
 #endif
 
 /* Monotonic milliseconds for measuring elapsed time. */
-static long long test_now_ms(void)
+static inline long long test_now_ms(void)
 {
 #ifdef _WIN32
 	return (long long)GetTickCount64();
@@ -36,7 +37,7 @@ static long long test_now_ms(void)
 #endif
 }
 
-static void test_sleep_ms(int ms)
+static inline void test_sleep_ms(int ms)
 {
 #ifdef _WIN32
 	Sleep((DWORD)ms);
@@ -45,6 +46,64 @@ static void test_sleep_ms(int ms)
 	ts.tv_sec = ms / 1000;
 	ts.tv_nsec = (long)(ms % 1000) * 1000000L;
 	nanosleep(&ts, NULL);
+#endif
+}
+
+/* An id of the calling thread, usable for equality comparison only. */
+static inline unsigned long long test_thread_id(void)
+{
+#ifdef _WIN32
+	return (unsigned long long)GetCurrentThreadId();
+#else
+	/* pthread_t is opaque; the tests only ever compare ids for (in)equality,
+	   and on every platform HIDAPI supports pthread_t is an integer or a
+	   pointer, so the cast preserves the identity the tests care about. */
+	return (unsigned long long)(uintptr_t)pthread_self();
+#endif
+}
+
+/* A plain (non-recursive) mutex. */
+typedef struct test_mutex {
+#ifdef _WIN32
+	CRITICAL_SECTION cs;
+#else
+	pthread_mutex_t mutex;
+#endif
+} test_mutex;
+
+static inline void test_mutex_init(test_mutex *m)
+{
+#ifdef _WIN32
+	InitializeCriticalSection(&m->cs);
+#else
+	pthread_mutex_init(&m->mutex, NULL);
+#endif
+}
+
+static inline void test_mutex_destroy(test_mutex *m)
+{
+#ifdef _WIN32
+	DeleteCriticalSection(&m->cs);
+#else
+	pthread_mutex_destroy(&m->mutex);
+#endif
+}
+
+static inline void test_mutex_lock(test_mutex *m)
+{
+#ifdef _WIN32
+	EnterCriticalSection(&m->cs);
+#else
+	pthread_mutex_lock(&m->mutex);
+#endif
+}
+
+static inline void test_mutex_unlock(test_mutex *m)
+{
+#ifdef _WIN32
+	LeaveCriticalSection(&m->cs);
+#else
+	pthread_mutex_unlock(&m->mutex);
 #endif
 }
 
@@ -62,14 +121,14 @@ typedef struct test_thread {
 } test_thread;
 
 #ifdef _WIN32
-static DWORD WINAPI test__thread_entry(LPVOID p)
+static inline DWORD WINAPI test__thread_entry(LPVOID p)
 {
 	test_thread *t = (test_thread *)p;
 	t->fn(t->arg);
 	return 0;
 }
 #else
-static void *test__thread_entry(void *p)
+static inline void *test__thread_entry(void *p)
 {
 	test_thread *t = (test_thread *)p;
 	t->fn(t->arg);
@@ -79,7 +138,7 @@ static void *test__thread_entry(void *p)
 #endif
 
 /* Returns 0 on success, -1 on failure. */
-static int test_thread_start(test_thread *t, void (*fn)(void *), void *arg)
+static inline int test_thread_start(test_thread *t, void (*fn)(void *), void *arg)
 {
 	t->fn = fn;
 	t->arg = arg;
@@ -93,7 +152,7 @@ static int test_thread_start(test_thread *t, void (*fn)(void *), void *arg)
 }
 
 /* Join with a timeout. Returns 0 if the thread finished, -1 on timeout. */
-static int test_thread_join_timeout(test_thread *t, int timeout_ms)
+static inline int test_thread_join_timeout(test_thread *t, int timeout_ms)
 {
 #ifdef _WIN32
 	DWORD r = WaitForSingleObject(t->handle, (DWORD)timeout_ms);
