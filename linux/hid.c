@@ -1101,8 +1101,10 @@ static void hid_internal_hotplug_release_monitor(void)
    it may still execute - and such a destructor re-entering HIDAPI would block on
    the hotplug mutex forever if the joiner held it, deadlocking the join. So the
    reaper sets join_in_progress, RELEASES the mutex for the join, then RE-ACQUIRES
-   it, advances the state to NONE, clears join_in_progress and broadcasts
-   thread_cond. A second reaper that finds join_in_progress set waits on
+   it, advances the state to NONE - but ONLY IF the generation it joined is still
+   the current one (such a destructor may have started a new generation while the
+   mutex was dropped; see the join site below) - then clears join_in_progress and
+   broadcasts thread_cond. A second reaper that finds join_in_progress set waits on
    thread_cond instead of joining the same pthread_t twice (undefined behavior),
    and wakes to observe NONE. Because the mutex is dropped, callers must
    re-validate cached state after this returns (hid_internal_hotplug_cleanup
@@ -1137,13 +1139,36 @@ static void hid_internal_hotplug_reap_thread(void)
 		return;
 	}
 
-	/* Claim the join, drop the mutex for it, then re-acquire and publish NONE. */
+	/* Claim the join, drop the mutex for it, then re-acquire. */
 	thread = hid_hotplug_context.thread;
 	hid_hotplug_context.join_in_progress = 1;
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 	pthread_join(thread, NULL);
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
+
+	/* Publish NONE only if the generation just joined is still the current one.
+	   While the mutex was dropped for the join, a thread-specific-data
+	   destructor running on the very thread being joined can - legally, from a
+	   user-callback context - re-enter hid_hotplug_register_callback(): its
+	   hid_internal_hotplug_cleanup() takes the pthread_equal() self-guard and
+	   DEFERS instead of joining, so the registration proceeds, finds the
+	   callback list empty and starts a NEW monitor generation, overwriting
+	   context.thread with a live thread and setting thread_state = RUNNING.
+	   Stamping NONE over that would strand the new generation: hid_exit() would
+	   see NONE and return WITHOUT joining it, leaving a monitor thread running
+	   inside the library after it is unloaded (the dlclose use-after-free). So
+	   advance to NONE only when context.thread still names the thread this
+	   reaper joined (by identity - pthread_equal, not ==) and it is still
+	   FINISHED; otherwise a newer generation now owns the lifecycle state and
+	   must be left completely untouched (it is reaped by its own future reaper /
+	   hid_exit). The completed pthread_join() already reaped the old thread, so
+	   nothing leaks either way. join_in_progress is cleared and thread_cond
+	   broadcast unconditionally, so any reaper or registration waiting out this
+	   join wakes and re-evaluates whichever branch was taken. */
+	if (pthread_equal(hid_hotplug_context.thread, thread)
+	    && hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
+		hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
+	}
 	hid_hotplug_context.join_in_progress = 0;
 	pthread_cond_broadcast(&hid_hotplug_context.thread_cond);
 }
