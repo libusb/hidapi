@@ -471,7 +471,12 @@ extern "C" {
 			If @p vendor_id and @p product_id are both set to 0, then all HID devices will be notified.
 
 			If HIDAPI is not initialized yet, this function initializes it
-			implicitly (as if by hid_init()).
+			implicitly (as if by hid_init()). On some backends this binds
+			HIDAPI's device-monitoring facilities to the calling thread (for
+			example, the macOS backend schedules its run loop there). An
+			application that cares which thread owns those facilities should
+			call hid_init() explicitly from that thread first, rather than
+			relying on the implicit initialization performed here.
 
 			When #HID_API_HOTPLUG_ENUMERATE is set, the synthetic "arrived"
 			events are delivered asynchronously on HIDAPI's internal event
@@ -530,7 +535,10 @@ extern "C" {
 				Call hid_error(NULL) to get the failure reason.
 				Registration fails if @p callback is NULL, if @p events
 				contains no valid #hid_hotplug_event bit, or if @p events
-				or @p flags contain unknown bits.
+				or @p flags contain unknown bits. When more than one argument
+				is invalid, which one the failure string names is
+				unspecified and may differ between backends; only the -1
+				return and the zeroed @p callback_handle are guaranteed.
 
 			@note On backends without hotplug support (e.g. NetBSD)
 				this function always returns -1.
