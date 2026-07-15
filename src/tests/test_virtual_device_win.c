@@ -294,7 +294,7 @@ int test_virtual_device_unplug(test_virtual_device *dev)
  * disabled the devnode we must be able to re-enable it. */
 int test_virtual_device_replug(test_virtual_device *dev)
 {
-	DEVINST devinst, parent;
+	DEVINST devinst, child;
 	CONFIGRET cr;
 	ULONG status = 0, problem = 0;
 
@@ -314,21 +314,29 @@ int test_virtual_device_replug(test_virtual_device *dev)
 		return TEST_VDEV_ERROR;
 	}
 
-	/* Enabling the function devnode does not reliably re-create its child HID
-	   PDO on its own, so the GUID_DEVINTERFACE_HID interface may not reappear.
-	   Re-enumerate the parent subtree to make PnP restart the function device
-	   and rebuild the HID interface; the caller then polls hid_enumerate for it
-	   to come back. */
-	if (CM_Get_Parent(&parent, devinst, 0) == CR_SUCCESS)
-		(void)CM_Reenumerate_DevNode(parent, CM_REENUMERATE_SYNCHRONOUS);
-	else
-		(void)CM_Reenumerate_DevNode(devinst, CM_REENUMERATE_SYNCHRONOUS);
+	/* Enabling the function devnode restarts it (its status shows DN_STARTED),
+	   but its child HID PDO is not always rebuilt automatically. Re-enumerate the
+	   function devnode itself - not its parent - so PnP re-queries *its* children
+	   and the vhidmini driver re-reports the HID collection, making the
+	   GUID_DEVINTERFACE_HID interface reappear (the caller then polls
+	   hid_enumerate for it). */
+	(void)CM_Reenumerate_DevNode(devinst, CM_REENUMERATE_SYNCHRONOUS);
 
-	/* Diagnostic: a non-zero problem code here (e.g. 0x16 CM_PROB_DISABLED)
-	   explains a subsequent enumerate timeout. */
+	/* Diagnostics: function-device health plus its children after re-enable. A
+	   non-zero problem code, or no HID child listed, explains an enumerate
+	   timeout in the caller. */
 	if (CM_Get_DevNode_Status(&status, &problem, devinst, 0) == CR_SUCCESS)
 		fprintf(stderr, "[win-vdev] after enable: status=0x%lX problem=0x%lX\n",
 		        (unsigned long)status, (unsigned long)problem);
+	if (CM_Get_Child(&child, devinst, 0) == CR_SUCCESS) {
+		do {
+			char cid[MAX_DEVICE_ID_LEN];
+			if (CM_Get_Device_IDA(child, cid, (ULONG)sizeof(cid), 0) == CR_SUCCESS)
+				fprintf(stderr, "[win-vdev]   child: %s\n", cid);
+		} while (CM_Get_Sibling(&child, child, 0) == CR_SUCCESS);
+	} else {
+		fprintf(stderr, "[win-vdev]   no child devnode after enable\n");
+	}
 
 	return TEST_VDEV_OK;
 }
