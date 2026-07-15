@@ -262,6 +262,12 @@ static void register_error_str_vformat(wchar_t **error_str, const char *format, 
 	register_error_str(error_str, msg);
 }
 
+/* True when the calling thread is HIDAPI's internal hotplug event thread; used
+   to suppress writes to the global error string made from that thread (see the
+   definition after the hotplug context for the full rationale). Must be called
+   with global_error_mutex held. */
+static int hid_internal_on_event_thread(void);
+
 /* Serializes the mutations of the global error string: the hotplug API is
    thread-safe and its failure paths (and the implicit hid_init()) may write
    the global error from multiple threads concurrently. */
@@ -275,7 +281,14 @@ static pthread_mutex_t global_error_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void register_global_error(const char *msg)
 {
 	pthread_mutex_lock(&global_error_mutex);
-	register_error_str(&last_global_error_str, msg);
+	/* Honor the cross-backend contract (see hidapi.h): a global-error write
+	   attempted on the internal hotplug event thread - e.g. from a
+	   hid_hotplug_(de)register_callback() call re-entered from within a user
+	   callback - must not touch the global error string. Per-device errors go
+	   through register_error_str() with a different target and are unaffected;
+	   only this process-global string is suppressed. */
+	if (!hid_internal_on_event_thread())
+		register_error_str(&last_global_error_str, msg);
 	pthread_mutex_unlock(&global_error_mutex);
 }
 
@@ -285,7 +298,9 @@ static void register_global_error_format(const char *format, ...)
 	va_list args;
 	va_start(args, format);
 	pthread_mutex_lock(&global_error_mutex);
-	register_error_str_vformat(&last_global_error_str, format, args);
+	/* See register_global_error(): suppressed on the internal event thread. */
+	if (!hid_internal_on_event_thread())
+		register_error_str_vformat(&last_global_error_str, format, args);
 	pthread_mutex_unlock(&global_error_mutex);
 	va_end(args);
 }
@@ -588,6 +603,15 @@ static struct hid_hotplug_context {
 	   registering thread after it (the barrier is the synchronization edge) */
 	unsigned char startup_ok;
 
+	/* Identity of the running hotplug event thread. Published by that thread as
+	   its first action and cleared in its epilogue, so it is valid exactly while
+	   an event thread exists. Guarded by global_error_mutex (a leaf mutex), NOT
+	   the hotplug mutex: the global-error writer consults it while holding
+	   global_error_mutex and must never take the hotplug mutex it may already
+	   hold. Read only via hid_internal_on_event_thread(). */
+	pthread_t event_thread_id;
+	unsigned char event_thread_id_valid;
+
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
 
@@ -599,6 +623,24 @@ static struct hid_hotplug_context {
    never destroyed: they live for the lifetime of the process, so that no thread
    can ever lock a mutex that hid_exit() destroyed underneath it */
 static pthread_once_t hid_hotplug_init_once = PTHREAD_ONCE_INIT;
+
+/* HIDAPI's public API contract (see hidapi.h) is that HIDAPI calls made from
+   within a hotplug callback do not update the global error string: the callback
+   runs on this internal event thread, and an application cannot serialize a
+   hid_error(NULL) read against a write from that thread - that would be a
+   use-after-free of last_global_error_str. This mirrors the libusb and linux
+   backends, which likewise suppress such writes. A callback may re-enter the
+   public hid_hotplug_register_callback()/hid_hotplug_deregister_callback(),
+   whose success and failure paths both write the global error; those writes are
+   suppressed via this check in register_global_error()[_format]().
+   Returns non-zero when the caller is the hotplug event thread. Must be called
+   with global_error_mutex held (the event_thread_id* fields are guarded by it),
+   which the global-error writer already holds. */
+static int hid_internal_on_event_thread(void)
+{
+	return hid_hotplug_context.event_thread_id_valid
+		&& pthread_equal(pthread_self(), hid_hotplug_context.event_thread_id);
+}
 
 static void hid_internal_hotplug_remove_postponed(void)
 {
@@ -1661,6 +1703,16 @@ static void hid_internal_hotplug_thread_epilogue(void)
 {
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
+	/* The event thread is exiting: stop suppressing global-error writes for its
+	   pthread id. Cleared under the hotplug mutex - before the thread is detached
+	   or collected, and thus before any replacement event thread can be started
+	   and publish its own id - so a later thread's id can never be clobbered.
+	   Ordering is hotplug mutex -> global_error_mutex, the same order the
+	   global-error writer uses when it is called under the hotplug mutex. */
+	pthread_mutex_lock(&global_error_mutex);
+	hid_hotplug_context.event_thread_id_valid = 0;
+	pthread_mutex_unlock(&global_error_mutex);
+
 	if (hid_hotplug_context.thread_needs_join && !hid_hotplug_context.join_in_progress) {
 		/* Nobody is inside pthread_join() on this thread, and nobody can enter
 		   it any more: the decision is taken under the mutex on both sides (see
@@ -1681,6 +1733,18 @@ static void* hotplug_thread(void* user_data)
 	int manager_opened = 0;
 
 	(void) user_data;
+
+	/* Publish this thread's identity as the very first action, before anything
+	   here can attempt a global-error write, so that any such write on this
+	   internal event thread - notably from a user callback that re-enters
+	   hid_hotplug_(de)register_callback() - is suppressed (see
+	   hid_internal_on_event_thread()). Uses global_error_mutex only: the hotplug
+	   mutex must not be taken during the startup phase (the registrant holds it,
+	   parked at the startup barrier). */
+	pthread_mutex_lock(&global_error_mutex);
+	hid_hotplug_context.event_thread_id = pthread_self();
+	hid_hotplug_context.event_thread_id_valid = 1;
+	pthread_mutex_unlock(&global_error_mutex);
 
 	/* Startup phase: the registering thread holds the hotplug mutex and is
 	   parked at the startup barrier, so this thread has exclusive access to the
