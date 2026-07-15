@@ -180,6 +180,31 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 		return TEST_VDEV_ERROR;
 	*out_dev = NULL;
 
+	/* Windows cannot create HID devices on the fly; the CI job pre-installs a
+	   single static vhidmini device whose identity is fixed (see
+	   src/tests/windows/driver). Report UNAVAILABLE for any requested device that
+	   is not actually present here - e.g. the mid-pass-stop test's second device -
+	   so such tests skip cleanly instead of waiting for one that can never appear. */
+	{
+		struct hid_device_info *infos = hid_enumerate(vendor_id, product_id);
+		char sn[64] = "(null)";
+
+		if (!infos)
+			return TEST_VDEV_UNAVAILABLE;
+		if (infos->serial_number) {
+			size_t i;
+			for (i = 0; i + 1 < sizeof(sn) && infos->serial_number[i]; i++)
+				sn[i] = (infos->serial_number[i] > 0 && infos->serial_number[i] < 128)
+				            ? (char)infos->serial_number[i]
+				            : '?';
+			sn[i] = '\0';
+		}
+		fprintf(stderr, "[win-vdev] create: %04X:%04X serial='%s' path=%s\n",
+		        (unsigned)vendor_id, (unsigned)product_id, sn,
+		        infos->path ? infos->path : "(null)");
+		hid_free_enumeration(infos);
+	}
+
 	dev = (struct test_virtual_device *)calloc(1, sizeof(*dev));
 	if (!dev)
 		return TEST_VDEV_ERROR;

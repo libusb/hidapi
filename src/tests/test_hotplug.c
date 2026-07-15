@@ -46,10 +46,19 @@
 /* CTest treats this exit code as "skipped" (see SKIP_RETURN_CODE in CMake). */
 #define EXIT_SKIP 77
 
-/* Test-unique ids so enumeration/filtering cannot collide with real hardware
-   (distinct from test_device_io.c's 0xF1D0:0x9001). */
+/* Test-unique ids so enumeration/filtering cannot collide with real hardware.
+   On Linux/macOS the device is created on demand, so the primary uses a PID
+   distinct from test_device_io.c's 0x9001. On Windows the virtual device is a
+   single pre-installed static driver (src/tests/windows/driver) whose identity
+   is fixed, so the primary must match it (PID 0x9001, serial == the driver's
+   VHIDMINI_SERIAL_NUMBER_STRING); the second device has no counterpart there and
+   is reported UNAVAILABLE by the Windows provider. */
 #define TEST_VID      0xF1D0
+#if defined(_WIN32)
+#define TEST_PID      0x9001   /* the static vhidmini driver's HIDMINI_PID */
+#else
 #define TEST_PID      0x9002
+#endif
 #define TEST_PID_2    0x9003   /* second device, for the mid-pass stop test */
 #define TEST_SERIAL   "HIDAPI-HOTPLUG-TEST"
 #define TEST_SERIAL_2 "HIDAPI-HOTPLUG-TEST-2"
