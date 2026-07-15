@@ -187,21 +187,8 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	   so such tests skip cleanly instead of waiting for one that can never appear. */
 	{
 		struct hid_device_info *infos = hid_enumerate(vendor_id, product_id);
-		char sn[64] = "(null)";
-
 		if (!infos)
 			return TEST_VDEV_UNAVAILABLE;
-		if (infos->serial_number) {
-			size_t i;
-			for (i = 0; i + 1 < sizeof(sn) && infos->serial_number[i]; i++)
-				sn[i] = (infos->serial_number[i] > 0 && infos->serial_number[i] < 128)
-				            ? (char)infos->serial_number[i]
-				            : '?';
-			sn[i] = '\0';
-		}
-		fprintf(stderr, "[win-vdev] create: %04X:%04X serial='%s' path=%s\n",
-		        (unsigned)vendor_id, (unsigned)product_id, sn,
-		        infos->path ? infos->path : "(null)");
 		hid_free_enumeration(infos);
 	}
 
@@ -358,7 +345,6 @@ int test_virtual_device_replug(test_virtual_device *dev)
 {
 	DEVINST func, child;
 	CONFIGRET cr;
-	ULONG status = 0, problem = 0;
 
 	(void)dev;
 
@@ -388,12 +374,6 @@ int test_virtual_device_replug(test_virtual_device *dev)
 		        (unsigned long)cr);
 		return TEST_VDEV_ERROR;
 	}
-
-	/* Diagnostic: child health after re-enable; a non-zero problem code explains
-	   an enumerate timeout in the caller. */
-	if (CM_Get_DevNode_Status(&status, &problem, child, 0) == CR_SUCCESS)
-		fprintf(stderr, "[win-vdev] child after enable: status=0x%lX problem=0x%lX\n",
-		        (unsigned long)status, (unsigned long)problem);
 
 	return TEST_VDEV_OK;
 }
