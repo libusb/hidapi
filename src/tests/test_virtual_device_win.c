@@ -31,21 +31,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <windows.h>
 #include <hidsdi.h>
 #include <hidpi.h>
 #include <cfgmgr32.h>
 
 /*
- * Instance id of the root-enumerated virtual-HID devnode. The CI job creates it
- * with `devcon install VhidminiUm.inf "root\VhidminiUm"`, which installs the
- * first (single) instance of hardware id `root\VhidminiUm` as `ROOT\VHIDMINIUM\0000`.
- * Presence toggling (unplug/replug) is done by disabling/enabling this devnode
- * via cfgmgr32: disabling it tears down the HIDClass child PDO so the
- * GUID_DEVINTERFACE_HID interface disappears (the winapi backend sees a removal);
- * enabling it re-creates the interface (an arrival).
+ * The virtual-HID devnode is located by its INF hardware id, not a fixed instance
+ * path. The CI job installs it with `devcon install VhidminiUm.inf
+ * "root\VhidminiUm"`, but PnP derives the devnode's *instance id* from the driver's
+ * setup class (Class=HIDClass in the INF -> observed instance ROOT\HIDCLASS\0000),
+ * not from the hardware id, so the instance path is not knowable a priori.
+ * locate_vhid_devnode() instead scans the ROOT enumerator for the devnode whose
+ * hardware id contains this token (matched case-insensitively).
+ *
+ * Presence toggling (unplug/replug) disables/enables that devnode via cfgmgr32:
+ * disabling it tears down the HIDClass child PDO so the GUID_DEVINTERFACE_HID
+ * interface disappears (the winapi backend sees a removal); enabling it re-creates
+ * the interface (an arrival).
  */
-#define VHID_INSTANCE_ID "ROOT\\VHIDMINIUM\\0000"
+#define VHID_HARDWARE_ID_MATCH "VHIDMINIUM"
 
 struct test_virtual_device {
 	unsigned short vendor_id;
@@ -54,16 +60,81 @@ struct test_virtual_device {
 	ULONG feature_len;      /* FeatureReportByteLength of the opened device */
 };
 
-/* Locate the root-enumerated virtual-HID devnode (re-located on every call:
-   simplest and robust, and cheap next to the PnP state changes it precedes).
-   Returns the CONFIGRET from CM_Locate_DevNodeA verbatim, with *devinst set on
-   CR_SUCCESS. CR_NO_SUCH_DEVNODE means the driver/device is not installed on
-   this host. A disabled (but not removed) root devnode is still "configured",
-   so CM_LOCATE_DEVNODE_NORMAL locates it for the re-enable in replug(). */
-static CONFIGRET locate_vhid_devnode(DEVINST *devinst)
+/* Case-insensitive: does haystack contain needle (needle already uppercase)? */
+static int contains_ci_upper(const char *haystack, const char *needle_upper)
 {
-	char devid[] = VHID_INSTANCE_ID; /* mutable buffer: DEVINSTID_A is non-const */
-	return CM_Locate_DevNodeA(devinst, devid, CM_LOCATE_DEVNODE_NORMAL);
+	size_t nlen = strlen(needle_upper);
+	const char *p;
+
+	if (nlen == 0)
+		return 1;
+	for (p = haystack; *p != '\0'; ++p) {
+		size_t i = 0;
+		while (i < nlen && p[i] != '\0' &&
+		       (char)toupper((unsigned char)p[i]) == needle_upper[i])
+			++i;
+		if (i == nlen)
+			return 1;
+	}
+	return 0;
+}
+
+/* Locate the root-enumerated virtual-HID devnode by matching its INF hardware id
+   (VHID_HARDWARE_ID_MATCH), robust to the PnP-generated instance path and index.
+   Every devnode under the ROOT enumerator is scanned - enabled or disabled, since
+   a disabled root devnode is still enumerated and "configured" - so both unplug's
+   disable and replug's re-enable resolve the same node. Returns CR_SUCCESS with
+   *out_devinst set; CR_NO_SUCH_DEVNODE if no such devnode exists (driver/device
+   not installed here); otherwise the failing CONFIGRET. */
+static CONFIGRET locate_vhid_devnode(DEVINST *out_devinst)
+{
+	CONFIGRET cr;
+	ULONG list_len = 0;
+	char *list;
+	char *inst;
+
+	cr = CM_Get_Device_ID_List_SizeA(&list_len, "ROOT",
+	                                 CM_GETIDLIST_FILTER_ENUMERATOR);
+	if (cr != CR_SUCCESS)
+		return cr;
+	if (list_len < 2)
+		return CR_NO_SUCH_DEVNODE;
+
+	list = (char *)malloc(list_len);
+	if (!list)
+		return CR_OUT_OF_MEMORY;
+
+	cr = CM_Get_Device_ID_ListA("ROOT", list, list_len,
+	                            CM_GETIDLIST_FILTER_ENUMERATOR);
+	if (cr != CR_SUCCESS) {
+		free(list);
+		return cr;
+	}
+
+	/* The list is a REG_MULTI_SZ of instance ids; walk each one. */
+	for (inst = list; *inst != '\0'; inst += strlen(inst) + 1) {
+		DEVINST devinst;
+		char hwids[512];
+		char *h;
+		ULONG hwlen = (ULONG)sizeof(hwids);
+
+		if (CM_Locate_DevNodeA(&devinst, inst, CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS)
+			continue;
+		if (CM_Get_DevNode_Registry_PropertyA(devinst, CM_DRP_HARDWAREID, NULL,
+		                                      hwids, &hwlen, 0) != CR_SUCCESS)
+			continue;
+		/* CM_DRP_HARDWAREID is itself a REG_MULTI_SZ; match any of its ids. */
+		for (h = hwids; *h != '\0'; h += strlen(h) + 1) {
+			if (contains_ci_upper(h, VHID_HARDWARE_ID_MATCH)) {
+				*out_devinst = devinst;
+				free(list);
+				return CR_SUCCESS;
+			}
+		}
+	}
+
+	free(list);
+	return CR_NO_SUCH_DEVNODE;
 }
 
 int test_virtual_device_create(test_virtual_device **out_dev,
@@ -192,16 +263,28 @@ int test_virtual_device_unplug(test_virtual_device *dev)
 	(void)dev; /* the devnode is installed out-of-band by the CI job */
 
 	cr = locate_vhid_devnode(&devinst);
-	if (cr == CR_NO_SUCH_DEVNODE)
+	if (cr == CR_NO_SUCH_DEVNODE) {
+		fprintf(stderr, "[win-vdev] no ROOT devnode with hardware id '%s' "
+		                "(driver/device not installed) -> hotplug test skips\n",
+		        VHID_HARDWARE_ID_MATCH);
 		return TEST_VDEV_UNAVAILABLE; /* driver/device not installed here */
-	if (cr != CR_SUCCESS)
+	}
+	if (cr != CR_SUCCESS) {
+		fprintf(stderr, "[win-vdev] locate failed: CONFIGRET 0x%lX\n",
+		        (unsigned long)cr);
 		return TEST_VDEV_ERROR;
+	}
 
 	cr = CM_Disable_DevNode(devinst, 0);
 	if (cr == CR_SUCCESS)
 		return TEST_VDEV_OK;
-	if (cr == CR_ACCESS_DENIED)
+	if (cr == CR_ACCESS_DENIED) {
+		fprintf(stderr, "[win-vdev] CM_Disable_DevNode -> CR_ACCESS_DENIED "
+		                "(not elevated, or devnode not disableable) -> hotplug test skips\n");
 		return TEST_VDEV_UNAVAILABLE; /* not elevated -> skip, don't fail */
+	}
+	fprintf(stderr, "[win-vdev] CM_Disable_DevNode failed: CONFIGRET 0x%lX\n",
+	        (unsigned long)cr);
 	return TEST_VDEV_ERROR;
 }
 
@@ -212,13 +295,22 @@ int test_virtual_device_unplug(test_virtual_device *dev)
 int test_virtual_device_replug(test_virtual_device *dev)
 {
 	DEVINST devinst;
+	CONFIGRET cr;
 
 	(void)dev;
 
-	if (locate_vhid_devnode(&devinst) != CR_SUCCESS)
+	cr = locate_vhid_devnode(&devinst);
+	if (cr != CR_SUCCESS) {
+		fprintf(stderr, "[win-vdev] replug locate failed: CONFIGRET 0x%lX\n",
+		        (unsigned long)cr);
 		return TEST_VDEV_ERROR;
+	}
 
-	return (CM_Enable_DevNode(devinst, 0) == CR_SUCCESS)
-	           ? TEST_VDEV_OK
-	           : TEST_VDEV_ERROR;
+	cr = CM_Enable_DevNode(devinst, 0);
+	if (cr != CR_SUCCESS) {
+		fprintf(stderr, "[win-vdev] CM_Enable_DevNode failed: CONFIGRET 0x%lX\n",
+		        (unsigned long)cr);
+		return TEST_VDEV_ERROR;
+	}
+	return TEST_VDEV_OK;
 }

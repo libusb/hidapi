@@ -145,7 +145,7 @@ jobs:
       shell: pwsh
       working-directory: build
       run: |
-        ctest -C Release -R "_winapi" --output-on-failure
+        ctest -C Release -R "_winapi" -V
 
     - name: Cleanup virtual device
       if: always()
