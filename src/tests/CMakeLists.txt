@@ -120,9 +120,13 @@ if(WIN32 AND TARGET hidapi_winapi)
     hidapi_add_hotplug_api_test(HotplugAPI_winapi hidapi_winapi)
     # Self-skips until the vhidmini2 provider implements unplug/replug.
     hidapi_add_hotplug_test(Hotplug_winapi test_virtual_device_win.c hidapi_winapi 30000 300)
-    # HidD_GetPreparsedData / HidP_GetCaps used by the Windows provider.
-    target_link_libraries(DeviceIO_winapi PRIVATE hid)
-    target_link_libraries(Hotplug_winapi PRIVATE hid)
+    # hid: HidD_GetPreparsedData / HidP_GetCaps (device caps).
+    # cfgmgr32: CM_Locate_DevNodeA / CM_Disable_DevNode / CM_Enable_DevNode, used
+    # by the provider to toggle the root devnode's presence (unplug/replug).
+    # Set on the target (not via #pragma comment(lib), which MinGW ignores) so
+    # every winapi toolchain -- MSVC, clang-cl and MinGW -- links it.
+    target_link_libraries(DeviceIO_winapi PRIVATE hid cfgmgr32)
+    target_link_libraries(Hotplug_winapi PRIVATE hid cfgmgr32)
     # Run from the directory holding the hidapi DLL so a shared build can find
     # it at launch (there is no rpath on Windows).
     set_tests_properties(DeviceIO_winapi HotplugAPI_winapi Hotplug_winapi PROPERTIES
