@@ -294,8 +294,9 @@ int test_virtual_device_unplug(test_virtual_device *dev)
  * disabled the devnode we must be able to re-enable it. */
 int test_virtual_device_replug(test_virtual_device *dev)
 {
-	DEVINST devinst;
+	DEVINST devinst, parent;
 	CONFIGRET cr;
+	ULONG status = 0, problem = 0;
 
 	(void)dev;
 
@@ -312,5 +313,22 @@ int test_virtual_device_replug(test_virtual_device *dev)
 		        (unsigned long)cr);
 		return TEST_VDEV_ERROR;
 	}
+
+	/* Enabling the function devnode does not reliably re-create its child HID
+	   PDO on its own, so the GUID_DEVINTERFACE_HID interface may not reappear.
+	   Re-enumerate the parent subtree to make PnP restart the function device
+	   and rebuild the HID interface; the caller then polls hid_enumerate for it
+	   to come back. */
+	if (CM_Get_Parent(&parent, devinst, 0) == CR_SUCCESS)
+		(void)CM_Reenumerate_DevNode(parent, CM_REENUMERATE_SYNCHRONOUS);
+	else
+		(void)CM_Reenumerate_DevNode(devinst, CM_REENUMERATE_SYNCHRONOUS);
+
+	/* Diagnostic: a non-zero problem code here (e.g. 0x16 CM_PROB_DISABLED)
+	   explains a subsequent enumerate timeout. */
+	if (CM_Get_DevNode_Status(&status, &problem, devinst, 0) == CR_SUCCESS)
+		fprintf(stderr, "[win-vdev] after enable: status=0x%lX problem=0x%lX\n",
+		        (unsigned long)status, (unsigned long)problem);
+
 	return TEST_VDEV_OK;
 }
