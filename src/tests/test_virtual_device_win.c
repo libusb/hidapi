@@ -34,6 +34,18 @@
 #include <windows.h>
 #include <hidsdi.h>
 #include <hidpi.h>
+#include <cfgmgr32.h>
+
+/*
+ * Instance id of the root-enumerated virtual-HID devnode. The CI job creates it
+ * with `devcon install VhidminiUm.inf "root\VhidminiUm"`, which installs the
+ * first (single) instance of hardware id `root\VhidminiUm` as `ROOT\VHIDMINIUM\0000`.
+ * Presence toggling (unplug/replug) is done by disabling/enabling this devnode
+ * via cfgmgr32: disabling it tears down the HIDClass child PDO so the
+ * GUID_DEVINTERFACE_HID interface disappears (the winapi backend sees a removal);
+ * enabling it re-creates the interface (an arrival).
+ */
+#define VHID_INSTANCE_ID "ROOT\\VHIDMINIUM\\0000"
 
 struct test_virtual_device {
 	unsigned short vendor_id;
@@ -41,6 +53,18 @@ struct test_virtual_device {
 	char serial[64];
 	ULONG feature_len;      /* FeatureReportByteLength of the opened device */
 };
+
+/* Locate the root-enumerated virtual-HID devnode (re-located on every call:
+   simplest and robust, and cheap next to the PnP state changes it precedes).
+   Returns the CONFIGRET from CM_Locate_DevNodeA verbatim, with *devinst set on
+   CR_SUCCESS. CR_NO_SUCH_DEVNODE means the driver/device is not installed on
+   this host. A disabled (but not removed) root devnode is still "configured",
+   so CM_LOCATE_DEVNODE_NORMAL locates it for the re-enable in replug(). */
+static CONFIGRET locate_vhid_devnode(DEVINST *devinst)
+{
+	char devid[] = VHID_INSTANCE_ID; /* mutable buffer: DEVINSTID_A is non-const */
+	return CM_Locate_DevNodeA(devinst, devid, CM_LOCATE_DEVNODE_NORMAL);
+}
 
 int test_virtual_device_create(test_virtual_device **out_dev,
                                unsigned short vendor_id,
@@ -141,20 +165,60 @@ int test_virtual_device_trigger(test_virtual_device *dev, hid_device *handle,
 
 void test_virtual_device_destroy(test_virtual_device *dev)
 {
-	/* The harness uninstalls the driver/device after the test. */
+	/* The harness (CI) uninstalls the driver/device after the test. But if a
+	   test unplugged (disabled the devnode) and exited before replugging it,
+	   re-enable it best-effort so a later run on the same host is not left with
+	   a disabled devnode. Locating/enabling an absent, already-enabled, or
+	   access-denied node is harmless, so the CONFIGRETs are intentionally
+	   ignored here. */
+	DEVINST devinst;
+	if (locate_vhid_devnode(&devinst) == CR_SUCCESS)
+		(void)CM_Enable_DevNode(devinst, 0);
 	free(dev);
 }
 
-/* Unplug/replug (device-presence toggling for the hotplug tests) is not
- * implemented for this provider yet; the hotplug tests self-skip here. */
+/* Unplug = disable the root devnode. This tears down the HIDClass child PDO, so
+ * the GUID_DEVINTERFACE_HID interface disappears and the winapi backend's PnP
+ * notification fires a removal (the test then sees the device LEFT / gone from
+ * hid_enumerate). This is also the hotplug test's capability probe, so a devnode
+ * that cannot be located (driver/device not installed) or that cannot be
+ * disabled for lack of elevation (CR_ACCESS_DENIED) returns UNAVAILABLE, which
+ * makes the test skip cleanly instead of failing. */
 int test_virtual_device_unplug(test_virtual_device *dev)
 {
-	(void)dev;
-	return TEST_VDEV_UNAVAILABLE;
+	DEVINST devinst;
+	CONFIGRET cr;
+
+	(void)dev; /* the devnode is installed out-of-band by the CI job */
+
+	cr = locate_vhid_devnode(&devinst);
+	if (cr == CR_NO_SUCH_DEVNODE)
+		return TEST_VDEV_UNAVAILABLE; /* driver/device not installed here */
+	if (cr != CR_SUCCESS)
+		return TEST_VDEV_ERROR;
+
+	cr = CM_Disable_DevNode(devinst, 0);
+	if (cr == CR_SUCCESS)
+		return TEST_VDEV_OK;
+	if (cr == CR_ACCESS_DENIED)
+		return TEST_VDEV_UNAVAILABLE; /* not elevated -> skip, don't fail */
+	return TEST_VDEV_ERROR;
 }
 
+/* Replug = re-enable the root devnode. The HIDClass child PDO and its HID
+ * interface are re-created, so the backend sees an arrival (the device is back
+ * in hid_enumerate). Failure here is a hard error, not a skip: if unplug()
+ * disabled the devnode we must be able to re-enable it. */
 int test_virtual_device_replug(test_virtual_device *dev)
 {
+	DEVINST devinst;
+
 	(void)dev;
-	return TEST_VDEV_UNAVAILABLE;
+
+	if (locate_vhid_devnode(&devinst) != CR_SUCCESS)
+		return TEST_VDEV_ERROR;
+
+	return (CM_Enable_DevNode(devinst, 0) == CR_SUCCESS)
+	           ? TEST_VDEV_OK
+	           : TEST_VDEV_ERROR;
 }
