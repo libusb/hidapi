@@ -971,11 +971,36 @@ enum hid_hotplug_thread_state {
 	   detached thread could not guarantee that - after it published its exit and
 	   hid_exit() returned, it could still be running its own epilogue
 	   (unlock/return) in the library's text when the application calls
-	   dlclose(), i.e. resume in unmapped code. The reap is coordinated by the
-	   join_in_progress flag and the thread_cond condition variable rather than a
-	   distinct state, so a concurrent reaper waits for the join instead of
-	   joining the same pthread_t twice. */
+	   dlclose(), i.e. resume in unmapped code. Reaping first RETIRES the finished
+	   generation (moves its pthread_t onto hid_hotplug_context.retired, keyed by a
+	   stable id token) and then joins it with the mutex released, so a pthread_t
+	   is never inspected after pthread_join() invalidated it, and a generation
+	   superseded by a re-entrant registration is joined rather than dropped. */
 	HID_HOTPLUG_THREAD_FINISHED
+};
+
+/* A monitor thread that has been CREATED (pthread_create succeeded) and not yet
+   JOINED. The current generation lives in hid_hotplug_context.thread /
+   .thread_id / .thread_state; once it publishes FINISHED it is moved onto
+   hid_hotplug_context.retired (see hid_internal_hotplug_reap_thread) and joined
+   from there. A generation that is superseded while still FINISHED-but-unjoined
+   - a thread-specific-data destructor running on it re-enters HIDAPI and starts a
+   new generation - is therefore never dropped: its pthread_t stays on this list
+   until joined. Threads are identified by the monotonic `id` token and by list
+   membership, NEVER by comparing a pthread_t after it was joined (that handle is
+   invalid). hid_exit() joins EVERY entry on this list (and the current thread)
+   before it returns. */
+struct hid_hotplug_monitor_thread {
+	pthread_t thread;
+	/* Stable identity token, assigned at creation (hid_hotplug_context.thread_id
+	   at the time). Survives the join; used for identity/diagnostics without ever
+	   touching the joined pthread_t. */
+	unsigned long id;
+	/* A reaper has set this and dropped the mutex to pthread_join() this entry:
+	   any other reaper skips it (a second join of the same pthread_t is undefined
+	   behavior), and hid_exit() waits on thread_cond for the join to finish. */
+	unsigned char being_joined;
+	struct hid_hotplug_monitor_thread *next;
 };
 
 static struct hid_hotplug_context {
@@ -988,17 +1013,31 @@ static struct hid_hotplug_context {
 	/* File descriptor for the UDEV monitor that allows to check for new events with poll() */
 	int monitor_fd;
 
-	/* Thread for the UDEV monitor */
+	/* Thread for the UDEV monitor (the current generation) */
 	pthread_t thread;
+
+	/* Stable identity token of the current generation's thread (0 = none).
+	   Assigned from next_thread_id at each pthread_create so a generation can be
+	   identified without ever comparing a joined pthread_t. */
+	unsigned long thread_id;
+
+	/* Monotonic source of thread_id tokens; never reused, survives hid_exit */
+	unsigned long next_thread_id;
 
 	enum hid_hotplug_thread_state thread_state;
 
+	/* Monitor threads created but not yet joined that are no longer the current
+	   generation (superseded/orphaned). Their pthread_t is moved here instead of
+	   being dropped; every entry is joined before hid_exit() returns. */
+	struct hid_hotplug_monitor_thread *retired;
+
 	pthread_mutex_t mutex;
 
-	/* Signaled when a monitor-thread reap completes (thread_state returns to
-	   NONE and join_in_progress clears): lets a second reaper wait out an
-	   in-flight join instead of joining the same pthread_t twice. Process-
-	   lifetime, like the mutex: never destroyed. */
+	/* Broadcast whenever a retired monitor thread is joined and removed from the
+	   list. hid_exit() must join every generation before returning; when the only
+	   entries left are being joined by another (pre-exit) reaper, it waits here
+	   for that join to complete instead of double-joining. Process-lifetime, like
+	   the mutex: never destroyed. */
 	pthread_cond_t thread_cond;
 
 	/* Boolean flags */
@@ -1009,10 +1048,6 @@ static struct hid_hotplug_context {
 	unsigned char cb_list_dirty;
 	/* hid_exit() is tearing the hotplug machinery down */
 	unsigned char exiting;
-	/* A reaper has claimed the FINISHED monitor thread and is joining its
-	   pthread_t with the mutex released; set/cleared under the mutex, cleared
-	   with a thread_cond broadcast (see hid_internal_hotplug_reap_thread) */
-	unsigned char join_in_progress;
 	/* The udev monitor socket died; no more events (see hotplug_thread) */
 	unsigned char monitor_dead;
 
@@ -1090,96 +1125,115 @@ static void hid_internal_hotplug_release_monitor(void)
 	hid_hotplug_context.monitor_fd = -1;
 }
 
-/* Reaps a monitor thread that has finished (published HID_HOTPLUG_THREAD_FINISHED
-   as its last write to shared state under the mutex) but has not been joined yet,
-   turning its state to HID_HOTPLUG_THREAD_NONE. Called with the mutex held
-   exactly once.
-
-   pthread_join() must NOT run under the mutex: the finished monitor thread has
-   already released everything it owned and published FINISHED, but its epilogue
-   and any thread-specific-data destructors a user callback armed while running on
-   it may still execute - and such a destructor re-entering HIDAPI would block on
-   the hotplug mutex forever if the joiner held it, deadlocking the join. So the
-   reaper sets join_in_progress, RELEASES the mutex for the join, then RE-ACQUIRES
-   it, advances the state to NONE - but ONLY IF the generation it joined is still
-   the current one (such a destructor may have started a new generation while the
-   mutex was dropped; see the join site below) - then clears join_in_progress and
-   broadcasts thread_cond. A second reaper that finds join_in_progress set waits on
-   thread_cond instead of joining the same pthread_t twice (undefined behavior),
-   and wakes to observe NONE. Because the mutex is dropped, callers must
-   re-validate cached state after this returns (hid_internal_hotplug_cleanup
-   does).
-
-   The monitor thread never joins itself: a thread-specific-data destructor armed
-   by a user callback runs on the monitor thread AFTER it published FINISHED (so
-   mutex_in_use no longer guards this path), and if that destructor re-enters
-   HIDAPI and reaches here a self-join would be undefined behavior / EDEADLK. The
-   pthread_equal guard makes such a re-entrant attempt defer, leaving the thread
-   FINISHED for an application-thread reaper - hid_exit() or the next
-   register/deregister. */
-static void hid_internal_hotplug_reap_thread(void)
+/* Moves the current generation onto the retired list once it has published
+   FINISHED, so its pthread_t is tracked (never dropped) and the current slot is
+   free for a new generation. The generation is identified by its stable id token,
+   not by its pthread_t. Called with the mutex held. Returns -1 only if the
+   (small) retired-list node cannot be allocated - leaving the thread FINISHED for
+   a later retry; it never drops or overwrites a live pthread_t. */
+static int hid_internal_hotplug_retire_current(void)
 {
-	pthread_t thread;
-
-	/* A re-entrant reap from the monitor thread itself cannot join itself:
-	   defer to the next application-thread reaper / hid_exit(). */
-	if (pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
-		return;
-	}
-
-	/* Another reaper already claimed the join: wait it out (thread_cond is
-	   broadcast when the join completes) instead of joining twice. */
-	while (hid_hotplug_context.join_in_progress) {
-		pthread_cond_wait(&hid_hotplug_context.thread_cond, &hid_hotplug_context.mutex);
-	}
+	struct hid_hotplug_monitor_thread *node;
 
 	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_FINISHED) {
-		/* Nothing to reap: never finished, or the reaper we waited on already
-		   advanced it to NONE. */
-		return;
+		return 0;
 	}
 
-	/* Claim the join, drop the mutex for it, then re-acquire. */
-	thread = hid_hotplug_context.thread;
-	hid_hotplug_context.join_in_progress = 1;
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
-	pthread_join(thread, NULL);
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
-
-	/* Publish NONE only if the generation just joined is still the current one.
-	   While the mutex was dropped for the join, a thread-specific-data
-	   destructor running on the very thread being joined can - legally, from a
-	   user-callback context - re-enter hid_hotplug_register_callback(): its
-	   hid_internal_hotplug_cleanup() takes the pthread_equal() self-guard and
-	   DEFERS instead of joining, so the registration proceeds, finds the
-	   callback list empty and starts a NEW monitor generation, overwriting
-	   context.thread with a live thread and setting thread_state = RUNNING.
-	   Stamping NONE over that would strand the new generation: hid_exit() would
-	   see NONE and return WITHOUT joining it, leaving a monitor thread running
-	   inside the library after it is unloaded (the dlclose use-after-free). So
-	   advance to NONE only when context.thread still names the thread this
-	   reaper joined (by identity - pthread_equal, not ==) and it is still
-	   FINISHED; otherwise a newer generation now owns the lifecycle state and
-	   must be left completely untouched (it is reaped by its own future reaper /
-	   hid_exit). The completed pthread_join() already reaped the old thread, so
-	   nothing leaks either way. join_in_progress is cleared and thread_cond
-	   broadcast unconditionally, so any reaper or registration waiting out this
-	   join wakes and re-evaluates whichever branch was taken. */
-	if (pthread_equal(hid_hotplug_context.thread, thread)
-	    && hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
-		hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
+	node = (struct hid_hotplug_monitor_thread *)calloc(1, sizeof(*node));
+	if (node == NULL) {
+		return -1;
 	}
-	hid_hotplug_context.join_in_progress = 0;
-	pthread_cond_broadcast(&hid_hotplug_context.thread_cond);
+	node->thread = hid_hotplug_context.thread;
+	node->id = hid_hotplug_context.thread_id;
+	node->being_joined = 0;
+	node->next = hid_hotplug_context.retired;
+	hid_hotplug_context.retired = node;
+
+	/* The current slot no longer names a live-or-finished thread. */
+	hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
+	hid_hotplug_context.thread_id = 0;
+	return 0;
 }
 
-/* Winds the monitor thread down once the last callback is gone and reaps it, so
-   that no monitor-thread code is still executing once this returns. The thread
-   releases the monitoring context itself, then publishes FINISHED; this reaps
-   the FINISHED thread (see hid_internal_hotplug_reap_thread). Called with the
-   mutex held exactly once (and not in use); the mutex is temporarily dropped
-   while waiting for a still-RUNNING thread to notice the empty list and while
-   joining, so the caller must re-validate any cached state after this returns. */
+/* Reaps monitor threads: first RETIRES the current generation if it has finished
+   (hid_internal_hotplug_retire_current), then joins every retired thread it is
+   allowed to join, each with the mutex RELEASED. Called with the mutex held
+   exactly once; because the mutex is dropped for the joins, callers must
+   re-validate any cached state after this returns.
+
+   pthread_join() must NOT run under the mutex: a finished monitor thread has
+   published FINISHED and released everything it owned, but a thread-specific-data
+   destructor armed by a user callback still runs on it afterwards - and such a
+   destructor re-entering HIDAPI would block on the hotplug mutex forever if the
+   joiner held it, deadlocking the join. So each entry is claimed (being_joined),
+   the mutex is dropped, the thread is joined, the mutex is re-acquired, and the
+   entry is unlinked and freed with a thread_cond broadcast.
+
+   Both hazards are handled WITHOUT ever inspecting a joined pthread_t:
+   - Self: a destructor re-entering HIDAPI on the monitor thread reaches here; a
+     thread cannot join itself. Its entry is skipped (pthread_self() compared
+     against the still-valid, unjoined handle) and left on the list for an
+     application-thread reaper / hid_exit().
+   - Concurrent reapers: an entry already being joined (being_joined) is skipped,
+     so the same pthread_t is never joined twice; its claimant unlinks it when its
+     join completes. Identity is by list membership and the id token - a pthread_t
+     is only ever passed to pthread_equal()/pthread_join() while still unjoined. */
+static void hid_internal_hotplug_reap_thread(void)
+{
+	/* Retire the finished current generation so it is tracked on the list and
+	   joined below (or by a later reaper / hid_exit). On allocation failure it
+	   stays FINISHED: no pthread_t is dropped, and the pthread_create() site
+	   refuses to overwrite a non-NONE slot, so no generation is orphaned. */
+	(void)hid_internal_hotplug_retire_current();
+
+	for (;;) {
+		struct hid_hotplug_monitor_thread **link;
+		struct hid_hotplug_monitor_thread *node = NULL;
+
+		for (link = &hid_hotplug_context.retired; *link != NULL; link = &(*link)->next) {
+			if (!(*link)->being_joined
+			    && !pthread_equal(pthread_self(), (*link)->thread)) {
+				node = *link;
+				break;
+			}
+		}
+		if (node == NULL) {
+			/* Nothing left that we may join: the list is empty, or the only
+			   entries are ourselves or already being joined by another reaper. */
+			return;
+		}
+
+		/* Claim the join, drop the mutex for it, then re-acquire and unlink. */
+		node->being_joined = 1;
+		pthread_mutex_unlock(&hid_hotplug_context.mutex);
+		pthread_join(node->thread, NULL);
+		pthread_mutex_lock(&hid_hotplug_context.mutex);
+
+		for (link = &hid_hotplug_context.retired; *link != NULL; link = &(*link)->next) {
+			if (*link == node) {
+				*link = node->next;
+				break;
+			}
+		}
+		free(node);
+		/* Wake hid_exit() (or any reaper) waiting for this join to complete. */
+		pthread_cond_broadcast(&hid_hotplug_context.thread_cond);
+	}
+}
+
+/* Winds the monitor thread down once the last callback is gone and reaps it. The
+   thread releases the monitoring context itself, then publishes FINISHED; this
+   retires it and joins the retired threads it can (see
+   hid_internal_hotplug_reap_thread). Called with the mutex held exactly once (and
+   not in use); the mutex is temporarily dropped while waiting for a still-RUNNING
+   thread to notice the empty list and while joining, so the caller must
+   re-validate any cached state after this returns.
+
+   This does NOT guarantee every retired generation is joined before it returns:
+   an entry that is the calling (monitor) thread, or one another reaper is
+   joining, is left on the list. A plain register/deregister must not block on
+   another generation's teardown; hid_exit() is the backstop that joins EVERY
+   generation before it returns. */
 static void hid_internal_hotplug_cleanup(void)
 {
 	if (hid_hotplug_context.mutex_in_use) {
@@ -1195,34 +1249,24 @@ static void hid_internal_hotplug_cleanup(void)
 			return;
 		}
 
-		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_NONE) {
-			/* No thread to join: it never started, or a concurrent caller
-			   already reaped it (and may have started a new one) */
-			return;
-		}
-
-		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
-			/* On the monitor thread itself (a thread-specific-data destructor
-			   re-entering HIDAPI after FINISHED was published) the reap defers
-			   without joining - leave the pthread_t for an application-thread
-			   reaper / hid_exit() and return, rather than spin here. */
-			if (pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
-				return;
-			}
-			/* The thread released the monitoring context and returned: reap it
-			   (joining, or waiting out a concurrent reaper on thread_cond, both
-			   with the mutex released), then re-evaluate. With hotplug_cbs still
-			   NULL no new thread can have appeared, so the loop settles on NONE. */
-			hid_internal_hotplug_reap_thread();
+		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_RUNNING) {
+			/* The thread has not yet noticed the empty callback list. Drop the
+			   mutex so it can make progress towards publishing FINISHED, then
+			   re-evaluate. */
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			poll(NULL, 0, 1);
+			pthread_mutex_lock(&hid_hotplug_context.mutex);
 			continue;
 		}
 
-		/* HID_HOTPLUG_THREAD_RUNNING: the thread has not yet noticed the empty
-		   callback list. Drop the mutex so it can make progress towards
-		   publishing FINISHED, then re-evaluate. */
-		pthread_mutex_unlock(&hid_hotplug_context.mutex);
-		poll(NULL, 0, 1);
-		pthread_mutex_lock(&hid_hotplug_context.mutex);
+		/* NONE or FINISHED: retire the finished current generation and join the
+		   retired threads we can (all with the mutex released inside the reap).
+		   With hotplug_cbs still NULL no new generation can appear here, so this
+		   settles - the current slot becomes NONE, or it stays FINISHED only
+		   because it is the calling thread or a retired-node allocation failed,
+		   and in both cases there is nothing more this caller can do. */
+		hid_internal_hotplug_reap_thread();
+		return;
 	}
 }
 
@@ -1250,8 +1294,8 @@ static void hid_internal_hotplug_init_once(void)
 	}
 	pthread_mutexattr_destroy(&attr);
 
-	/* Process-lifetime, like the mutex (never destroyed): coordinates the
-	   monitor-thread reap so concurrent reapers never double-join. */
+	/* Process-lifetime, like the mutex (never destroyed): lets hid_exit() wait for
+	   a retired thread another reaper is joining, so no pthread_t is joined twice. */
 	if (pthread_cond_init(&hid_hotplug_context.thread_cond, NULL) != 0) {
 		pthread_mutex_destroy(&hid_hotplug_context.mutex);
 		return;
@@ -1261,6 +1305,9 @@ static void hid_internal_hotplug_init_once(void)
 	/* The handles are monotonic and never reused (see hidapi.h); the counter
 	   survives hid_exit */
 	hid_hotplug_context.next_handle = FIRST_HOTPLUG_CALLBACK_HANDLE;
+	/* Monotonic monitor-thread generation tokens; never reused, survive hid_exit.
+	   Start at 1 so that 0 unambiguously means "no current generation". */
+	hid_hotplug_context.next_thread_id = 1;
 
 	/* Publish the mutex as usable, last */
 	hid_hotplug_context.mutex_ready = 1;
@@ -1337,16 +1384,41 @@ static void hid_internal_hotplug_exit(void)
 		}
 		hid_hotplug_context.cb_list_dirty = 0;
 
-		/* Reap the monitor thread (temporarily dropping the mutex) and
-		   release the monitoring context. Repeat until the teardown is
-		   complete: `exiting` keeps anything from re-arming the machinery
-		   while the mutex is dropped, and a concurrent deregistration may
-		   claim the join itself - in which case the thread is observed
-		   already reaped (HID_HOTPLUG_THREAD_NONE) here */
+		/* Wind the current generation down and reap what can be reaped
+		   (temporarily dropping the mutex). `exiting` keeps anything from
+		   re-arming the machinery or starting a new generation while the mutex is
+		   dropped, so from here the retired list only ever shrinks. */
 		hid_internal_hotplug_cleanup();
 
+		/* Backstop for a current generation cleanup could not retire because the
+		   (tiny) retired-list node would not allocate: join it in place. Safe
+		   precisely because `exiting` is set - no thread-specific-data destructor
+		   can start a new generation over the slot while the mutex is dropped, and
+		   hid_exit() is never the monitor thread - so after the join the slot
+		   still names the joined thread and is simply cleared. */
+		if (hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_FINISHED) {
+			pthread_t thread = hid_hotplug_context.thread;
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			pthread_join(thread, NULL);
+			pthread_mutex_lock(&hid_hotplug_context.mutex);
+			hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_NONE;
+			hid_hotplug_context.thread_id = 0;
+			continue;
+		}
+
+		/* EVERY generation must be joined before hid_exit() returns. cleanup's
+		   reap joined every retired thread it could; anything still on the list is
+		   being joined by another (pre-exit) reaper - wait for that join to
+		   broadcast thread_cond, then re-evaluate. (hid_exit() is never the
+		   monitor thread, so no retired entry is ever "self" here.) */
+		if (hid_hotplug_context.retired != NULL) {
+			pthread_cond_wait(&hid_hotplug_context.thread_cond, &hid_hotplug_context.mutex);
+			continue;
+		}
+
 		if (hid_hotplug_context.hotplug_cbs == NULL
-		    && hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_NONE) {
+		    && hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_NONE
+		    && hid_hotplug_context.retired == NULL) {
 			break;
 		}
 	}
@@ -2192,21 +2264,37 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 		/* Start the thread that will be doing the event scanning.
 		   hid_internal_hotplug_cleanup() above ran with the callback list empty,
-		   so it wound any previous monitor thread all the way down to
-		   HID_HOTPLUG_THREAD_NONE - reaping a FINISHED one and waiting out any
-		   in-flight join on thread_cond - before we reach here. The state is
-		   therefore NONE and the mutex has been held continuously since, so this
-		   pthread_create never overwrites a context.thread that still labels a
-		   live or unreaped thread.
+		   so it retired any finished predecessor generation onto the retired list
+		   (joining it there, or leaving it for hid_exit()) and drove the current
+		   slot to HID_HOTPLUG_THREAD_NONE - even in the orphan case where a
+		   thread-specific-data destructor re-registers on the very monitor thread
+		   that just finished: that generation is RETIRED (self-skipped for the
+		   join), never dropped. The mutex has been held continuously since, so the
+		   slot is NONE here; the guard below only fires if retiring the
+		   predecessor could not allocate its (tiny) list node, in which case the
+		   registration fails rather than overwrite - and thereby orphan - a
+		   pthread_t that is still unjoined.
 		   The thread is JOINABLE. When it winds down (the last callback is gone)
 		   it releases the monitoring context and publishes
 		   HID_HOTPLUG_THREAD_FINISHED under the mutex before it returns; the
-		   pthread_t is then reaped by hid_exit() or the next register/deregister
-		   (see hid_internal_hotplug_reap_thread), so no monitor-thread code is
-		   still executing inside the library once hid_exit() returns - which a
-		   detached thread could not guarantee. Joining is done by ANOTHER thread,
-		   never the monitor thread itself, so it is ThreadSanitizer-clean (unlike
-		   pthread_detach(self)). */
+		   pthread_t is then retired and joined by hid_exit() or the next
+		   register/deregister (see hid_internal_hotplug_reap_thread), so no
+		   monitor-thread code is still executing inside the library once
+		   hid_exit() returns - which a detached thread could not guarantee.
+		   Joining is done by ANOTHER thread, never the monitor thread itself, so
+		   it is ThreadSanitizer-clean (unlike pthread_detach(self)). */
+		if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_NONE
+		    && hid_internal_hotplug_retire_current() != 0) {
+			hid_hotplug_context.hotplug_cbs = NULL;
+			/* The handle never became visible: return it to the counter */
+			hid_hotplug_context.next_handle--;
+			hid_internal_hotplug_release_monitor();
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			free(hotplug_cb);
+			register_global_error("Couldn't retire the previous hotplug monitor thread");
+			return -1;
+		}
+
 		int thread_error = pthread_create(&hid_hotplug_context.thread, NULL, &hotplug_thread, NULL);
 
 		if (thread_error) {
@@ -2219,6 +2307,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			register_global_error("Couldn't create the hotplug monitor thread");
 			return -1;
 		}
+		/* Stamp the new generation with a fresh stable id token, then publish it
+		   RUNNING (both under the mutex, before the thread can do anything). */
+		hid_hotplug_context.thread_id = hid_hotplug_context.next_thread_id++;
 		hid_hotplug_context.thread_state = HID_HOTPLUG_THREAD_RUNNING;
 	}
 
