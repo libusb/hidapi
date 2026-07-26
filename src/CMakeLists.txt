@@ -55,6 +55,8 @@ endif()
 # Helper(s)
 
 function(hidapi_configure_pc PC_IN_FILE)
+    set(oneValueArgs OUTPUT_NAME)
+    cmake_parse_arguments(HIDAPI_PC "" "${oneValueArgs}" "" ${ARGN})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pc")
 
     set(VERSION "${VERSION}${VERSION_SUFFIX}")
@@ -71,7 +73,11 @@ function(hidapi_configure_pc PC_IN_FILE)
         set(includedir "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
     endif()
 
-    get_filename_component(PC_IN_FILENAME "${PC_IN_FILE}" NAME_WE)
+    if(HIDAPI_PC_OUTPUT_NAME)
+        set(PC_IN_FILENAME "${HIDAPI_PC_OUTPUT_NAME}")
+    else()
+        get_filename_component(PC_IN_FILENAME "${PC_IN_FILE}" NAME_WE)
+    endif()
     set(PC_FILE "${CMAKE_CURRENT_BINARY_DIR}/pc/${PC_IN_FILENAME}.pc")
     configure_file("${PC_IN_FILE}" "${PC_FILE}" @ONLY)
     if(HIDAPI_INSTALL_TARGETS)
@@ -186,6 +192,11 @@ else()
 endif()
 
 add_library(hidapi::hidapi ALIAS hidapi_${EXPORT_ALIAS})
+
+if(NOT WIN32 AND NOT APPLE)
+    set(HIDAPI_PC_BACKEND "hidapi-${EXPORT_ALIAS}")
+    hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend.pc.in" OUTPUT_NAME hidapi)
+endif()
 
 if(HIDAPI_INSTALL_TARGETS)
     include(CMakePackageConfigHelpers)
