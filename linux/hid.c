@@ -7,7 +7,7 @@
 
  libusb/hidapi Team
 
- Copyright 2022, All Rights Reserved.
+ Copyright 2026, All Rights Reserved.
 
  At the discretion of the user of this library,
  this software may be licensed under the terms of the
