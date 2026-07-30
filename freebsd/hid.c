@@ -584,14 +584,17 @@ static struct hid_device_info *hid_create_device_info_by_hidraw_idx(int fd_prep,
 	int desc_size;
 	int fd;
 	struct hidraw_device_info devinfo;
-	struct hidraw_report_descriptor desc = {0};
+	struct hidraw_report_descriptor desc;
 	struct hid_device_info *result = NULL;
 	struct hid_device_info *info_template = NULL;
 	struct hid_device_info *head = NULL;
 	struct hid_device_info *tail = NULL;
+	unsigned short page = 0, usage = 0;
+	struct hid_usage_iterator iter;
 
 	char devpath[256];
 
+	memset(&desc, 0, sizeof(desc));
 	snprintf(devpath, sizeof(devpath), "/dev/hidraw%d", idx);
 
 	fd = fd_prep == -1 ? open(devpath, O_RDONLY | O_CLOEXEC) : fd_prep;
@@ -643,8 +646,6 @@ static struct hid_device_info *hid_create_device_info_by_hidraw_idx(int fd_prep,
 		goto end;
 	}
 
-	unsigned short page = 0, usage = 0;
-	struct hid_usage_iterator iter;
 	memset(&iter, 0, sizeof(iter));
 
 	while (!get_next_hid_usage(desc.value, desc.size, &iter, &page, &usage)) {
@@ -1017,12 +1018,13 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 {
 	int res;
 	size_t report_length = length;
-	struct hidraw_gen_descriptor desc = {0};
+	struct hidraw_gen_descriptor desc;
 
 	/*
 	 * The uhid-compatible report ioctls do not change the descriptor's
 	 * hidraw framing mode and are available on all supported FreeBSD releases.
 	 */
+	memset(&desc, 0, sizeof(desc));
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
@@ -1055,7 +1057,9 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 {
 	int res;
 	unsigned char report_id;
-	struct hidraw_gen_descriptor desc = {0};
+	struct hidraw_gen_descriptor desc;
+
+	memset(&desc, 0, sizeof(desc));
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
@@ -1090,7 +1094,9 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device *dev, const un
 {
 	int res;
 	size_t report_length = length;
-	struct hidraw_gen_descriptor desc = {0};
+	struct hidraw_gen_descriptor desc;
+
+	memset(&desc, 0, sizeof(desc));
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
@@ -1122,7 +1128,9 @@ int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned c
 {
 	int res;
 	unsigned char report_id;
-	struct hidraw_gen_descriptor desc = {0};
+	struct hidraw_gen_descriptor desc;
+
+	memset(&desc, 0, sizeof(desc));
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
