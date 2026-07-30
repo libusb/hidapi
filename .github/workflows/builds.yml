@@ -125,7 +125,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install libudev-dev libusb-1.0-0-dev python3-pip ninja-build
+        sudo apt install autoconf automake libudev-dev libusb-1.0-0-dev pkg-config python3-pip ninja-build
         sudo -H pip3 install meson
     - name: Configure CMake
       run: |
@@ -138,6 +138,15 @@ jobs:
     - name: Build CMake Static
       working-directory: build/static
       run: make install
+    - name: Check pkg-config package
+      run: |
+        autoreconf --install --force hidapisrc/tests/pkg-config
+        mkdir -p build/pkg-config-test
+        cd build/pkg-config-test
+        CFLAGS="${GNU_COMPILE_FLAGS}" \
+          PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/install/shared/lib/pkgconfig" \
+          "${GITHUB_WORKSPACE}/hidapisrc/tests/pkg-config/configure"
+        make V=1
     - name: Run virtual-device tests (uhid -> hidraw; raw-gadget self-skips)
       working-directory: build/shared
       run: |
@@ -156,6 +165,7 @@ jobs:
       with:
         files: "install/shared/lib/libhidapi-libusb.so, \
                 install/shared/lib/libhidapi-hidraw.so, \
+                install/shared/lib/pkgconfig/hidapi.pc, \
                 install/shared/include/hidapi/hidapi.h, \
                 install/shared/include/hidapi/hidapi_libusb.h, \
                 install/static/lib/libhidapi-libusb.a, \

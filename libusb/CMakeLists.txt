@@ -106,7 +106,11 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-libusb.pc.in")
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
+    OUTPUT_NAME "hidapi-libusb"
+    LIBRARY_NAME "hidapi-libusb"
+    DESCRIPTION "C Library for USB HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the libusb implementation."
+)
 
 if(HIDAPI_WITH_TESTS)
      add_subdirectory(test)
