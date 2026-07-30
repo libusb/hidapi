@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <locale.h>
 #include <errno.h>
@@ -35,9 +36,6 @@
 /* Unix */
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/utsname.h>
 #include <fcntl.h>
 #include <wchar.h>
 
@@ -150,6 +148,10 @@ struct hid_device_ {
 
 	hidapi_error_ctx error;
 	wchar_t *last_read_error_str;
+
+	unsigned int write_timeout_ms;
+	unsigned int send_output_report_timeout_ms;
+	unsigned int send_feature_report_timeout_ms;
 };
 
 static struct hid_api_version api_version = {
@@ -173,6 +175,9 @@ static hid_device *new_hid_device(void)
 		return NULL;
 
 	dev->blocking = 1;
+	dev->write_timeout_ms = 1000;
+	dev->send_output_report_timeout_ms = 1000;
+	dev->send_feature_report_timeout_ms = 1000;
 
 	hidapi_thread_state_init(&dev->thread_state);
 
@@ -1614,6 +1619,61 @@ err:
 	return NULL;
 }
 
+void HID_API_EXPORT hid_libusb_set_write_timeout(hid_device *dev, unsigned int timeout)
+{
+	dev->write_timeout_ms = timeout;
+}
+
+void HID_API_EXPORT hid_libusb_set_send_output_report_timeout(hid_device *dev, unsigned int timeout)
+{
+	dev->send_output_report_timeout_ms = timeout;
+}
+
+void HID_API_EXPORT hid_libusb_set_send_feature_report_timeout(hid_device *dev, unsigned int timeout)
+{
+	dev->send_feature_report_timeout_ms = timeout;
+}
+
+static int hidapi_internal_send_output_report(hid_device *dev, const unsigned char *data, size_t length, unsigned int timeout_ms)
+{
+	int res = -1;
+	int skipped_report_id = 0;
+	int report_number;
+
+	if (!data || !length) {
+		register_string_error(&dev->error, "Zero buffer/length");
+		return -1;
+	}
+
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+
+	report_number = data[0];
+
+	if (report_number == 0x0) {
+		data++;
+		length--;
+		skipped_report_id = 1;
+	}
+
+	res = libusb_control_transfer(dev->device_handle,
+		LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_OUT,
+		0x09/*HID set_report*/,
+		(2/*HID output*/ << 8) | report_number,
+		dev->interface,
+		(unsigned char *)data, length,
+		timeout_ms);
+
+	if (res < 0) {
+		register_libusb_error(&dev->error, res, "hidapi_internal_send_output_report");
+		return -1;
+	}
+
+	/* Account for the report ID */
+	if (skipped_report_id)
+		length++;
+
+	return (int)length;
+}
 
 int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
@@ -1623,7 +1683,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 
 	if (dev->output_endpoint <= 0) {
 		/* No interrupt out endpoint. Use the Control Endpoint */
-		return hid_send_output_report(dev, data, length);
+		return hidapi_internal_send_output_report(dev, data, length, dev->write_timeout_ms);
 	}
 
 	if (!data || !length) {
@@ -1647,7 +1707,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 		dev->output_endpoint,
 		(unsigned char*)data,
 		(int)length,
-		&actual_length, 1000);
+		&actual_length, dev->write_timeout_ms);
 
 	if (res < 0) {
 		register_libusb_error(&dev->error, res, "hid_write");
@@ -1832,7 +1892,7 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 		(3/*HID feature*/ << 8) | report_number,
 		dev->interface,
 		(unsigned char *)data, length,
-		1000/*timeout millis*/);
+		dev->send_feature_report_timeout_ms);
 
 	if (res < 0) {
 		register_libusb_error(&dev->error, res, "hid_send_feature_report");
@@ -1889,43 +1949,7 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 
 int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *data, size_t length)
 {
-	int res = -1;
-	int skipped_report_id = 0;
-	int report_number;
-
-	if (!data || !length) {
-		register_string_error(&dev->error, "Zero buffer/length");
-		return -1;
-	}
-
-	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
-
-	report_number = data[0];
-
-	if (report_number == 0x0) {
-		data++;
-		length--;
-		skipped_report_id = 1;
-	}
-
-	res = libusb_control_transfer(dev->device_handle,
-		LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_OUT,
-		0x09/*HID set_report*/,
-		(2/*HID output*/ << 8) | report_number,
-		dev->interface,
-		(unsigned char *)data, length,
-		1000/*timeout millis*/);
-
-	if (res < 0) {
-		register_libusb_error(&dev->error, res, "hid_send_output_report");
-		return -1;
-	}
-
-	/* Account for the report ID */
-	if (skipped_report_id)
-		length++;
-
-	return (int)length;
+	return hidapi_internal_send_output_report(dev, data, length, dev->send_output_report_timeout_ms);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)

@@ -18,6 +18,9 @@ add_library(hidapi_winapi
     ${HIDAPI_PUBLIC_HEADERS}
     ${SOURCES}
 )
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c hidapi_descriptor_reconstruct.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_winapi
     PUBLIC hidapi_include
 )

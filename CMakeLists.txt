@@ -70,8 +70,14 @@ if(HIDAPI_ENABLE_ASAN)
     endif()
 endif()
 
-if(WIN32 OR HIDAPI_WITH_LIBUSB)
-    # so far only Windows and LibUSB have tests
+if(WIN32)
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
+    # Linux and macOS have virtual-device based tests (uhid / raw-gadget /
+    # IOHIDUserDevice). Off by default: they need a virtual device at runtime
+    # and otherwise self-skip.
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
+elseif(HIDAPI_WITH_LIBUSB)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
 else()
     set(HIDAPI_WITH_TESTS OFF)
@@ -90,6 +96,10 @@ add_subdirectory(src)
 option(HIDAPI_BUILD_HIDTEST "Build small console test application hidtest" ${IS_DEBUG_BUILD})
 if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
+endif()
+
+if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
+    add_subdirectory(src/tests)
 endif()
 
 if(HIDAPI_ENABLE_ASAN)

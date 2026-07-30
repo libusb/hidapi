@@ -5,6 +5,9 @@ add_library(hidapi_libusb
     hidapi_libusb_report_descriptor.h
     hid.c
 )
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
 
 if(TARGET usb-1.0)

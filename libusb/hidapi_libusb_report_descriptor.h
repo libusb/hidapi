@@ -36,7 +36,7 @@ static uint32_t get_report_item_data(const uint8_t *report_descriptor, size_t it
    reports of the requested type, and -1 for a malformed descriptor. */
 static ssize_t get_max_report_size(const uint8_t *report_descriptor, size_t descriptor_size, enum report_descr_type report_type)
 {
-	struct report_global_state state = {0};
+	struct report_global_state state = {0, 0, 0, 0, 0};
 	struct report_global_state state_stack[REPORT_GLOBAL_STACK_SIZE];
 	size_t report_bits[256] = {0};
 	size_t state_stack_size = 0;
