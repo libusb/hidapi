@@ -1,0 +1,12 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: @HIDAPI_BACKEND_NAME@
+Description: @HIDAPI_BACKEND_DESCRIPTION@
+URL: https://github.com/libusb/hidapi
+Version: @VERSION@
+Libs: -L${libdir} -l@HIDAPI_BACKEND_LIBRARY_NAME@
+@HIDAPI_BACKEND_REQUIRES_PRIVATE@
+Cflags: -I${includedir}/hidapi

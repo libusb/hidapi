@@ -43,4 +43,8 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-netbsd.pc.in")
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
+    OUTPUT_NAME "hidapi-netbsd"
+    LIBRARY_NAME "hidapi-netbsd"
+    DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the netbsd implementation."
+)

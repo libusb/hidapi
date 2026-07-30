@@ -138,6 +138,14 @@ static void register_device_error_format(hid_device *dev, const char *format, ..
 	va_end(args);
 }
 
+static void register_device_error_from_global(hid_device *dev)
+{
+	free(dev->error_str);
+	dev->error_str = global_error_str ?
+	    wcsdup(global_error_str) :
+	    wcsdup(L"Failed to query HID device information");
+}
+
 #define STR_TO_WSTR_BUFF_SIZE 256
 static wchar_t*str_to_wstr(char *str) {
 	wchar_t namebuffer[STR_TO_WSTR_BUFF_SIZE];
@@ -147,7 +155,7 @@ static wchar_t*str_to_wstr(char *str) {
 		return NULL;
 
 	converted = mbstowcs(namebuffer, str, STR_TO_WSTR_BUFF_SIZE - 1);
-	if (converted == -1)
+	if (converted == (size_t) -1)
 		return NULL;
 	namebuffer[converted] = L'\0';
 	return wcsdup(namebuffer);
@@ -162,7 +170,6 @@ struct hid_sysctl_iter {
 
 static int hid_get_name_from_mib(int *mib, int items, char *name_buffer, size_t buffer_size) {
 	int q_name_oid[CTL_MAXNAME] = {0};
-	int result = -1;
 
 	q_name_oid[0] = CTL_SYSCTL;
 	q_name_oid[1] = CTL_SYSCTL_NAME;
@@ -186,7 +193,7 @@ static int hid_get_dev_idx_from_mib(int *mib, int items) {
 	return sscanf(name_buffer, "dev.hidraw.%d", &result) == 1 ? result : -1;
 }
 
-static int hid_get_next_from_oid(int *oid, size_t *items, int total_items) {
+static int hid_get_next_from_oid(int *oid, size_t *items, size_t total_items) {
 	int q_next_oid[CTL_MAXNAME], recv_oid[CTL_MAXNAME];
 	int found = 0;
 	size_t cur_items = *items, recv_items;
@@ -455,14 +462,14 @@ static int get_next_hid_usage(const uint8_t *report_descriptor, uint32_t size, s
 	return 1; /* finished processing */
 }
 
-static libusb_device_handle *hid_find_device_handle_by_bus_and_port(int bus, int addr) {
+static libusb_device_handle *hid_find_device_handle_by_bus_and_addr(int bus, int addr) {
 	libusb_device **list;
 	libusb_device_handle *handler = NULL;
 	int error, num_devs;
 
 	error = libusb_get_device_list(global_usb_context, &list);
 	if (error < 0) {
-		register_global_error_format("hid_find_device_handle_by_bus_and_port: %s", libusb_strerror(error));
+		register_global_error_format("hid_find_device_handle_by_bus_and_addr: %s", libusb_strerror(error));
 		return NULL;
 	}
 
@@ -486,18 +493,28 @@ static libusb_device_handle *hid_find_device_handle_by_bus_and_port(int bus, int
 
 static int hid_get_udev_location_from_hidraw_idx(int idx, int *bus, int *addr, int *inf) {
 	char buff[256];
-	int oid[CTL_MAXNAME];
-	size_t oid_size  = CTL_MAXNAME;
 	size_t len;
-	int udev_idx;
+	int hidbus_idx, udev_idx, hub_addr, port;
 
-	snprintf(buff, sizeof(buff), "dev.hidbus.%d.%%parent", idx);
+	snprintf(buff, sizeof(buff), "dev.hidraw.%d.%%parent", idx);
 	len = sizeof(buff) - 1;
 	if (sysctlbyname(buff, buff, &len, NULL, 0))
 		return 0;
+	if (len >= sizeof(buff))
+		len = sizeof(buff) - 1;
 	buff[len] = '\0';
 
-	if (sscanf(buff, "usbhid%2d", &udev_idx) != 1)
+	if (sscanf(buff, "hidbus%d", &hidbus_idx) != 1)
+		return 0;
+	snprintf(buff, sizeof(buff), "dev.hidbus.%d.%%parent", hidbus_idx);
+	len = sizeof(buff) - 1;
+	if (sysctlbyname(buff, buff, &len, NULL, 0))
+		return 0;
+	if (len >= sizeof(buff))
+		len = sizeof(buff) - 1;
+	buff[len] = '\0';
+
+	if (sscanf(buff, "usbhid%d", &udev_idx) != 1)
 		return 0;
 	snprintf(buff, sizeof(buff), "dev.usbhid.%d.%%location", udev_idx);
 	len = sizeof(buff);
@@ -506,7 +523,8 @@ static int hid_get_udev_location_from_hidraw_idx(int idx, int *bus, int *addr, i
 	if (len >= sizeof(buff))
 		len = sizeof(buff) - 1;
 	buff[len] = '\0';
-	return sscanf(buff, "bus=%d hubaddr=%2d port=%2d devaddr=%2d interface=%d", bus, addr, addr, addr, inf) == 4;
+	return sscanf(buff, "bus=%d hubaddr=%d port=%d devaddr=%d interface=%d",
+		bus, &hub_addr, &port, addr, inf) == 5;
 }
 
 static void hid_device_handle_bus_dependent(const struct hidraw_device_info *rawinfo, struct hid_device_info *info, int idx) {
@@ -515,31 +533,31 @@ static void hid_device_handle_bus_dependent(const struct hidraw_device_info *raw
 	libusb_device_descriptor desc;
 	uint8_t buffer[256] = {0};
 	int bus, addr;
-	int len = 0, namebuf_len;
-	int converted;
+	int len = 0;
 
 	switch (rawinfo->hdi_bustype) {
 	case BUS_USB:
-		if (hid_get_udev_location_from_hidraw_idx(idx,&bus,
-			&addr,&info->interface_number) != 0)
+		info->bus_type = HID_API_BUS_USB;
+		if (!hid_get_udev_location_from_hidraw_idx(idx, &bus,
+			&addr, &info->interface_number))
 			break;
-		handler = hid_find_device_handle_by_bus_and_port(bus, addr);
+		handler = hid_find_device_handle_by_bus_and_addr(bus, addr);
 		if (!handler)
 			break;
 		device = libusb_get_device(handler);
 		if (libusb_get_device_descriptor(device, &desc)) {
 			libusb_close(handler);
-		}
-		len = libusb_get_string_descriptor_ascii(handler, desc.iManufacturer, buffer, sizeof(buffer));
-		if (len <= 0) {
-			libusb_close(handler);
 			break;
 		}
-		if (len >= sizeof(buffer))
-			len = sizeof(buffer) - 1;
-		buffer[len] = '\0';
-		info->manufacturer_string = str_to_wstr((char *)buffer);
-		info->bus_type = HID_API_BUS_USB;
+		if (desc.iManufacturer) {
+			len = libusb_get_string_descriptor_ascii(handler, desc.iManufacturer, buffer, sizeof(buffer));
+			if (len > 0) {
+				if ((size_t) len >= sizeof(buffer))
+					len = sizeof(buffer) - 1;
+				buffer[len] = '\0';
+				info->manufacturer_string = str_to_wstr((char *)buffer);
+			}
+		}
 		libusb_close(handler);
 		break;
 	case BUS_BLUETOOTH:
@@ -550,6 +568,9 @@ static void hid_device_handle_bus_dependent(const struct hidraw_device_info *raw
 		break;
 	case BUS_SPI:
 		info->bus_type = HID_API_BUS_SPI;
+		break;
+	case BUS_VIRTUAL:
+		info->bus_type = HID_API_BUS_VIRTUAL;
 		break;
 	default:
 		info->bus_type = HID_API_BUS_UNKNOWN;
@@ -563,14 +584,17 @@ static struct hid_device_info *hid_create_device_info_by_hidraw_idx(int fd_prep,
 	int desc_size;
 	int fd;
 	struct hidraw_device_info devinfo;
-	struct hidraw_report_descriptor desc;
-	struct hid_device_info *result = NULL, *template = NULL;
+	struct hidraw_report_descriptor desc = {0};
+	struct hid_device_info *result = NULL;
+	struct hid_device_info *info_template = NULL;
+	struct hid_device_info *head = NULL;
+	struct hid_device_info *tail = NULL;
 
 	char devpath[256];
 
 	snprintf(devpath, sizeof(devpath), "/dev/hidraw%d", idx);
 
-	fd = fd_prep == -1 ? open(devpath, O_RDWR | O_CLOEXEC) : fd_prep;
+	fd = fd_prep == -1 ? open(devpath, O_RDONLY | O_CLOEXEC) : fd_prep;
 	if (fd == -1) {
 		register_global_error_format("open: %s", strerror(errno));
 		return NULL;
@@ -578,25 +602,38 @@ static struct hid_device_info *hid_create_device_info_by_hidraw_idx(int fd_prep,
 
 	error = ioctl(fd, HIDRAW_GET_DEVICEINFO, &devinfo);
 	if (error == -1) {
-		register_global_error_format("ioctl(HIDRAW_GET_DEVICE_INFO): %s", strerror(errno));
+		register_global_error_format("ioctl(HIDRAW_GET_DEVICEINFO): %s", strerror(errno));
 		goto end;
 	}
 
-	template = calloc(sizeof(struct hid_device_info), 1);
-	template->path = strdup(devpath);
-	template->vendor_id = devinfo.hdi_vendor;
-	template->product_id = devinfo.hdi_product;
-	template->serial_number = str_to_wstr(devinfo.hdi_uniq);
-	template->release_number = devinfo.hdi_version;
-	template->product_string = str_to_wstr(devinfo.hdi_name);
-	template->interface_number = -1;
-	template->manufacturer_string = NULL;
-	template->next = NULL;
-	hid_device_handle_bus_dependent(&devinfo, template, idx);
+	info_template = (struct hid_device_info *) calloc(sizeof(struct hid_device_info), 1);
+	if (!info_template) {
+		register_global_error("Couldn't allocate memory");
+		goto end;
+	}
+	info_template->path = strdup(devpath);
+	if (!info_template->path) {
+		register_global_error("Couldn't allocate memory");
+		goto end;
+	}
+	info_template->vendor_id = devinfo.hdi_vendor;
+	info_template->product_id = devinfo.hdi_product;
+	info_template->serial_number = str_to_wstr(devinfo.hdi_uniq);
+	info_template->release_number = devinfo.hdi_version;
+	info_template->product_string = str_to_wstr(devinfo.hdi_name);
+	info_template->interface_number = -1;
+	info_template->manufacturer_string = NULL;
+	info_template->next = NULL;
+	hid_device_handle_bus_dependent(&devinfo, info_template, idx);
 
 	error = ioctl(fd, HIDIOCGRDESCSIZE, &desc_size);
 	if (error == -1) {
 		register_global_error_format("ioctl(HIDIOCGRDESCSIZE): %s", strerror(errno));
+		goto end;
+	}
+	if (desc_size <= 0 || (size_t) desc_size >= sizeof(desc.value)) {
+		errno = EOVERFLOW;
+		register_global_error("HIDIOCGRDESCSIZE returned an invalid report descriptor size");
 		goto end;
 	}
 	desc.size = desc_size;
@@ -609,36 +646,65 @@ static struct hid_device_info *hid_create_device_info_by_hidraw_idx(int fd_prep,
 	unsigned short page = 0, usage = 0;
 	struct hid_usage_iterator iter;
 	memset(&iter, 0, sizeof(iter));
-	struct hid_device_info *cur = template;
 
 	while (!get_next_hid_usage(desc.value, desc.size, &iter, &page, &usage)) {
-		cur = cur->next = (struct hid_device_info *) calloc(1, sizeof(struct hid_device_info));
-		if (!cur)
-			break;
-		cur->path = strdup(template->path);
-		cur->vendor_id = template->vendor_id;
-		cur->product_id = template->product_id;
-		cur->serial_number = template->serial_number ? wcsdup(template->serial_number) : NULL;
-		cur->release_number = template->release_number;
-		cur->product_string = template->product_string ? wcsdup(template->product_string) : NULL;
-		cur->interface_number = template->interface_number;
-		cur->manufacturer_string = template->manufacturer_string ? wcsdup(template->manufacturer_string) : NULL;
-		cur->bus_type = template->bus_type;
+		struct hid_device_info *cur = (struct hid_device_info *) calloc(1, sizeof(struct hid_device_info));
+		if (!cur) {
+			register_global_error("Couldn't allocate memory");
+			goto end;
+		}
+		cur->path = strdup(info_template->path);
+		cur->vendor_id = info_template->vendor_id;
+		cur->product_id = info_template->product_id;
+		cur->serial_number = info_template->serial_number ? wcsdup(info_template->serial_number) : NULL;
+		cur->release_number = info_template->release_number;
+		cur->product_string = info_template->product_string ? wcsdup(info_template->product_string) : NULL;
+		cur->interface_number = info_template->interface_number;
+		cur->manufacturer_string = info_template->manufacturer_string ? wcsdup(info_template->manufacturer_string) : NULL;
+		cur->bus_type = info_template->bus_type;
 		cur->usage = usage;
 		cur->usage_page = page;
+
+		if (!cur->path ||
+		    (info_template->serial_number && !cur->serial_number) ||
+		    (info_template->product_string && !cur->product_string) ||
+		    (info_template->manufacturer_string && !cur->manufacturer_string)) {
+			hid_free_enumeration(cur);
+			register_global_error("Couldn't allocate memory");
+			goto end;
+		}
+
+		if (tail)
+			tail->next = cur;
+		else
+			head = cur;
+		tail = cur;
 	}
-	/*
-	 * make the circular linked list. so that caller can have
-	 * the address of first element (cur->next) and last element(cur)
-	 */
-	cur->next = template->next;
-	template->next = NULL;
+
+	if (!tail) {
+		/*
+		 * Keep devices with descriptors that have no top-level usage
+		 * collection visible, matching the other hidraw backend.
+		 */
+		head = tail = info_template;
+		info_template = NULL;
+	}
+
+	if (tail) {
+		/*
+		 * Make the circular linked list, so the caller has the first
+		 * element at result->next and can append using result as the tail.
+		 */
+		tail->next = head;
+		result = tail;
+		head = NULL;
+	}
 end:
-	if (template)
-		hid_free_enumeration(template);
+	hid_free_enumeration(info_template);
+	hid_free_enumeration(head);
 	if (fd_prep == -1)
 		close(fd);
-	return cur == template ?  NULL : cur;
+	return result;
 }
 
 
@@ -657,12 +723,17 @@ int HID_API_EXPORT hid_init(void)
 	const char *locale;
 	int error;
 
+	register_global_error(NULL);
+
 	locale = setlocale(LC_CTYPE, NULL);
 	if (!locale)
 		setlocale(LC_CTYPE, "");
 
-	if (global_usb_context == NULL && (error = libusb_init(&global_usb_context)))
-		return error;
+	if (global_usb_context == NULL && (error = libusb_init(&global_usb_context))) {
+		global_usb_context = NULL;
+		register_global_error_format("libusb_init: %s", libusb_strerror(error));
+		return -1;
+	}
 
 	return 0;
 }
@@ -679,16 +750,28 @@ int HID_API_EXPORT hid_exit(void)
 
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
-	struct hid_device_info *root = calloc(1, sizeof(struct hid_device_info));
-	struct hid_device_info *head = root;
-	int oid[CTL_MAXNAME] = {0};
-	size_t buf_len, oid_items = CTL_MAXNAME;
+	struct hid_device_info *root;
+	struct hid_device_info *head;
 	struct hid_sysctl_iter iter;
 
-	if (!hid_init_sysctl_iter(&iter, "dev.hidraw"))
-		return NULL;
 	if (hid_init() != 0)
 		return NULL;
+	if (!hid_init_sysctl_iter(&iter, "dev.hidraw")) {
+		if (errno == ENOENT) {
+			if (vendor_id == 0 && product_id == 0)
+				register_global_error("No HID devices found in the system.");
+			else
+				register_global_error("No HID devices with requested VID/PID found in the system.");
+		}
+		return NULL;
+	}
+
+	root = (struct hid_device_info *) calloc(1, sizeof(struct hid_device_info));
+	if (!root) {
+		register_global_error("Couldn't allocate memory");
+		return NULL;
+	}
+	head = root;
 	/*
 	 * we want to exactly match dev.hidraw.%d
 	 */
@@ -715,6 +798,15 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	}
 	root = head->next;
 	free(head);
+	if (root == NULL) {
+		if (vendor_id == 0 && product_id == 0)
+			register_global_error("No HID devices found in the system.");
+		else
+			register_global_error("No HID devices with requested VID/PID found in the system.");
+	}
+	else {
+		register_global_error(NULL);
+	}
 	return root;
 }
 
@@ -779,7 +871,8 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
 	hid_device *dev = NULL;
 
-	hid_init();
+	if (hid_init() != 0)
+		return NULL;
 	/* register_global_error: global error is reset by hid_init */
 
 	dev = new_hid_device();
@@ -790,6 +883,11 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 
 	dev->device_path = strdup(path);
+	if (!dev->device_path) {
+		free(dev);
+		register_global_error("Couldn't allocate memory");
+		return NULL;
+	}
 	dev->device_handle = open(path, O_RDWR | O_CLOEXEC);
 
 	if (dev->device_handle >= 0) {
@@ -807,8 +905,9 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 	else {
 		/* Unable to open a device. */
-		free(dev);
 		register_global_error_format("Failed to open a device with path '%s': %s", path, strerror(errno));
+		free((void *)dev->device_path);
+		free(dev);
 		return NULL;
 	}
 }
@@ -917,136 +1016,140 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char *data, size_t length)
 {
 	int res;
-#ifndef HIDIOCGFEATURE
-	struct hidraw_gen_descriptor desc;
-#endif
+	size_t report_length = length;
+	struct hidraw_gen_descriptor desc = {0};
 
+	/*
+	 * The uhid-compatible report ioctls do not change the descriptor's
+	 * hidraw framing mode and are available on all supported FreeBSD releases.
+	 */
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
-
-#ifdef HIDIOCSFEATURE
-	res = ioctl(dev->device_handle, HIDIOCSFEATURE(length), data);
-	length = res;
-#else
-	desc.hgd_maxlen = length;
-	desc.hgd_data = (void *)data;
-	desc.hgd_report_type = HID_FEATURE_REPORT;
+	if (length > UINT16_MAX) {
+		errno = EOVERFLOW;
+		register_device_error(dev, "Report is too large");
+		return -1;
+	}
 
 	register_device_error(dev, NULL);
 
+	desc.hgd_maxlen = data[0] == 0 ? length - 1 : length;
+	desc.hgd_data = (void *)(data[0] == 0 ? data + 1 : data);
+	desc.hgd_report_type = HID_FEATURE_REPORT;
+
 	res = ioctl(dev->device_handle, HIDRAW_SET_REPORT, &desc);
-#endif
 
 	if (res < 0) {
 		register_device_error_format(dev, "ioctl (SFEATURE): %s", strerror(errno));
 		return -1;
 	}
 
-	return length;
+	return report_length;
 }
 
 int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
-#ifndef HIDIOCGFEATURE
-	struct hidraw_gen_descriptor desc;
-#endif
+	unsigned char report_id;
+	struct hidraw_gen_descriptor desc = {0};
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
+	if (length > UINT16_MAX) {
+		errno = EOVERFLOW;
+		register_device_error(dev, "Report is too large");
+		return -1;
+	}
 
-#ifdef HIDIOCGFEATURE
-	res = ioctl(dev->device_handle, HIDIOCGFEATURE(length), data);
-	length = res;
-#else
-	desc.hgd_maxlen = length;
-	desc.hgd_data = (void *)data;
-	desc.hgd_report_type = HID_FEATURE_REPORT;
-
+	report_id = data[0];
 	register_device_error(dev, NULL);
 
+	desc.hgd_maxlen = report_id == 0 ? length - 1 : length;
+	desc.hgd_data = report_id == 0 ? data + 1 : data;
+	desc.hgd_report_type = HID_FEATURE_REPORT;
+
 	res = ioctl(dev->device_handle, HIDRAW_GET_REPORT, &desc);
-	length = desc.hgd_actlen;
-#endif
 
 	if (res < 0) {
 		register_device_error_format(dev, "ioctl (GFEATURE): %s", strerror(errno));
 		return -1;
 	}
 
+	length = desc.hgd_actlen + (report_id == 0);
 	return length;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device *dev, const unsigned char *data, size_t length)
 {
 	int res;
-#ifndef HIDIOCSOUTPUT
-	struct hidraw_gen_descriptor desc;
-#endif
+	size_t report_length = length;
+	struct hidraw_gen_descriptor desc = {0};
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
+	if (length > UINT16_MAX) {
+		errno = EOVERFLOW;
+		register_device_error(dev, "Report is too large");
+		return -1;
+	}
 
-#ifdef HIDIOCSOUTPUT
-	res = ioctl(dev->device_handle, HIDIOCSOUTPUT(length), data);
-	length = res;
-#else
-	desc.hgd_maxlen = length;
-	desc.hgd_data = (void *)data;
+	register_device_error(dev, NULL);
+
+	desc.hgd_maxlen = data[0] == 0 ? length - 1 : length;
+	desc.hgd_data = (void *)(data[0] == 0 ? data + 1 : data);
 	desc.hgd_report_type = HID_OUTPUT_REPORT;
 	res = ioctl(dev->device_handle, HIDRAW_SET_REPORT, &desc);
-#endif
 
 	if (res < 0) {
 		register_device_error_format(dev, "ioctl (SOUTPUT): %s", strerror(errno));
 		return -1;
 	}
 
-	return length;
+	return report_length;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
 {
 	int res;
-#ifndef HIDIOCGINPUT
-	struct hidraw_gen_descriptor desc;
-#endif
+	unsigned char report_id;
+	struct hidraw_gen_descriptor desc = {0};
 
 	if (!data || (length == 0)) {
 		errno = EINVAL;
 		register_device_error(dev, "Zero buffer/length");
 		return -1;
 	}
+	if (length > UINT16_MAX) {
+		errno = EOVERFLOW;
+		register_device_error(dev, "Report is too large");
+		return -1;
+	}
 
-#ifdef HIDIOCGINPUT
-	res = ioctl(dev->device_handle, HIDIOCGINPUT(length), data);
-	length = res;
-#else
-	desc.hgd_maxlen = length;
-	desc.hgd_data = (void *)data;
-	desc.hgd_report_type = HID_INPUT_REPORT;
-
+	report_id = data[0];
 	register_device_error(dev, NULL);
 
+	desc.hgd_maxlen = report_id == 0 ? length - 1 : length;
+	desc.hgd_data = report_id == 0 ? data + 1 : data;
+	desc.hgd_report_type = HID_INPUT_REPORT;
+
 	res = ioctl(dev->device_handle, HIDRAW_GET_REPORT, &desc);
-	length = desc.hgd_actlen;
-#endif
 
 	if (res < 0) {
 		register_device_error_format(dev, "ioctl (GINPUT): %s", strerror(errno));
 		return -1;
 	}
 
+	length = desc.hgd_actlen + (report_id == 0);
 	return length;
 }
 
@@ -1165,8 +1268,9 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 		if (devinfo != NULL) {
 			dev->device_info = devinfo->next;
 			devinfo->next = NULL;
+			register_device_error(dev, NULL);
 		} else {
-			register_device_error(dev, "Failed to create device: maybe the permission is not correct?");
+			register_device_error_from_global(dev);
 		}
 	}
 
@@ -1207,6 +1311,12 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		return error;
 	}
 
+	if (act_len < 0 || (size_t) act_len >= sizeof(desc.value)) {
+		errno = EOVERFLOW;
+		register_device_error(dev, "hid_get_report_descriptor: invalid report descriptor size");
+		return -1;
+	}
+
 	desc.size = act_len;
 	error = ioctl(dev->device_handle, HIDIOCGRDESC, &desc);
 	if (error < 0) {
@@ -1215,7 +1325,7 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 		return error;
 	}
 
-	if (act_len < buf_size)
+	if ((size_t) act_len < buf_size)
 		buf_size = act_len;
 
 	memcpy(buf, desc.value, buf_size);

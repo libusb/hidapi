@@ -4,14 +4,17 @@ add_library(hidapi_hidraw
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_hidraw PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
 
 include(FindPkgConfig)
-pkg_check_modules(libusb-1.0 REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
+pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
 
-target_link_libraries(hidapi_hidraw PRIVATE PkgConfig::libusb-1.0 Threads::Threads)
+target_link_libraries(hidapi_hidraw PRIVATE PkgConfig::libusb Threads::Threads)
 
 set_target_properties(hidapi_hidraw
     PROPERTIES
@@ -35,4 +38,9 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-hidraw.pc.in")
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
+    OUTPUT_NAME "hidapi-hidraw"
+    LIBRARY_NAME "hidapi-hidraw"
+    DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the hidraw implementation."
+    REQUIRES_PRIVATE "libusb-1.0 >= 1.0.9"
+)
