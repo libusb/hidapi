@@ -57,9 +57,12 @@ case $host in
 	threads="pthreads"
 
 	# HIDAPI/hidraw libs
-	PKG_CHECK_MODULES([libudev], [libudev], true, [hidapi_lib_error libudev])
-	LIBS_HIDRAW_PR="${LIBS_HIDRAW_PR} $libudev_LIBS"
-	CFLAGS_HIDRAW="${CFLAGS_HIDRAW} $libudev_CFLAGS"
+	hidapi_saved_LIBS="$LIBS"
+	AC_SEARCH_LIBS([dlopen], [dl], [], [hidapi_lib_error libdl])
+	if test "x$ac_cv_search_dlopen" != "xnone required"; then
+		LIBS_HIDRAW_PR="${LIBS_HIDRAW_PR} ${ac_cv_search_dlopen}"
+	fi
+	LIBS="$hidapi_saved_LIBS"
 
 	# HIDAPI/libusb libs
 	AC_CHECK_LIB([rt], [clock_gettime], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -lrt"], [hidapi_lib_error librt])

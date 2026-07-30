@@ -8,4 +8,5 @@ Description: C Library for USB/Bluetooth HID device access from Linux, Mac OS X,
 URL: https://github.com/libusb/hidapi
 Version: @VERSION@
 Libs: -L${libdir} -lhidapi-hidraw
+Libs.private: -ldl
 Cflags: -I${includedir}/hidapi

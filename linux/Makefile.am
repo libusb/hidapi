@@ -7,4 +7,9 @@ libhidapi_hidraw_la_LIBADD = $(LIBS_HIDRAW)
 hdrdir = $(includedir)/hidapi
 hdr_HEADERS = $(top_srcdir)/hidapi/hidapi.h
 
-EXTRA_DIST = Makefile-manual
+EXTRA_DIST = \
+	Makefile-manual \
+	test/CMakeLists.txt \
+	test/dlopen_interposer.c \
+	test/hidapi_hidraw_loader_test.c \
+	test/incomplete_udev.c

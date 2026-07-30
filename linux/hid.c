@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <locale.h>
 #include <errno.h>
+#include <stdarg.h>
 
 /* Unix */
 #include <unistd.h>
@@ -35,16 +36,57 @@
 #include <sys/utsname.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <dlfcn.h>
 
 /* Linux */
 #include <linux/hidraw.h>
 #include <linux/version.h>
 #include <linux/input.h>
 
-/* falkTX: replaced by local file for dynamic loading */
-#include "libudev.c"
-
 #include "hidapi.h"
+
+struct udev;
+struct udev_device;
+struct udev_enumerate;
+struct udev_list_entry;
+
+typedef struct udev *udev_new_(void);
+typedef struct udev *udev_unref_(struct udev *udev);
+typedef struct udev_device *udev_device_new_from_devnum_(struct udev *udev, char type, dev_t devnum);
+typedef struct udev_device *udev_device_new_from_syspath_(struct udev *udev, const char *syspath);
+typedef struct udev_device *udev_device_unref_(struct udev_device *udev_device);
+typedef struct udev_device *udev_device_get_parent_with_subsystem_devtype_(
+	struct udev_device *udev_device, const char *subsystem, const char *devtype);
+typedef const char *udev_device_get_syspath_(struct udev_device *udev_device);
+typedef const char *udev_device_get_devnode_(struct udev_device *udev_device);
+typedef const char *udev_device_get_sysattr_value_(struct udev_device *udev_device, const char *sysattr);
+typedef struct udev_enumerate *udev_enumerate_new_(struct udev *udev);
+typedef struct udev_enumerate *udev_enumerate_unref_(struct udev_enumerate *udev_enumerate);
+typedef int udev_enumerate_add_match_subsystem_(struct udev_enumerate *udev_enumerate, const char *subsystem);
+typedef int udev_enumerate_scan_devices_(struct udev_enumerate *udev_enumerate);
+typedef struct udev_list_entry *udev_enumerate_get_list_entry_(struct udev_enumerate *udev_enumerate);
+typedef struct udev_list_entry *udev_list_entry_get_next_(struct udev_list_entry *list_entry);
+typedef const char *udev_list_entry_get_name_(struct udev_list_entry *list_entry);
+
+static udev_new_ *udev_new = NULL;
+static udev_unref_ *udev_unref = NULL;
+static udev_device_new_from_devnum_ *udev_device_new_from_devnum = NULL;
+static udev_device_new_from_syspath_ *udev_device_new_from_syspath = NULL;
+static udev_device_unref_ *udev_device_unref = NULL;
+static udev_device_get_parent_with_subsystem_devtype_ *udev_device_get_parent_with_subsystem_devtype = NULL;
+static udev_device_get_syspath_ *udev_device_get_syspath = NULL;
+static udev_device_get_devnode_ *udev_device_get_devnode = NULL;
+static udev_device_get_sysattr_value_ *udev_device_get_sysattr_value = NULL;
+static udev_enumerate_new_ *udev_enumerate_new = NULL;
+static udev_enumerate_unref_ *udev_enumerate_unref = NULL;
+static udev_enumerate_add_match_subsystem_ *udev_enumerate_add_match_subsystem = NULL;
+static udev_enumerate_scan_devices_ *udev_enumerate_scan_devices = NULL;
+static udev_enumerate_get_list_entry_ *udev_enumerate_get_list_entry = NULL;
+static udev_list_entry_get_next_ *udev_list_entry_get_next = NULL;
+static udev_list_entry_get_name_ *udev_list_entry_get_name = NULL;
+
+static void *udev_lib_handle = NULL;
+static int hidapi_initialized = 0;
 
 #ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
 /* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.
@@ -166,6 +208,84 @@ static void register_global_error_format(const char *format, ...)
 	va_start(args, format);
 	register_error_str_vformat(&last_global_error_str, format, args);
 	va_end(args);
+}
+
+static void free_udev_library(void)
+{
+	if (udev_lib_handle)
+		dlclose(udev_lib_handle);
+	udev_lib_handle = NULL;
+
+	udev_new = NULL;
+	udev_unref = NULL;
+	udev_device_new_from_devnum = NULL;
+	udev_device_new_from_syspath = NULL;
+	udev_device_unref = NULL;
+	udev_device_get_parent_with_subsystem_devtype = NULL;
+	udev_device_get_syspath = NULL;
+	udev_device_get_devnode = NULL;
+	udev_device_get_sysattr_value = NULL;
+	udev_enumerate_new = NULL;
+	udev_enumerate_unref = NULL;
+	udev_enumerate_add_match_subsystem = NULL;
+	udev_enumerate_scan_devices = NULL;
+	udev_enumerate_get_list_entry = NULL;
+	udev_list_entry_get_next = NULL;
+	udev_list_entry_get_name = NULL;
+}
+
+static int lookup_udev_functions(void)
+{
+	udev_lib_handle = dlopen("libudev.so.1", RTLD_NOW | RTLD_LOCAL);
+	if (!udev_lib_handle) {
+		const char *error = dlerror();
+		register_global_error_format("Failed to load libudev.so.1: %s", error ? error : "unknown error");
+		return -1;
+	}
+
+/* Avoid direct function-pointer casts from void pointers.
+   Using memcpy keeps this warning-free regardless of the compiler settings. */
+#define HIDAPI_UDEV_RESOLVE(name) do { \
+	void *symbol; \
+	const char *error; \
+	dlerror(); \
+	symbol = dlsym(udev_lib_handle, #name); \
+	error = dlerror(); \
+	if (error) { \
+		register_global_error_format("Failed to resolve libudev symbol %s: %s", #name, error); \
+		goto err; \
+	} \
+	if (sizeof(name) != sizeof(symbol)) { \
+		register_global_error_format("Failed to resolve libudev symbol %s: incompatible pointer sizes", #name); \
+		goto err; \
+	} \
+	memcpy(&name, &symbol, sizeof(symbol)); \
+} while (0)
+
+	HIDAPI_UDEV_RESOLVE(udev_new);
+	HIDAPI_UDEV_RESOLVE(udev_unref);
+	HIDAPI_UDEV_RESOLVE(udev_device_new_from_devnum);
+	HIDAPI_UDEV_RESOLVE(udev_device_new_from_syspath);
+	HIDAPI_UDEV_RESOLVE(udev_device_unref);
+	HIDAPI_UDEV_RESOLVE(udev_device_get_parent_with_subsystem_devtype);
+	HIDAPI_UDEV_RESOLVE(udev_device_get_syspath);
+	HIDAPI_UDEV_RESOLVE(udev_device_get_devnode);
+	HIDAPI_UDEV_RESOLVE(udev_device_get_sysattr_value);
+	HIDAPI_UDEV_RESOLVE(udev_enumerate_new);
+	HIDAPI_UDEV_RESOLVE(udev_enumerate_unref);
+	HIDAPI_UDEV_RESOLVE(udev_enumerate_add_match_subsystem);
+	HIDAPI_UDEV_RESOLVE(udev_enumerate_scan_devices);
+	HIDAPI_UDEV_RESOLVE(udev_enumerate_get_list_entry);
+	HIDAPI_UDEV_RESOLVE(udev_list_entry_get_next);
+	HIDAPI_UDEV_RESOLVE(udev_list_entry_get_name);
+
+#undef HIDAPI_UDEV_RESOLVE
+
+	return 0;
+
+err:
+	free_udev_library();
+	return -1;
 }
 
 /* Set the last error for a device to be reported by hid_error(dev).
@@ -919,11 +1039,20 @@ int HID_API_EXPORT hid_init(void)
 	if (!locale)
 		setlocale(LC_CTYPE, "");
 
+	if (!hidapi_initialized) {
+		if (lookup_udev_functions() < 0)
+			return -1;
+		hidapi_initialized = 1;
+	}
+
 	return 0;
 }
 
 int HID_API_EXPORT hid_exit(void)
 {
+	free_udev_library();
+	hidapi_initialized = 0;
+
 	/* Free global error message */
 	register_global_error(NULL);
 
@@ -939,7 +1068,8 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	struct hid_device_info *root = NULL; /* return object */
 	struct hid_device_info *cur_dev = NULL;
 
-	hid_init();
+	if (hid_init() < 0)
+		return NULL;
 	/* register_global_error: global error is reset by hid_init */
 
 	/* Create the udev object */
@@ -956,7 +1086,9 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 	devices = udev_enumerate_get_list_entry(enumerate);
 	/* For each item, see if it matches the vid/pid, and if so
 	   create a udev_device record for it */
-	udev_list_entry_foreach(dev_list_entry, devices) {
+	for (dev_list_entry = devices;
+	     dev_list_entry != NULL;
+	     dev_list_entry = udev_list_entry_get_next(dev_list_entry)) {
 		const char *sysfs_path;
 		unsigned short dev_vid = 0;
 		unsigned short dev_pid = 0;
@@ -1078,7 +1210,8 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 {
 	hid_device *dev = NULL;
 
-	hid_init();
+	if (hid_init() < 0)
+		return NULL;
 	/* register_global_error: global error is reset by hid_init */
 
 	dev = new_hid_device();

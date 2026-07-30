@@ -8,7 +8,7 @@ target_link_libraries(hidapi_hidraw PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
 
-target_link_libraries(hidapi_hidraw PRIVATE Threads::Threads dl)
+target_link_libraries(hidapi_hidraw PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
 set_target_properties(hidapi_hidraw
     PROPERTIES
@@ -23,6 +23,10 @@ set_target_properties(hidapi_hidraw
 add_library(hidapi::hidraw ALIAS hidapi_hidraw)
 # compatibility with raw library link
 add_library(hidapi-hidraw ALIAS hidapi_hidraw)
+
+if(HIDAPI_WITH_TESTS)
+    add_subdirectory(test)
+endif()
 
 if(HIDAPI_INSTALL_TARGETS)
     install(TARGETS hidapi_hidraw EXPORT hidapi

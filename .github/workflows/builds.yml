@@ -108,19 +108,25 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install libudev-dev libusb-1.0-0-dev python3-pip ninja-build
+        sudo apt install libudev1 libusb-1.0-0-dev python3-pip ninja-build
         sudo -H pip3 install meson
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
-        cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
     - name: Build CMake Shared
       working-directory: build/shared
       run: make install
+    - name: Test CMake Shared
+      working-directory: build/shared
+      run: ctest --output-on-failure
     - name: Build CMake Static
       working-directory: build/static
       run: make install
+    - name: Test CMake Static
+      working-directory: build/static
+      run: ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
@@ -515,12 +521,12 @@ jobs:
         path: hidapisrc
     - name: Install dependencies
       run: |
-        apk add gcc musl-dev autoconf automake libtool eudev-dev libusb-dev linux-headers cmake ninja make
+        apk add gcc musl-dev autoconf automake libtool eudev-libs libusb-dev linux-headers cmake ninja make
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
-        cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
+        cmake -B build/shared-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install/shared-cmake -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
+        cmake -B build/static-cmake -S hidapisrc -GNinja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DCMAKE_INSTALL_PREFIX=install/static-cmake -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${ALPINE_COMPILE_FLAGS}"
     - name: Configure Automake
       working-directory: hidapisrc
       run: |
@@ -529,9 +535,15 @@ jobs:
     - name: Build CMake Shared
       working-directory: build/shared-cmake
       run: ninja install
+    - name: Test CMake Shared
+      working-directory: build/shared-cmake
+      run: ctest --output-on-failure
     - name: Build CMake Static
       working-directory: build/static-cmake
       run: ninja install
+    - name: Test CMake Static
+      working-directory: build/static-cmake
+      run: ctest --output-on-failure
     - name: Build Automake
       working-directory: hidapisrc
       run: |
