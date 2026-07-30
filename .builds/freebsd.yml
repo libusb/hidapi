@@ -18,7 +18,7 @@ tasks:
     ./configure
     echo Configure CMake build
     mkdir -p build install_cmake
-    cmake -GNinja -B build -S . -DCMAKE_INSTALL_PREFIX=install_cmake
+    cmake -GNinja -B build -S . -DCMAKE_INSTALL_PREFIX=install_cmake -DHIDAPI_BUILD_HIDTEST=ON
 - build-autotools: |
     cd hidapi
     make
@@ -30,5 +30,7 @@ tasks:
     ninja install
     ninja clean
 - build-manual: |
-    cd hidapi/libusb
+    cd hidapi/freebsd
+    gmake -f Makefile-manual
+    cd ../libusb
     gmake -f Makefile-manual
