@@ -1,0 +1,11 @@
+AC_PREREQ([2.69])
+AC_INIT([hidapi-pkg-config-test], [1.0])
+AC_CONFIG_SRCDIR([test.c])
+AM_INIT_AUTOMAKE([foreign])
+
+AC_PROG_CC
+PKG_PROG_PKG_CONFIG
+PKG_CHECK_MODULES([HIDAPI], [hidapi])
+
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT

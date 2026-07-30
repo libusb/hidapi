@@ -2,9 +2,6 @@
  HIDAPI - Multi-Platform library for
  communication with HID devices.
 
- Alan Ott
- Signal 11 Software
-
  libusb/hidapi Team
 
  Copyright 2022, All Rights Reserved.
