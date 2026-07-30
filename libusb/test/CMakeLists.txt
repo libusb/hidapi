@@ -5,23 +5,12 @@ set_target_properties(max_input_report_size_test
         C_STANDARD_REQUIRED TRUE
 )
 
-if(TARGET usb-1.0)
-    target_link_libraries(max_input_report_size_test PRIVATE usb-1.0)
-else()
-    include(FindPkgConfig)
-    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
-    target_link_libraries(max_input_report_size_test PRIVATE PkgConfig::libusb)
-endif()
-
-target_link_libraries(max_input_report_size_test PUBLIC hidapi_include)
+target_link_libraries(max_input_report_size_test PRIVATE hidapi_include)
 
 # Each test case requires 2 files:
 # <name>.pp_data - textual representation of HIDP_PREPARSED_DATA;
-# <name>_expected.rpt_desc - reconstructed HID Report Descriptor out of .pp_data file;
-#
-# (Non-required by test):
-# <name>_real.dpt_desc - the original report rescriptor used to create a test case;
-set(HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES
+# <name>_real.rpt_desc - the original report descriptor used to create a test case.
+set(HID_REPORT_DESCRIPTOR_TEST_CASES
      046D_C52F_0001_000C
      046D_C52F_0001_FF00
      046D_C52F_0002_0001
@@ -51,18 +40,18 @@ set(HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES
 
 set(CMAKE_VERSION_SUPPORTS_ENVIRONMENT_MODIFICATION "3.22")
 
-foreach(TEST_CASE ${HID_DESCRIPTOR_RECONSTRUCT_TEST_CASES})
+foreach(TEST_CASE ${HID_REPORT_DESCRIPTOR_TEST_CASES})
      set(TEST_PP_DATA "${CMAKE_CURRENT_LIST_DIR}/../../windows/test/data/${TEST_CASE}.pp_data")
      if(NOT EXISTS "${TEST_PP_DATA}")
           message(FATAL_ERROR "Missing '${TEST_PP_DATA}' file for '${TEST_CASE}' test case")
      endif()
-     set(TEST_EXPECTED_DESCRIPTOR "${CMAKE_CURRENT_LIST_DIR}/../../windows/test/data/${TEST_CASE}_expected.rpt_desc")
-     if(NOT EXISTS "${TEST_EXPECTED_DESCRIPTOR}")
-          message(FATAL_ERROR "Missing '${TEST_EXPECTED_DESCRIPTOR}' file for '${TEST_CASE}' test case")
+     set(TEST_REPORT_DESCRIPTOR "${CMAKE_CURRENT_LIST_DIR}/../../windows/test/data/${TEST_CASE}_real.rpt_desc")
+     if(NOT EXISTS "${TEST_REPORT_DESCRIPTOR}")
+          message(FATAL_ERROR "Missing '${TEST_REPORT_DESCRIPTOR}' file for '${TEST_CASE}' test case")
      endif()
 
      add_test(NAME "LibUsbHidMaxInputReportSizeTest_${TEST_CASE}"
-          COMMAND max_input_report_size_test "${TEST_PP_DATA}" "${TEST_EXPECTED_DESCRIPTOR}"
+          COMMAND max_input_report_size_test "${TEST_PP_DATA}" "${TEST_REPORT_DESCRIPTOR}"
           WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
      )
 endforeach()

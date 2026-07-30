@@ -2,6 +2,7 @@ list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_libusb.h")
 
 add_library(hidapi_libusb
     ${HIDAPI_PUBLIC_HEADERS}
+    hidapi_libusb_report_descriptor.h
     hid.c
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
