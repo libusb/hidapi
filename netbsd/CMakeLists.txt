@@ -1,9 +1,10 @@
-cmake_minimum_required(VERSION 3.6.3...3.25 FATAL_ERROR)
-
 add_library(hidapi_netbsd
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_netbsd PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
