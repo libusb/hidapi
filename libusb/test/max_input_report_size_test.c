@@ -124,21 +124,35 @@ static int parse_c_hex_bytes(char *line, unsigned char *data, size_t data_size, 
 	if (comment)
 		*comment = '\0';
 
-	while ((cursor = strstr(cursor, "0x")) != NULL) {
-		if (cursor[2] != '\0' &&
-		    cursor[3] != '\0' &&
-		    isxdigit((unsigned char)cursor[2]) &&
-		    isxdigit((unsigned char)cursor[3]) &&
-		    !isxdigit((unsigned char)cursor[4])) {
-			char byte_text[3] = {cursor[2], cursor[3], '\0'};
-			unsigned int value = (unsigned int)strtoul(byte_text, NULL, 16);
+	while (isspace((unsigned char)*cursor))
+		cursor++;
+	if (cursor[0] != '0' || cursor[1] != 'x')
+		return 0;
 
-			if (append_byte(data, data_size, data_length, value, filename) < 0)
-				return -1;
-			found = 1;
-			cursor += 4;
-		} else {
-			cursor += 2;
+	while (*cursor) {
+		char *end;
+		unsigned long value;
+
+		if (cursor[0] != '0' || cursor[1] != 'x') {
+			fprintf(stderr, "Malformed C hex byte list in '%s'\n", filename);
+			return -1;
+		}
+		value = strtoul(cursor + 2, &end, 16);
+		if (end == cursor + 2 || end - (cursor + 2) > 2 ||
+		    append_byte(data, data_size, data_length, (unsigned int)value, filename) < 0)
+			return -1;
+		found = 1;
+		cursor = end;
+
+		while (isspace((unsigned char)*cursor))
+			cursor++;
+		if (*cursor == ',') {
+			cursor++;
+			while (isspace((unsigned char)*cursor))
+				cursor++;
+		} else if (*cursor != '\0') {
+			fprintf(stderr, "Malformed C hex byte list in '%s'\n", filename);
+			return -1;
 		}
 	}
 
@@ -256,6 +270,10 @@ static bool read_report_descriptor(const char *filename, unsigned char *data, si
 
 static int test_report_descriptor_parser(void)
 {
+	char single_digit_hex[] = "  0x5, 0x0a, // valid C-style byte list";
+	char stray_hex_text[] = "description mentions 0x05 but is not a byte list";
+	unsigned char fixture_bytes[2];
+	size_t fixture_byte_count = 0;
 	static const uint8_t missing_report_size[] = {0x95, 0x01, 0x81, 0x00};
 	static const uint8_t truncated_item[] = {0x75};
 	static const uint8_t output_only[] = {0x75, 0x08, 0x95, 0x01, 0x91, 0x00};
@@ -264,7 +282,48 @@ static int test_report_descriptor_parser(void)
 		0x85, 0x02, 0x95, 0x01, 0x81, 0x00,
 		0x85, 0x01, 0x95, 0x02, 0x81, 0x00,
 	};
+	static const uint8_t push_pop[] = {
+		0x75, 0x08, 0x95, 0x01, 0xa4,
+		0x75, 0x10, 0x95, 0x02, 0x81, 0x00,
+		0xb4, 0x81, 0x00,
+	};
+	static const uint8_t long_item[] = {
+		0x75, 0x08, 0xfe, 0x02, 0x99, 0xaa, 0xbb,
+		0x95, 0x03, 0x81, 0x00,
+	};
+	static const uint8_t four_byte_globals[] = {
+		0x77, 0x08, 0x00, 0x00, 0x00,
+		0x97, 0x02, 0x00, 0x00, 0x00,
+		0x81, 0x00,
+	};
+	static const uint8_t two_byte_report_id[] = {
+		0x86, 0x01, 0x00, 0x75, 0x08, 0x95, 0x01, 0x81, 0x00,
+	};
+	static const uint8_t mixed_report_id_zero[] = {
+		0x75, 0x08, 0x95, 0x01, 0x81, 0x00,
+		0x85, 0x01, 0x81, 0x00,
+	};
+	static const uint8_t oversized_report[] = {
+		0x75, 0x20, 0x97, 0xff, 0xff, 0xff, 0x7f, 0x81, 0x00,
+	};
+	static const uint8_t maximum_report[] = {
+		0x75, 0x08, 0x97, 0xff, 0xff, 0x00, 0x00, 0x81, 0x00,
+	};
+	static const uint8_t over_maximum_report[] = {
+		0x75, 0x08, 0x97, 0x00, 0x00, 0x01, 0x00, 0x81, 0x00,
+	};
+	static const uint8_t accumulated_overflow[] = {
+		0x77, 0xff, 0xff, 0xff, 0xff,
+		0x97, 0xff, 0xff, 0xff, 0xff,
+		0x81, 0x00, 0x81, 0x00,
+	};
 
+	if (parse_c_hex_bytes(single_digit_hex, fixture_bytes, sizeof(fixture_bytes), &fixture_byte_count, "self-test") != 1 ||
+	    fixture_byte_count != 2 || fixture_bytes[0] != 0x05 || fixture_bytes[1] != 0x0a ||
+	    parse_c_hex_bytes(stray_hex_text, fixture_bytes, sizeof(fixture_bytes), &fixture_byte_count, "self-test") != 0) {
+		fprintf(stderr, "C-style report descriptor fixture parsing failed\n");
+		return -1;
+	}
 	if (get_max_report_size(missing_report_size, sizeof(missing_report_size), REPORT_DESCR_INPUT) != -1 ||
 	    get_max_report_size(truncated_item, sizeof(truncated_item), REPORT_DESCR_INPUT) != -1) {
 		fprintf(stderr, "Malformed report descriptor was not rejected\n");
@@ -276,6 +335,21 @@ static int test_report_descriptor_parser(void)
 	}
 	if (get_max_report_size(repeated_report_id, sizeof(repeated_report_id), REPORT_DESCR_INPUT) != 4) {
 		fprintf(stderr, "Repeated report ID fields were not accumulated correctly\n");
+		return -1;
+	}
+	if (get_max_report_size(push_pop, sizeof(push_pop), REPORT_DESCR_INPUT) != 5 ||
+	    get_max_report_size(long_item, sizeof(long_item), REPORT_DESCR_INPUT) != 3 ||
+	    get_max_report_size(four_byte_globals, sizeof(four_byte_globals), REPORT_DESCR_INPUT) != 2 ||
+	    get_max_report_size(two_byte_report_id, sizeof(two_byte_report_id), REPORT_DESCR_INPUT) != 2 ||
+	    get_max_report_size(maximum_report, sizeof(maximum_report), REPORT_DESCR_INPUT) != (ssize_t)HIDAPI_LIBUSB_MAX_REPORT_SIZE) {
+		fprintf(stderr, "Valid global-item encodings were not parsed correctly\n");
+		return -1;
+	}
+	if (get_max_report_size(mixed_report_id_zero, sizeof(mixed_report_id_zero), REPORT_DESCR_INPUT) != -1 ||
+	    get_max_report_size(oversized_report, sizeof(oversized_report), REPORT_DESCR_INPUT) != -1 ||
+	    get_max_report_size(over_maximum_report, sizeof(over_maximum_report), REPORT_DESCR_INPUT) != -1 ||
+	    get_max_report_size(accumulated_overflow, sizeof(accumulated_overflow), REPORT_DESCR_INPUT) != -1) {
+		fprintf(stderr, "Invalid or unsafe report descriptor was not rejected\n");
 		return -1;
 	}
 
@@ -293,6 +367,9 @@ int main(int argc, char *argv[])
 	ssize_t feature_size;
 	int ret = EXIT_SUCCESS;
 
+	if (argc == 2 && strcmp(argv[1], "--self-test") == 0)
+		return test_report_descriptor_parser() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+
 	if (argc != 3) {
 		fprintf(stderr, "Expected 2 arguments ('<>.pp_data' and '<>_real.rpt_desc'), got: %d\n", argc - 1);
 		return EXIT_FAILURE;
@@ -300,8 +377,6 @@ int main(int argc, char *argv[])
 
 	printf("Checking: '%s' / '%s'\n", argv[1], argv[2]);
 
-	if (test_report_descriptor_parser() < 0)
-		return EXIT_FAILURE;
 	if (!read_report_descriptor(argv[2], report_descriptor, sizeof(report_descriptor), &report_descriptor_size))
 		return EXIT_FAILURE;
 	if (parse_expected_report_sizes(argv[1], &expected) < 0)

@@ -20,6 +20,9 @@ struct report_global_state {
 };
 
 #define REPORT_GLOBAL_STACK_SIZE 16
+/* Bound descriptor-controlled allocations to a conservative 16-bit report
+   range while leaving room for practical libusb interrupt transfers. */
+#define HIDAPI_LIBUSB_MAX_REPORT_SIZE ((size_t)UINT16_MAX)
 
 static uint32_t get_report_item_data(const uint8_t *report_descriptor, size_t item_offset, size_t data_len)
 {
@@ -77,7 +80,7 @@ static ssize_t get_max_report_size(const uint8_t *report_descriptor, size_t desc
 				state.report_size_set = 1;
 				break;
 			case 0x84: /* Report ID */
-				if (data_len != 1 || value == 0)
+				if (data_len == 0 || value == 0 || value > UINT8_MAX)
 					return -1;
 				state.report_id = (uint8_t)value;
 				report_ids_used = 1;
@@ -140,14 +143,20 @@ static ssize_t get_max_report_size(const uint8_t *report_descriptor, size_t desc
 		if (max_bits > SIZE_MAX - 7)
 			return -1;
 		max_bytes = (max_bits + 7) / 8;
-		if (max_bytes >= (size_t)PTRDIFF_MAX)
+		if (max_bytes >= (size_t)PTRDIFF_MAX ||
+		    max_bytes >= HIDAPI_LIBUSB_MAX_REPORT_SIZE)
 			return -1;
 		return (ssize_t)(max_bytes + 1);
 	}
 
 	if (report_bits[0] > (size_t)PTRDIFF_MAX - 7)
 		return -1;
-	return (ssize_t)((report_bits[0] + 7) / 8);
+	{
+		const size_t report_size = (report_bits[0] + 7) / 8;
+		if (report_size > HIDAPI_LIBUSB_MAX_REPORT_SIZE)
+			return -1;
+		return (ssize_t)report_size;
+	}
 }
 
 #endif

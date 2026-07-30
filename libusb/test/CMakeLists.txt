@@ -38,7 +38,9 @@ set(HID_REPORT_DESCRIPTOR_TEST_CASES
      1532_00A3_0002_0001
 )
 
-set(CMAKE_VERSION_SUPPORTS_ENVIRONMENT_MODIFICATION "3.22")
+add_test(NAME LibUsbHidReportDescriptorParserTest
+     COMMAND max_input_report_size_test --self-test
+)
 
 foreach(TEST_CASE ${HID_REPORT_DESCRIPTOR_TEST_CASES})
      set(TEST_PP_DATA "${CMAKE_CURRENT_LIST_DIR}/../../windows/test/data/${TEST_CASE}.pp_data")

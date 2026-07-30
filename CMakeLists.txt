@@ -38,9 +38,9 @@ if(APPLE)
         option(CMAKE_FRAMEWORK "Build macOS/iOS Framework version of the library" OFF)
     endif()
 elseif(NOT WIN32)
+    option(HIDAPI_WITH_LIBUSB "Build LIBUSB-based implementation of HIDAPI" ON)
     if(CMAKE_SYSTEM_NAME MATCHES "Linux")
         option(HIDAPI_WITH_HIDRAW "Build HIDRAW-based implementation of HIDAPI" ON)
-        option(HIDAPI_WITH_LIBUSB "Build LIBUSB-based implementation of HIDAPI" ON)
     endif()
     if(CMAKE_SYSTEM_NAME MATCHES "NetBSD")
         option(HIDAPI_WITH_NETBSD "Build NetBSD/UHID implementation of HIDAPI" ON)
@@ -73,14 +73,14 @@ endif()
 if(WIN32)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
-    # Linux and macOS have virtual-device based tests (uhid / raw-gadget /
-    # IOHIDUserDevice). Off by default: they need a virtual device at runtime
-    # and otherwise self-skip.
+    # Linux and macOS include virtual-device based tests (uhid / raw-gadget /
+    # IOHIDUserDevice). Keep the full test suite opt-in because those tests need
+    # a virtual device at runtime and otherwise self-skip.
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 elseif(HIDAPI_WITH_LIBUSB)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
 else()
-    set(HIDAPI_WITH_TESTS OFF)
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 endif()
 
 if(HIDAPI_WITH_TESTS)
