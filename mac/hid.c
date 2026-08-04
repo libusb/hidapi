@@ -1438,6 +1438,14 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 	(void) result;
 	(void) sender;
 
+	/* A device without a backing io_service_t carries no usable identity (see
+	   match_ref_to_info()): once cached it would match neither the arrival
+	   dedupe nor its own removal, so it would be reported more than once and
+	   never evicted. Keep it consistently invisible instead. */
+	if (!device || IOHIDDeviceGetService(device) == MACH_PORT_NULL) {
+		return;
+	}
+
 	if (!startup) {
 		/* Lock the mutex to avoid race conditions */
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
@@ -1459,6 +1467,17 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 
 	info = create_device_info(device);
 	if (!info) {
+		/* Out of memory on the live-arrival path: the device ends up neither in
+		   the cache nor in an event, so "reported exactly once" is best effort
+		   here. The registration-time paths are hardened against this -
+		   hid_internal_hotplug_build_device_cache() fails the startup and
+		   hid_hotplug_register_callback() fails the registration rather than
+		   commit a partial initial pass - because both still have a caller to
+		   report the failure to. An IOKit callback has none, and the
+		   IOHIDManager does not re-report the device, so there is nothing left
+		   to fail or retry against. (During the startup phase the device is
+		   still picked up by hid_internal_hotplug_build_device_cache(), which
+		   does fail loudly if it cannot allocate either.) */
 		if (!startup) {
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		}
@@ -1655,6 +1674,12 @@ static int hid_internal_hotplug_build_device_cache(void)
 		struct hid_device_info *info;
 
 		if (device_array[i] == NULL) {
+			continue;
+		}
+
+		/* Same identity requirement as the live-arrival path: an entry with no
+		   backing io_service_t could never be deduped against, nor evicted */
+		if (IOHIDDeviceGetService(device_array[i]) == MACH_PORT_NULL) {
 			continue;
 		}
 
