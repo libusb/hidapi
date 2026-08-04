@@ -1202,31 +1202,30 @@ static void hid_internal_hotplug_retire_current(void)
 	hid_hotplug_context.thread_id = 0;
 }
 
-/* Non-zero when the caller runs on one of HIDAPI's monitor threads: the current
-   generation, or a retired one that has not been claimed for joining. Called
-   with the mutex held.
+/* The stable id token of the generation this thread IS, or 0 on any other
+   thread. Written by hotplug_thread() as its first action and never cleared, so
+   it identifies the thread for the whole of its life - including the
+   thread-specific-data destructor phase, which runs AFTER the thread published
+   FINISHED and returned. That phase is exactly where a pthread_t comparison
+   stops being usable: a reaper may already have claimed the entry
+   (being_joined) and be sitting in pthread_join(), which returns only once
+   those destructors are done - so being_joined does NOT mean the thread has
+   terminated, and its pthread_t must not be touched either way. The id tokens
+   are monotonic and start at 1, so 0 is never a valid generation; thread-locals
+   are zero-initialized, and a recycled OS thread gets a fresh (zero) one. */
+static __thread unsigned long hid_hotplug_thread_self_id;
+
+/* Non-zero when the caller runs on one of HIDAPI's monitor threads, whatever
+   the state of that thread's generation - running, finished, retired or being
+   joined. Needs no lock: it only reads this thread's own thread-local.
 
    mutex_in_use alone does not catch every such call: it only covers a call made
    from within a dispatch. A thread-specific-data destructor armed by a user
-   callback runs on the monitor thread AFTER the dispatch unwound - and after the
-   thread published FINISHED - and may re-enter the library from there.
-   An entry another reaper claimed (being_joined) is skipped: that thread has
-   terminated, so it cannot be the caller, and its pthread_t must not be
-   inspected once its joiner started (it may already have been invalidated). */
+   callback runs on the monitor thread after the dispatch unwound - and after the
+   thread published FINISHED - and may re-enter the library from there. */
 static int hid_internal_on_monitor_thread(void)
 {
-	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_NONE
-	    && pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
-		return 1;
-	}
-
-	for (struct hid_hotplug_monitor_thread *entry = hid_hotplug_context.retired; entry != NULL; entry = entry->next) {
-		if (!entry->being_joined && pthread_equal(pthread_self(), entry->thread)) {
-			return 1;
-		}
-	}
-
-	return 0;
+	return hid_hotplug_thread_self_id != 0;
 }
 
 /* Reaps monitor threads: first RETIRES the current generation if it has finished
@@ -1485,15 +1484,19 @@ static void hid_internal_hotplug_exit(void)
 		   register/deregister/hid_exit() from an application thread to join: the
 		   same bounded degradation as hid_exit() from within a callback.
 
-		   A being-joined entry is counted without inspecting its pthread_t (its
-		   thread terminated, so it cannot be the caller anyway) - a pthread_t is
-		   never touched after a join was started on it. */
+		   Self is recognized by the generation id token this thread carries in a
+		   thread-local (hid_hotplug_thread_self_id), NOT by pthread_equal(): the
+		   caller's own entry may already be claimed by a reaper sitting in
+		   pthread_join() - which returns only once this thread's destructors are
+		   done, so being_joined does NOT mean the thread has terminated - and a
+		   claimed pthread_t must not be inspected. Counting that entry as
+		   somebody else's would deadlock both threads: this one would wait for a
+		   broadcast that only its own join completion can send. */
 		if (hid_hotplug_context.retired != NULL) {
 			int others = 0;
 
 			for (struct hid_hotplug_monitor_thread *entry = hid_hotplug_context.retired; entry != NULL; entry = entry->next) {
-				if (entry->being_joined
-				    || !pthread_equal(pthread_self(), entry->thread)) {
+				if (entry->id != hid_hotplug_thread_self_id) {
 					others = 1;
 					break;
 				}
@@ -2032,6 +2035,13 @@ static void* hotplug_thread(void* user_data)
 	   the same: an unsynchronized read here would race the setup of the next
 	   monitoring context (whose registration this thread cannot have seen). */
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	/* Learn our own generation id, for the join-safe self-identification the
+	   library needs once this thread's pthread_t may have been claimed for a
+	   join (see hid_hotplug_thread_self_id). The value read here is ours: the
+	   creating registration holds the mutex continuously from pthread_create()
+	   until after it published this id, and a newer generation cannot be
+	   created before this one publishes FINISHED below. */
+	hid_hotplug_thread_self_id = hid_hotplug_context.thread_id;
 	monitor_fd = hid_hotplug_context.monitor_fd;
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
@@ -2376,7 +2386,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			if (monitor_error && !quiet) {
 				register_global_error(monitor_error);
 			}
-			/* on enumerate_failure the global error is already set by the enumeration */
+			/* on enumerate_failure the enumeration has set the global error -
+			   unless quiet suppressed it, in which case this caller is an
+			   internal thread, which must not read it either */
 			return -1;
 		}
 
