@@ -994,17 +994,12 @@ static int hid_internal_hotplug_lock()
 
 static void hid_internal_hotplug_exit()
 {
-	if (hid_internal_hotplug_lock() < 0) {
-		/* The hotplug machinery was never initialized, so nothing can race us for
-		 * `usb_context`: a registration is the only path that would, and it would
-		 * have initialized the machinery (and taken `mutex`) first. Destroy the
-		 * main context a plain hid_init() may have created and return. */
-		if (usb_context) {
-			libusb_exit(usb_context);
-			usb_context = NULL;
-		}
-		return;
-	}
+	/* Initialize the machinery if it never was, instead of taking a lock-free
+	 * shortcut for that case: the common path below then handles it naturally
+	 * (empty callback list, no threads to wind down) and, crucially, destroys
+	 * `usb_context` under `mutex` - so a concurrent first-ever registration
+	 * cannot read the context while we are destroying it. */
+	hid_internal_hotplug_init_and_lock();
 
 	struct hid_hotplug_callback **current = &hid_hotplug_context.hotplug_cbs;
 	/* Remove all callbacks from the list (undelivered ENUMERATE snapshots die with them) */
@@ -1855,7 +1850,7 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 	/* Release the libusb device - we are done with it */
 	libusb_unref_device(msg->device);
 
-	/* Cleanup note: this function is called inside a thread that the clenup function would be waiting to finish */
+	/* Cleanup note: this function is called inside a thread that the cleanup function would be waiting to finish */
 	/* Any callbacks that await removal are removed above */
 	/* No further cleaning is needed */
 }
