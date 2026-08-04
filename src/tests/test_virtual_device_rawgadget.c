@@ -559,8 +559,12 @@ static void *ep0_thread_fn(void *arg)
 	size_t evsz = sizeof(*ev) + sizeof(struct usb_ctrlrequest);
 
 	ev = (struct usb_raw_event *)calloc(1, evsz);
-	if (!ev)
+	if (!ev) {
+		/* Report the exit here too, or rg_unplug() would spin its full
+		   SIGUSR1 budget signalling a thread that is already gone. */
+		dev->ep0_exited = 1;
 		return NULL;
+	}
 
 	while (!dev->stop) {
 		int rv;
@@ -778,6 +782,10 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	dev = (struct test_virtual_device *)calloc(1, sizeof(*dev));
 	if (!dev)
 		return TEST_VDEV_ERROR;
+	/* calloc leaves fd == 0, a valid descriptor (stdin). Put dev in the
+	   documented unplugged state before rg_plug() inspects it, or its
+	   already-plugged guard would take fd 0 for an open gadget fd and close it. */
+	dev->fd = -1;
 
 	/* Identity + lifetime state: these outlive any unplug/replug. The per-plug
 	   fields are (re)initialised by rg_plug. */
