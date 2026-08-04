@@ -179,6 +179,7 @@ struct test_virtual_device {
 	int int_in_started;
 	volatile int stop;
 	volatile int ep0_exited;        /* ep0 thread has left its fetch loop */
+	volatile int int_in_exited;     /* int_in thread has left its write loop */
 
 	volatile int configured;        /* SET_CONFIGURATION seen, IN ep enabled */
 	int int_in_ep;                  /* raw-gadget handle for the IN endpoint */
@@ -558,8 +559,12 @@ static void *ep0_thread_fn(void *arg)
 	size_t evsz = sizeof(*ev) + sizeof(struct usb_ctrlrequest);
 
 	ev = (struct usb_raw_event *)calloc(1, evsz);
-	if (!ev)
+	if (!ev) {
+		/* Report the exit here too, or rg_unplug() would spin its full
+		   SIGUSR1 budget signalling a thread that is already gone. */
+		dev->ep0_exited = 1;
 		return NULL;
+	}
 
 	while (!dev->stop) {
 		int rv;
@@ -624,6 +629,7 @@ static void *int_in_thread_fn(void *arg)
 		(void)ep_io_write(dev->fd, USB_RAW_IOCTL_EP_WRITE, dev->int_in_ep,
 		                  payload, TEST_VDEV_REPORT_SIZE);
 	}
+	dev->int_in_exited = 1;
 	return NULL;
 }
 
@@ -645,14 +651,23 @@ static void rg_unplug(struct test_virtual_device *dev)
 	pthread_cond_broadcast(&dev->cond);
 	pthread_mutex_unlock(&dev->lock);
 
-	/* The ep0 thread is parked in the blocking EVENT_FETCH ioctl (and the
-	   int_in thread may be in EP_WRITE); interrupt them with SIGUSR1 until the
-	   ep0 thread reports it has left its loop, so the joins below don't hang. */
+	/* The ep0 thread is parked in the blocking EVENT_FETCH ioctl and the int_in
+	   thread may be parked in EP_WRITE; interrupt BOTH with SIGUSR1 until each
+	   reports it has left its loop, so the joins below don't hang. Signalling
+	   must not stop at the ep0 thread: an int_in thread blocked in EP_WRITE
+	   would then never be woken and its join would hang until the CTest
+	   timeout. */
 	{
 		int spins = 0;
-		while (dev->ep0_started && !dev->ep0_exited && spins++ < 500) {
-			pthread_kill(dev->ep0_thread, SIGUSR1);
-			if (dev->int_in_started)
+		while (spins++ < 500) {
+			int ep0_busy = dev->ep0_started && !dev->ep0_exited;
+			int int_in_busy = dev->int_in_started && !dev->int_in_exited;
+
+			if (!ep0_busy && !int_in_busy)
+				break;
+			if (ep0_busy)
+				pthread_kill(dev->ep0_thread, SIGUSR1);
+			if (int_in_busy)
 				pthread_kill(dev->int_in_thread, SIGUSR1);
 			sleep_ms(10);
 		}
@@ -678,17 +693,26 @@ static void rg_unplug(struct test_virtual_device *dev)
    answers enumeration. Returns TEST_VDEV_UNAVAILABLE when there is no raw-gadget
    node or no dummy_hcd UDC to bind (INIT/RUN failure, e.g. the UDC is already
    bound by another gadget). On any failure it cleans up like the old create()
-   fail path and leaves dev in the unplugged state (fd == -1, threads stopped). */
+   fail path and leaves dev in the unplugged state (fd == -1, threads stopped).
+   If dev still looks plugged (open fd or live workers) it is unplugged first,
+   so a redundant plug cannot leak the old fd or orphan the old threads. */
 static int rg_plug(struct test_virtual_device *dev)
 {
 	struct usb_raw_init init;
 	int rc;
 
+	/* Never plug on top of a plug: that would overwrite fd/thread handles and
+	   leave the old ones behind. rg_unplug() is idempotent, so this is a no-op
+	   when the device is already unplugged. */
+	if (dev->fd >= 0 || dev->ep0_started || dev->int_in_started)
+		rg_unplug(dev);
+
 	/* Reset every per-plug field so a 2nd/3rd plug behaves exactly like the
-	   first. The signal handler being (re)installed is harmless, and ep0_exited
-	   MUST be 0 here so rg_unplug's SIGUSR1 spin drives the *new* ep0 thread.
-	   The mutex/cond and identity (vendor/product/serial) are intentionally
-	   left untouched -- they persist across the unplug/replug cycle. */
+	   first. The signal handler being (re)installed is harmless, and the
+	   *_exited flags MUST be 0 here so rg_unplug's SIGUSR1 spin drives the
+	   *new* threads. The mutex/cond and identity (vendor/product/serial) are
+	   intentionally left untouched -- they persist across the unplug/replug
+	   cycle. */
 	dev->stop = 0;
 	dev->fd = -1;
 	dev->int_in_ep = -1;
@@ -697,6 +721,7 @@ static int rg_plug(struct test_virtual_device *dev)
 	dev->ep0_started = 0;
 	dev->int_in_started = 0;
 	dev->ep0_exited = 0;
+	dev->int_in_exited = 0;
 	dev->pending = TEST_VDEV_CMD_NONE;
 
 	dev->fd = open("/dev/raw-gadget", O_RDWR);
@@ -757,6 +782,10 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	dev = (struct test_virtual_device *)calloc(1, sizeof(*dev));
 	if (!dev)
 		return TEST_VDEV_ERROR;
+	/* calloc leaves fd == 0, a valid descriptor (stdin). Put dev in the
+	   documented unplugged state before rg_plug() inspects it, or its
+	   already-plugged guard would take fd 0 for an open gadget fd and close it. */
+	dev->fd = -1;
 
 	/* Identity + lifetime state: these outlive any unplug/replug. The per-plug
 	   fields are (re)initialised by rg_plug. */

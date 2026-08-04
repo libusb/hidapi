@@ -338,7 +338,8 @@ static int HID_API_CALL cb_slow(hid_hotplug_callback_handle callback_handle,
    callback WITH ENUMERATE and deregisters itself - both from within the
    callback (the hotplug API is documented re-entrant). */
 typedef struct parent_ctx {
-	int acted;
+	int acted;   /* run-once guard, taken by the first qualifying ARRIVED */
+	int done;    /* published LAST, after the results below are stored */
 	int child_rc;
 	hid_hotplug_callback_handle child_handle;
 	int self_dereg_rc;
@@ -369,10 +370,14 @@ static int HID_API_CALL cb_parent(hid_hotplug_callback_handle callback_handle,
 		                                       HID_API_HOTPLUG_ENUMERATE,
 		                                       cb_log, NULL, &child);
 		int dereg_rc = hid_hotplug_deregister_callback(callback_handle);
+		/* Store the results and only then publish 'done', in one locked
+		   section: the main thread waits on 'done', so it can never observe
+		   the results half-written. */
 		test_mutex_lock(&g_log_lock);
 		ctx->child_rc = rc;
 		ctx->child_handle = child;
 		ctx->self_dereg_rc = dereg_rc;
+		ctx->done = 1;
 		test_mutex_unlock(&g_log_lock);
 	}
 	return 0;
@@ -909,7 +914,7 @@ static int t15_reentrant_registration(void)
 
 	step("plug: the parent registers the child and deregisters itself");
 	CHECK(test_virtual_device_replug(g_vdev) == TEST_VDEV_OK);
-	CHECK(hp_wait_flag(&ctx.acted, EVENT_TIMEOUT_MS) == 0);
+	CHECK(hp_wait_flag(&ctx.done, EVENT_TIMEOUT_MS) == 0);
 
 	test_mutex_lock(&g_log_lock);
 	child_rc = ctx.child_rc;

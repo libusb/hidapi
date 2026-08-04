@@ -173,7 +173,8 @@ static int t1_arg_validation(void)
 
 /* ------------------------------------------------------------------ */
 /* T2: handles are positive, never 0, and not reused while the library
-   remains initialized (a later registration gets a larger handle). */
+   remains initialized (a later registration gets a different handle;
+   hidapi.h promises uniqueness, not monotonicity). */
 static int t2_handle_properties(hid_hotplug_callback_handle *out_stale)
 {
 	hid_hotplug_callback_handle h1 = 0, h2 = 0;
@@ -185,7 +186,7 @@ static int t2_handle_properties(hid_hotplug_callback_handle *out_stale)
 
 	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_noop, NULL, &h2) == 0);
 	CHECK(h2 > 0);
-	CHECK(h2 > h1); /* handles are not reused while initialized */
+	CHECK(h2 != h1); /* handles are not reused while initialized */
 	CHECK(hid_hotplug_deregister_callback(h2) == 0);
 
 	*out_stale = h2; /* a genuine but no-longer-registered handle for T3 */

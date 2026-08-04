@@ -73,8 +73,9 @@ endfunction()
 # Define a tier-2 (device-backed) hotplug test <name> built from
 # test_hotplug.c + <provider>. Self-skips when no virtual device can be
 # created here, when the backend reports hotplug as unsupported, or when the
-# provider cannot toggle device presence (test_virtual_device_unplug/_replug);
-# currently only the uhid provider implements presence toggling.
+# provider cannot toggle device presence (test_virtual_device_unplug/_replug).
+# The uhid, rawgadget and Windows vhidmini providers all implement presence
+# toggling; the darwin provider does not yet.
 # <event_timeout_ms> is the per-event wait budget inside the test;
 # <ctest_timeout> bounds the whole run.
 function(hidapi_add_hotplug_test name provider backend event_timeout_ms ctest_timeout)
@@ -109,8 +110,10 @@ endif()
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND TARGET hidapi_libusb)
     hidapi_add_vdev_test(DeviceIO_libusb test_virtual_device_rawgadget.c hidapi_libusb)
     hidapi_add_hotplug_api_test(HotplugAPI_libusb hidapi_libusb)
-    # Self-skips until the rawgadget provider implements unplug/replug; the
-    # generous budgets anticipate the full (virtual) USB stack round trips.
+    # The rawgadget provider toggles presence by unbinding/rebinding the gadget
+    # from the dummy_hcd UDC; this runs in the label-gated libusb-vhid-test VM
+    # job. The generous budgets anticipate the full (virtual) USB stack round
+    # trips.
     hidapi_add_hotplug_test(Hotplug_libusb test_virtual_device_rawgadget.c hidapi_libusb 30000 300)
 endif()
 
@@ -118,7 +121,8 @@ endif()
 if(WIN32 AND TARGET hidapi_winapi)
     hidapi_add_vdev_test(DeviceIO_winapi test_virtual_device_win.c hidapi_winapi)
     hidapi_add_hotplug_api_test(HotplugAPI_winapi hidapi_winapi)
-    # Self-skips until the vhidmini2 provider implements unplug/replug.
+    # The vhidmini provider toggles presence by disabling/enabling the HID child
+    # devnode; this runs in the label-gated win-vhid-test job.
     hidapi_add_hotplug_test(Hotplug_winapi test_virtual_device_win.c hidapi_winapi 30000 300)
     # hid: HidD_GetPreparsedData / HidP_GetCaps (device caps).
     # cfgmgr32: CM_Locate_DevNodeA / CM_Disable_DevNode / CM_Enable_DevNode, used

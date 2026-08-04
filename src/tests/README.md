@@ -37,13 +37,17 @@ The hotplug tests come in two tiers:
 * **Tier 2 — `Hotplug_<backend>`** (`test_hotplug.c`): device-backed hotplug
   scenarios. On top of a virtual device, the provider must be able to *toggle
   the device's presence* (`test_virtual_device_unplug()` /
-  `test_virtual_device_replug()` in `test_virtual_device.h`). Currently only
-  the **uhid** provider implements toggling (a `UHID_DESTROY` /
-  `UHID_CREATE2` pair on the same open `/dev/uhid` fd), so `Hotplug_hidraw`
-  is the one tier-2 test that actually runs (in `builds.yml`'s ubuntu-cmake
-  job, like `DeviceIO_hidraw`); the other providers return
-  `TEST_VDEV_UNAVAILABLE` from the toggle calls and their `Hotplug_*` tests
-  self-skip everywhere until presence toggling is implemented for them.
+  `test_virtual_device_replug()` in `test_virtual_device.h`). The **uhid**
+  (`UHID_DESTROY` / `UHID_CREATE2` on the same open `/dev/uhid` fd),
+  **rawgadget** (unbind/rebind the gadget from the `dummy_hcd` UDC) and
+  Windows **vhidmini** (disable/enable the HID child devnode) providers all
+  implement toggling. `Hotplug_hidraw` runs per-push (in `builds.yml`'s
+  ubuntu-cmake job, like `DeviceIO_hidraw`); `Hotplug_libusb` and
+  `Hotplug_winapi` run in the label-gated `ci-virtual-device` jobs
+  (`libusb-vhid-test` / `win-vhid-test`), which provide the privileged
+  environment those providers need. The darwin provider still returns
+  `TEST_VDEV_UNAVAILABLE` from the toggle calls, so `Hotplug_darwin`
+  self-skips until presence toggling is implemented for it.
 
 | Test | Runs per-push in `builds.yml` | Notes |
 |------|-------------------------------|-------|
@@ -51,9 +55,9 @@ The hotplug tests come in two tiers:
 | `HotplugAPI_libusb` | yes (ubuntu-cmake) | needs libusb hotplug support at runtime |
 | `HotplugAPI_winapi` | yes (windows-cmake, MSVC/NMake/ClangCL/MinGW) | |
 | `HotplugAPI_darwin` | yes (macos-cmake) | |
-| `Hotplug_hidraw` | yes (ubuntu-cmake, via `uhid`) | the only tier-2 test that runs today |
-| `Hotplug_libusb` | builds, self-skips | needs rawgadget unplug/replug (future) |
-| `Hotplug_winapi` | builds, self-skips | needs driver-side presence toggling (future) |
+| `Hotplug_hidraw` | yes (ubuntu-cmake, via `uhid`) | the tier-2 test that runs per-push |
+| `Hotplug_libusb` | builds, self-skips | runs in the label-gated `libusb-vhid-test` VM job |
+| `Hotplug_winapi` | builds, self-skips | runs in the label-gated `win-vhid-test` job |
 | `Hotplug_darwin` | builds, self-skips | needs `IOHIDUserDevice` re-creation (future) |
 
 The tier-2 test is written against strict synchronization rules (hotplug tests
