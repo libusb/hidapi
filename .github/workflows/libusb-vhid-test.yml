@@ -64,7 +64,7 @@ jobs:
           -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON
         cmake --build build
 
-    - name: Run DeviceIO_libusb inside a VM (generic kernel + raw_gadget)
+    - name: Run the virtual-device tests inside a VM (generic kernel + raw_gadget)
       run: |
         set -eux
         # The generic kernel just installed (has dummy_hcd + raw_gadget modules).

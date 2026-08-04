@@ -186,10 +186,32 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	   is not actually present here - e.g. the mid-pass-stop test's second device -
 	   so such tests skip cleanly instead of waiting for one that can never appear. */
 	{
-		struct hid_device_info *infos = hid_enumerate(vendor_id, product_id);
-		if (!infos)
+		DEVINST func, child;
+		int found = 0, spins;
+
+		/* A previous run killed mid-test (e.g. a CTest timeout) never reached
+		   destroy(), so the HID child may still be disabled from an unplug.
+		   Best-effort re-enable it before probing, otherwise the probe below
+		   would report UNAVAILABLE and the whole suite would silently skip even
+		   though the driver is installed. All CONFIGRETs are ignored: when the
+		   driver is absent the locate simply fails and the probe stays empty. */
+		if (locate_vhid_devnode(&func) == CR_SUCCESS &&
+		    find_hid_child(func, &child) == CR_SUCCESS)
+			(void)CM_Enable_DevNode(child, 0);
+
+		/* Re-poll briefly: a just-re-enabled child needs a moment to re-appear
+		   in hid_enumerate(). */
+		for (spins = 0; spins < 30; spins++) {
+			struct hid_device_info *infos = hid_enumerate(vendor_id, product_id);
+			if (infos) {
+				hid_free_enumeration(infos);
+				found = 1;
+				break;
+			}
+			Sleep(100);
+		}
+		if (!found)
 			return TEST_VDEV_UNAVAILABLE;
-		hid_free_enumeration(infos);
 	}
 
 	dev = (struct test_virtual_device *)calloc(1, sizeof(*dev));
