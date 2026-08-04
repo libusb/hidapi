@@ -687,6 +687,11 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 	char *product_name_utf8 = NULL;
 	unsigned bus_type;
 	int result;
+	/* The manufacturer/product strings of a USB device that has a USB parent are
+	   copied from optional sysfs attributes, where a NULL copy means "absent"
+	   rather than "out of memory"; every other branch copies them from sources
+	   known to be non-NULL. Cleared by that branch, for the check below. */
+	int strings_from_uevent = 1;
 	struct hidraw_report_descriptor report_desc;
 
 	sysfs_path = udev_device_get_syspath(raw_dev);
@@ -783,6 +788,7 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 
 			cur_dev->manufacturer_string = copy_udev_string(usb_dev, "manufacturer");
 			cur_dev->product_string = copy_udev_string(usb_dev, "product");
+			strings_from_uevent = 0;
 
 			cur_dev->bus_type = HID_API_BUS_USB;
 
@@ -836,6 +842,24 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			/* Unknown device type - this should never happen, as we
 			 * check for USB and Bluetooth devices above */
 			break;
+	}
+
+	/* A string copy that failed is a genuine resource failure too, exactly like
+	   the calloc() above - flag it, or an all-or-nothing caller would accept a
+	   silently degraded record (see the partial-copy check in
+	   hid_internal_copy_device_info). An entry with a NULL path is especially
+	   harmful in the hotplug cache: it can never be matched by its removal, nor
+	   recognized as a duplicate. utf8_to_wchar_t() returns NULL only on an
+	   allocation failure - an unconvertible string yields an empty one - so this
+	   never fails a merely odd device. */
+	if ((dev_path && !root->path)
+	    || (serial_number_utf8 && !root->serial_number)
+	    || (strings_from_uevent
+	        && (!root->manufacturer_string
+	            || (product_name_utf8 && !root->product_string)))) {
+		if (failure) {
+			*failure = 1;
+		}
 	}
 
 	/* Usage Page and Usage */
@@ -893,6 +917,19 @@ static struct hid_device_info * create_device_info_for_device(struct udev_device
 			cur_dev->usage_page = page;
 			cur_dev->usage = usage;
 			cur_dev->bus_type = prev_dev->bus_type;
+
+			/* Same all-or-nothing rule as above: every string here is copied
+			   from a source known to be non-NULL, so a NULL copy is an
+			   allocation failure that left a degraded entry in the chain */
+			if ((dev_path && !cur_dev->path)
+			    || (prev_dev->serial_number && !cur_dev->serial_number)
+			    || (prev_dev->manufacturer_string && !cur_dev->manufacturer_string)
+			    || (prev_dev->product_string && !cur_dev->product_string)) {
+				if (failure) {
+					*failure = 1;
+				}
+				break;
+			}
 		}
 	}
 
@@ -1165,6 +1202,33 @@ static void hid_internal_hotplug_retire_current(void)
 	hid_hotplug_context.thread_id = 0;
 }
 
+/* Non-zero when the caller runs on one of HIDAPI's monitor threads: the current
+   generation, or a retired one that has not been claimed for joining. Called
+   with the mutex held.
+
+   mutex_in_use alone does not catch every such call: it only covers a call made
+   from within a dispatch. A thread-specific-data destructor armed by a user
+   callback runs on the monitor thread AFTER the dispatch unwound - and after the
+   thread published FINISHED - and may re-enter the library from there.
+   An entry another reaper claimed (being_joined) is skipped: that thread has
+   terminated, so it cannot be the caller, and its pthread_t must not be
+   inspected once its joiner started (it may already have been invalidated). */
+static int hid_internal_on_monitor_thread(void)
+{
+	if (hid_hotplug_context.thread_state != HID_HOTPLUG_THREAD_NONE
+	    && pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
+		return 1;
+	}
+
+	for (struct hid_hotplug_monitor_thread *entry = hid_hotplug_context.retired; entry != NULL; entry = entry->next) {
+		if (!entry->being_joined && pthread_equal(pthread_self(), entry->thread)) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 /* Reaps monitor threads: first RETIRES the current generation if it has finished
    (hid_internal_hotplug_retire_current), then joins every retired thread it is
    allowed to join, each with the mutex RELEASED. Called with the mutex held
@@ -1407,18 +1471,44 @@ static void hid_internal_hotplug_exit(void)
 		   retired list) rather than leaving a published FINISHED slot to join. */
 
 		/* EVERY generation must be joined before hid_exit() returns. cleanup's
-		   reap joined every retired thread it could; anything still on the list is
-		   being joined by another (pre-exit) reaper - wait for that join to
-		   broadcast thread_cond, then re-evaluate. (hid_exit() is never the
-		   monitor thread, so no retired entry is ever "self" here.) */
+		   reap joined every retired thread it could, and `exiting` keeps new ones
+		   from appearing, so anything still on the list is either being joined by
+		   another (pre-exit) reaper - wait for that join to broadcast thread_cond,
+		   then re-evaluate - or the calling thread itself.
+
+		   "Self" is possible here: a thread-specific-data destructor armed by a
+		   user callback can run hid_exit() on the just-finished monitor thread,
+		   and a thread cannot join itself (the reap skipped it for that reason).
+		   Waiting for such an entry would block forever - while `exiting` is set
+		   nobody else can reap it - and would leave the hotplug API permanently
+		   closed. Stop instead and leave the entry for the next
+		   register/deregister/hid_exit() from an application thread to join: the
+		   same bounded degradation as hid_exit() from within a callback.
+
+		   A being-joined entry is counted without inspecting its pthread_t (its
+		   thread terminated, so it cannot be the caller anyway) - a pthread_t is
+		   never touched after a join was started on it. */
 		if (hid_hotplug_context.retired != NULL) {
-			pthread_cond_wait(&hid_hotplug_context.thread_cond, &hid_hotplug_context.mutex);
-			continue;
+			int others = 0;
+
+			for (struct hid_hotplug_monitor_thread *entry = hid_hotplug_context.retired; entry != NULL; entry = entry->next) {
+				if (entry->being_joined
+				    || !pthread_equal(pthread_self(), entry->thread)) {
+					others = 1;
+					break;
+				}
+			}
+
+			if (others) {
+				pthread_cond_wait(&hid_hotplug_context.thread_cond, &hid_hotplug_context.mutex);
+				continue;
+			}
 		}
 
 		if (hid_hotplug_context.hotplug_cbs == NULL
-		    && hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_NONE
-		    && hid_hotplug_context.retired == NULL) {
+		    && hid_hotplug_context.thread_state == HID_HOTPLUG_THREAD_NONE) {
+			/* The retired list is empty, or holds only the calling thread
+			   (checked above): there is nothing left that this caller can join */
 			break;
 		}
 	}
@@ -1472,8 +1562,12 @@ static int hid_internal_match_device_id(unsigned short vendor_id, unsigned short
    system: *failure (when non-NULL) is set to 1 only when the enumeration itself
    failed (with the global error set accordingly). An empty result is not a
    failure. Used by the initial hotplug-registration snapshot, which must fail
-   rather than arm the callbacks against an incomplete device set. */
-static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, unsigned short product_id, int *failure)
+   rather than arm the callbacks against an incomplete device set.
+   quiet: don't touch the global error string - for a caller running on HIDAPI's
+   monitor thread, which never writes it (see hidapi.h). The library is already
+   initialized in that case, so the implicit hid_init() (which resets the string)
+   is skipped as well. */
+static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, unsigned short product_id, int *failure, int quiet)
 {
 	struct udev *udev;
 	struct udev_enumerate *enumerate;
@@ -1486,13 +1580,17 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 		*failure = 0;
 	}
 
-	hid_init();
-	/* register_global_error: global error is reset by hid_init */
+	if (!quiet) {
+		hid_init();
+		/* register_global_error: global error is reset by hid_init */
+	}
 
 	/* Create the udev object */
 	udev = udev_new();
 	if (!udev) {
-		register_global_error("Couldn't create udev context");
+		if (!quiet) {
+			register_global_error("Couldn't create udev context");
+		}
 		if (failure) {
 			*failure = 1;
 		}
@@ -1503,7 +1601,9 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	enumerate = udev_enumerate_new(udev);
 	if (!enumerate) {
 		udev_unref(udev);
-		register_global_error("Couldn't create udev enumeration");
+		if (!quiet) {
+			register_global_error("Couldn't create udev enumeration");
+		}
 		if (failure) {
 			*failure = 1;
 		}
@@ -1512,7 +1612,9 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	if (udev_enumerate_add_match_subsystem(enumerate, "hidraw") < 0) {
 		udev_enumerate_unref(enumerate);
 		udev_unref(udev);
-		register_global_error("Couldn't add the hidraw subsystem match to the udev enumeration");
+		if (!quiet) {
+			register_global_error("Couldn't add the hidraw subsystem match to the udev enumeration");
+		}
 		if (failure) {
 			*failure = 1;
 		}
@@ -1521,7 +1623,9 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	if (udev_enumerate_scan_devices(enumerate) < 0) {
 		udev_enumerate_unref(enumerate);
 		udev_unref(udev);
-		register_global_error("Couldn't scan the udev devices");
+		if (!quiet) {
+			register_global_error("Couldn't scan the udev devices");
+		}
 		if (failure) {
 			*failure = 1;
 		}
@@ -1569,7 +1673,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 			continue;
 		}
 
-		tmp = create_device_info_for_device(raw_dev, 0, failure);
+		tmp = create_device_info_for_device(raw_dev, quiet, failure);
 		if (tmp) {
 			if (cur_dev) {
 				cur_dev->next = tmp;
@@ -1591,7 +1695,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 	udev_enumerate_unref(enumerate);
 	udev_unref(udev);
 
-	if (root == NULL) {
+	if (root == NULL && !quiet) {
 		if (vendor_id == 0 && product_id == 0) {
 			register_global_error("No HID devices found in the system.");
 		} else {
@@ -1604,7 +1708,7 @@ static struct hid_device_info *hid_internal_enumerate(unsigned short vendor_id, 
 
 struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, unsigned short product_id)
 {
-	return hid_internal_enumerate(vendor_id, product_id, NULL);
+	return hid_internal_enumerate(vendor_id, product_id, NULL, 0);
 }
 
 void  HID_API_EXPORT hid_free_enumeration(struct hid_device_info *devs)
@@ -1872,7 +1976,18 @@ static void hid_internal_hotplug_process_event(struct udev_device *raw_dev)
 		   invisible to hid_enumerate(); there is nothing meaningful to
 		   deliver instead. quiet: this runs on the monitor thread, which
 		   never writes the global error string (see hidapi.h). */
-		hid_internal_hotplug_process_arrival(create_device_info_for_device(raw_dev, 1, NULL));
+		int arrival_failure = 0;
+		struct hid_device_info *info = create_device_info_for_device(raw_dev, 1, &arrival_failure);
+		if (arrival_failure) {
+			/* A genuine resource failure, unlike the benign exclusions above:
+			   the chain may be incomplete or hold a degraded entry, and a
+			   degraded entry must never enter the cache - one with a NULL path
+			   could neither be matched by its removal nor recognized as a
+			   duplicate. Drop the whole device instead. */
+			hid_free_enumeration(info);
+			info = NULL;
+		}
+		hid_internal_hotplug_process_arrival(info);
 	} else if (!strcmp(action, "remove")) {
 		const char *devnode = udev_device_get_devnode(raw_dev);
 		char devnode_buf[32];
@@ -2076,8 +2191,12 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	   string alone: HIDAPI's internal threads never write it (see hidapi.h),
 	   or an application that reads it with hid_error(NULL) on another thread
 	   would race a write it cannot serialize against. This is why even the
-	   parameter checks below run under the mutex. */
-	quiet = hid_hotplug_context.mutex_in_use;
+	   parameter checks below run under the mutex.
+	   mutex_in_use only covers a call made from within a dispatch: a
+	   thread-specific-data destructor armed by a user callback re-enters here on
+	   the monitor thread after the dispatch unwound (and after the thread
+	   published FINISHED), so the thread identity is checked as well. */
+	quiet = hid_hotplug_context.mutex_in_use || hid_internal_on_monitor_thread();
 
 	/* Check params */
 	if (callback == NULL) {
@@ -2202,12 +2321,14 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		int enumerate_failure = 0;
 		const char *monitor_error = NULL;
 
-		/* This branch is never taken on the monitor thread: the callback list
+		/* This branch is never taken from within a dispatch: the callback list
 		   is empty here, while a dispatch always has at least the callback it
 		   is dispatching to in the list (a deregistration from within a
-		   callback only tombstones the record). The global error writes below
-		   - including the hid_internal_enumerate() ones - are therefore always
-		   made by an application thread */
+		   callback only tombstones the record). It CAN still run on the monitor
+		   thread - a thread-specific-data destructor re-registering after the
+		   last callback is gone - so the global error writes below, the
+		   hid_internal_enumerate() ones included, are all made conditional on
+		   quiet: HIDAPI's internal threads never write that string */
 
 		/* Prepare a UDEV context to run monitoring on */
 		hid_hotplug_context.udev_ctx = udev_new();
@@ -2240,8 +2361,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			   here would leave pre-connected devices without their "left"
 			   events later, so it fails the registration (unlike an empty
 			   system, which is not an error) */
-			hid_hotplug_context.devs = hid_internal_enumerate(0, 0, &enumerate_failure);
-			if (!enumerate_failure) {
+			hid_hotplug_context.devs = hid_internal_enumerate(0, 0, &enumerate_failure, quiet);
+			if (!enumerate_failure && !quiet) {
 				register_global_error(NULL);
 			}
 		}
@@ -2252,7 +2373,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			hid_internal_hotplug_release_monitor();
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			free(hotplug_cb);
-			if (monitor_error) {
+			if (monitor_error && !quiet) {
 				register_global_error(monitor_error);
 			}
 			/* on enumerate_failure the global error is already set by the enumeration */
@@ -2300,7 +2421,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			hid_internal_hotplug_release_monitor();
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			free(hotplug_cb);
-			register_global_error("Couldn't allocate the hotplug monitor thread record");
+			if (!quiet) {
+				register_global_error("Couldn't allocate the hotplug monitor thread record");
+			}
 			return -1;
 		}
 
@@ -2320,7 +2443,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 			hid_internal_hotplug_release_monitor();
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 			free(hotplug_cb);
-			register_global_error("Couldn't create the hotplug monitor thread");
+			if (!quiet) {
+				register_global_error("Couldn't create the hotplug monitor thread");
+			}
 			return -1;
 		}
 		/* The new generation now owns its pre-allocated retired-list node. Stamp
@@ -2400,10 +2525,12 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
-	/* A deregistration made from within a callback runs on HIDAPI's internal
-	   monitor thread, which never writes the global error string - the
-	   parameter check included (see hid_hotplug_register_callback) */
-	quiet = hid_hotplug_context.mutex_in_use;
+	/* A deregistration made from within a callback - or from a thread-specific-
+	   data destructor running on the monitor thread once the dispatch unwound -
+	   runs on HIDAPI's internal monitor thread, which never writes the global
+	   error string, the parameter check included (see
+	   hid_hotplug_register_callback) */
+	quiet = hid_hotplug_context.mutex_in_use || hid_internal_on_monitor_thread();
 
 	if (callback_handle <= 0) {
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
