@@ -32,7 +32,7 @@ jobs:
         set -eux
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential cmake libudev-dev libusb-1.0-0-dev \
+          build-essential cmake libudev1 libusb-1.0-0-dev \
           qemu-system-x86 virtme-ng linux-image-generic
         # raw_gadget ships in the generic kernel's modules-extra; install that
         # plus headers (needed to build dummy_hcd, which Ubuntu doesn't package).

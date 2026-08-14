@@ -9,10 +9,7 @@ target_link_libraries(hidapi_hidraw PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
 
-include(FindPkgConfig)
-pkg_check_modules(libudev REQUIRED IMPORTED_TARGET libudev)
-
-target_link_libraries(hidapi_hidraw PRIVATE PkgConfig::libudev Threads::Threads)
+target_link_libraries(hidapi_hidraw PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
 set_target_properties(hidapi_hidraw
     PROPERTIES
@@ -28,6 +25,10 @@ add_library(hidapi::hidraw ALIAS hidapi_hidraw)
 # compatibility with raw library link
 add_library(hidapi-hidraw ALIAS hidapi_hidraw)
 
+if(HIDAPI_WITH_TESTS)
+    add_subdirectory(test)
+endif()
+
 if(HIDAPI_INSTALL_TARGETS)
     install(TARGETS hidapi_hidraw EXPORT hidapi
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -40,4 +41,5 @@ hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
     OUTPUT_NAME "hidapi-hidraw"
     LIBRARY_NAME "hidapi-hidraw"
     DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the hidraw implementation."
+    PRIVATE_LIBS "${HIDAPI_HIDRAW_PRIVATE_LIBS}"
 )

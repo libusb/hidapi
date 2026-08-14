@@ -55,7 +55,7 @@ endif()
 # Helper(s)
 
 function(hidapi_configure_pc PC_IN_FILE)
-    set(oneValueArgs OUTPUT_NAME LIBRARY_NAME DESCRIPTION)
+    set(oneValueArgs OUTPUT_NAME LIBRARY_NAME DESCRIPTION PRIVATE_LIBS)
     cmake_parse_arguments(HIDAPI_PC "" "${oneValueArgs}" "" ${ARGN})
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pc")
 
@@ -86,6 +86,8 @@ function(hidapi_configure_pc PC_IN_FILE)
     set(HIDAPI_BACKEND_NAME "${PC_IN_FILENAME}")
     set(HIDAPI_BACKEND_DESCRIPTION "${HIDAPI_PC_DESCRIPTION}")
     set(HIDAPI_BACKEND_LIBRARY_NAME "${HIDAPI_LIB_NAME}")
+    set(HIDAPI_BACKEND_PRIVATE_LIBS "${HIDAPI_PC_PRIVATE_LIBS}")
+    set(HIDAPI_PRIVATE_LIBS "${HIDAPI_PC_PRIVATE_LIBS}")
     set(PC_FILE "${CMAKE_CURRENT_BINARY_DIR}/pc/${PC_IN_FILENAME}.pc")
     configure_file("${PC_IN_FILE}" "${PC_FILE}" @ONLY)
     if(HIDAPI_INSTALL_TARGETS)
@@ -124,8 +126,20 @@ set(EXPORT_COMPONENTS)
 
 set(HIDAPI_NEED_EXPORT_THREADS FALSE)
 set(HIDAPI_NEED_EXPORT_LIBUSB FALSE)
-set(HIDAPI_NEED_EXPORT_LIBUDEV FALSE)
 set(HIDAPI_NEED_EXPORT_ICONV FALSE)
+
+# The hidraw backend loads libudev with the dynamic loader.
+# CMAKE_DL_LIBS may be empty (loader lives in libc), a plain library name,
+# or something already usable as-is on the link line, so only add the -l
+# prefix to a plain name.
+set(HIDAPI_HIDRAW_PRIVATE_LIBS)
+if(CMAKE_DL_LIBS)
+    if(CMAKE_DL_LIBS MATCHES "^-" OR IS_ABSOLUTE "${CMAKE_DL_LIBS}")
+        set(HIDAPI_HIDRAW_PRIVATE_LIBS "${CMAKE_DL_LIBS}")
+    else()
+        set(HIDAPI_HIDRAW_PRIVATE_LIBS "-l${CMAKE_DL_LIBS}")
+    endif()
+endif()
 
 if(WIN32)
     target_include_directories(hidapi_include INTERFACE
@@ -158,7 +172,6 @@ else()
             set(EXPORT_ALIAS hidraw)
             if(NOT BUILD_SHARED_LIBS)
                 set(HIDAPI_NEED_EXPORT_THREADS TRUE)
-                set(HIDAPI_NEED_EXPORT_LIBUDEV TRUE)
             endif()
         endif()
     elseif(CMAKE_SYSTEM_NAME MATCHES "NetBSD")
@@ -202,8 +215,13 @@ endif()
 add_library(hidapi::hidapi ALIAS hidapi_${EXPORT_ALIAS})
 
 get_target_property(HIDAPI_LIB_NAME hidapi_${EXPORT_ALIAS} OUTPUT_NAME)
+set(HIDAPI_GENERIC_PRIVATE_LIBS)
+if(EXPORT_ALIAS STREQUAL "hidraw")
+    set(HIDAPI_GENERIC_PRIVATE_LIBS "${HIDAPI_HIDRAW_PRIVATE_LIBS}")
+endif()
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in"
     LIBRARY_NAME "${HIDAPI_LIB_NAME}"
+    PRIVATE_LIBS "${HIDAPI_GENERIC_PRIVATE_LIBS}"
 )
 
 if(HIDAPI_INSTALL_TARGETS)

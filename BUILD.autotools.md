@@ -91,8 +91,9 @@ $ export HOST=arm-linux
 
 ### Prerequisites
 
-Depending on what backend you want to cross-compile, you also need to prepare the dependencies:
-`libusb` for libusb HIDAPI backend, or `libudev` for hidraw HIDAPI backend.
+The libusb HIDAPI backend requires `libusb` as a build-time dependency. The hidraw HIDAPI
+backend needs no `libudev` at build time because it is loaded dynamically at runtime. The
+target system must provide the libudev runtime library (`libudev.so.1`).
 
 An example of cross-compiling `libusb`. From `libusb` source directory, run:
 ```sh
@@ -100,9 +101,6 @@ An example of cross-compiling `libusb`. From `libusb` source directory, run:
 make
 make install
 ```
-
-An example of cross-comping `libudev` is not covered by this section.
-Check `libudev`'s documentation for details.
 
 ### Building HIDAPI
 
