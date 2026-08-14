@@ -85,7 +85,6 @@ static udev_list_entry_get_next_ *udev_list_entry_get_next = NULL;
 static udev_list_entry_get_name_ *udev_list_entry_get_name = NULL;
 
 static void *udev_lib_handle = NULL;
-static int hidapi_initialized = 0;
 
 #ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
 /* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.
@@ -1040,10 +1039,9 @@ int HID_API_EXPORT hid_init(void)
 	if (!locale)
 		setlocale(LC_CTYPE, "");
 
-	if (!hidapi_initialized) {
+	if (!udev_lib_handle) {
 		if (lookup_udev_functions() < 0)
 			return -1;
-		hidapi_initialized = 1;
 	}
 
 	return 0;
@@ -1052,7 +1050,6 @@ int HID_API_EXPORT hid_init(void)
 int HID_API_EXPORT hid_exit(void)
 {
 	free_udev_library();
-	hidapi_initialized = 0;
 
 	/* Free global error message */
 	register_global_error(NULL);

@@ -144,10 +144,44 @@ static int test_failure_recovery(void)
 	return verify_balanced_cleanup(initial_opens, initial_closes, 4);
 }
 
+static int test_load_failure(void)
+{
+	const wchar_t *error;
+	unsigned int initial_opens;
+	unsigned int initial_closes;
+
+	if (read_counter("hidapi_test_udev_open_count", &initial_opens) < 0 ||
+	    read_counter("hidapi_test_udev_close_count", &initial_closes) < 0)
+		return 1;
+
+	if (hid_init() != -1) {
+		fprintf(stderr, "hid_init unexpectedly succeeded when loading libudev should fail\n");
+		return 1;
+	}
+
+	error = hid_error(NULL);
+	if (!error || !wcsstr(error, L"Failed to load libudev.so.1")) {
+		fwprintf(stderr, L"hid_init returned an unexpected error: %ls\n", error ? error : L"(null)");
+		return 1;
+	}
+
+	if (hid_init() != 0) {
+		error = hid_error(NULL);
+		fwprintf(stderr, L"hid_init did not recover: %ls\n", error ? error : L"(null)");
+		return 1;
+	}
+	if (hid_exit() != 0) {
+		fprintf(stderr, "hid_exit failed after recovery\n");
+		return 1;
+	}
+
+	return verify_balanced_cleanup(initial_opens, initial_closes, 1);
+}
+
 int main(int argc, char **argv)
 {
 	if (argc != 2) {
-		fprintf(stderr, "usage: %s reload|failure-recovery\n", argv[0]);
+		fprintf(stderr, "usage: %s reload|failure-recovery|load-failure\n", argv[0]);
 		return 2;
 	}
 
@@ -155,6 +189,8 @@ int main(int argc, char **argv)
 		return test_reload();
 	if (strcmp(argv[1], "failure-recovery") == 0)
 		return test_failure_recovery();
+	if (strcmp(argv[1], "load-failure") == 0)
+		return test_load_failure();
 
 	fprintf(stderr, "unknown test mode: %s\n", argv[1]);
 	return 2;

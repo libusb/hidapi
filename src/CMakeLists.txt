@@ -128,6 +128,19 @@ set(HIDAPI_NEED_EXPORT_THREADS FALSE)
 set(HIDAPI_NEED_EXPORT_LIBUSB FALSE)
 set(HIDAPI_NEED_EXPORT_ICONV FALSE)
 
+# The hidraw backend loads libudev with the dynamic loader.
+# CMAKE_DL_LIBS may be empty (loader lives in libc), a plain library name,
+# or something already usable as-is on the link line, so only add the -l
+# prefix to a plain name.
+set(HIDAPI_HIDRAW_PRIVATE_LIBS)
+if(CMAKE_DL_LIBS)
+    if(CMAKE_DL_LIBS MATCHES "^-" OR IS_ABSOLUTE "${CMAKE_DL_LIBS}")
+        set(HIDAPI_HIDRAW_PRIVATE_LIBS "${CMAKE_DL_LIBS}")
+    else()
+        set(HIDAPI_HIDRAW_PRIVATE_LIBS "-l${CMAKE_DL_LIBS}")
+    endif()
+endif()
+
 if(WIN32)
     target_include_directories(hidapi_include INTERFACE
         "$<BUILD_INTERFACE:${PROJECT_ROOT}/windows>"
@@ -204,7 +217,7 @@ add_library(hidapi::hidapi ALIAS hidapi_${EXPORT_ALIAS})
 get_target_property(HIDAPI_LIB_NAME hidapi_${EXPORT_ALIAS} OUTPUT_NAME)
 set(HIDAPI_GENERIC_PRIVATE_LIBS)
 if(EXPORT_ALIAS STREQUAL "hidraw")
-    set(HIDAPI_GENERIC_PRIVATE_LIBS "-ldl")
+    set(HIDAPI_GENERIC_PRIVATE_LIBS "${HIDAPI_HIDRAW_PRIVATE_LIBS}")
 endif()
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in"
     LIBRARY_NAME "${HIDAPI_LIB_NAME}"
