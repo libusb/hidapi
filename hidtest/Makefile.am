@@ -9,14 +9,26 @@ hidtest_hidraw_LDADD = $(top_builddir)/linux/libhidapi-hidraw.la
 
 hidtest_libusb_SOURCES = test.c
 hidtest_libusb_LDADD = $(top_builddir)/libusb/libhidapi-libusb.la
+
 else
 
+if OS_FREEBSD
+noinst_PROGRAMS = hidtest-libusb hidtest-hidraw
+
+hidtest_hidraw_SOURCES = test.c
+hidtest_hidraw_LDADD = $(top_builddir)/freebsd/libhidapi-hidraw.la
+
+hidtest_libusb_SOURCES = test.c
+hidtest_libusb_LDADD = $(top_builddir)/libusb/libhidapi-libusb.la
+
+else
 # Other OS's
 noinst_PROGRAMS = hidtest
 
 hidtest_SOURCES = test.c
 hidtest_LDADD = $(top_builddir)/$(backend)/libhidapi.la
 
+endif
 endif
 
 if OS_DARWIN

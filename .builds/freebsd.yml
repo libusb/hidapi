@@ -7,6 +7,7 @@ packages:
 - libtool
 - pkgconf
 - cmake
+- meson
 - ninja
 sources:
 - https://github.com/libusb/hidapi
@@ -15,20 +16,67 @@ tasks:
     cd hidapi
     echo Configure Autotools build
     ./bootstrap
-    ./configure
+    ./configure \
+      --prefix="$PWD/install_autotools"
     echo Configure CMake build
-    mkdir -p build install_cmake
-    cmake -GNinja -B build -S . -DCMAKE_INSTALL_PREFIX=install_cmake
+    cmake -GNinja -B build/shared -S . \
+      -DCMAKE_INSTALL_PREFIX="$PWD/install_cmake/shared" \
+      -DHIDAPI_BUILD_HIDTEST=ON
+    cmake -GNinja -B build/static -S . \
+      -DCMAKE_INSTALL_PREFIX="$PWD/install_cmake/static" \
+      -DBUILD_SHARED_LIBS=FALSE \
+      -DHIDAPI_BUILD_HIDTEST=ON
+    cmake -GNinja -B build/cxx -S . \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DHIDAPI_BUILD_AS_CXX=ON \
+      "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror"
+    meson setup build/meson
 - build-autotools: |
     cd hidapi
     make
-    make DESTDIR=$PWD/root install
+    make install
+    export PKG_CONFIG_PATH="$PWD/install_autotools/libdata/pkgconfig"
+    export LD_LIBRARY_PATH="$PWD/install_autotools/lib"
+    for package in hidapi hidapi-hidraw; do
+      cc -Wall -Wextra -Werror \
+        $(pkg-config --cflags "$package") \
+        tests/pkg-config/test.c \
+        -o "build/$package-pkg-config-test" \
+        $(pkg-config --static --libs "$package")
+      "./build/$package-pkg-config-test"
+    done
+    cc -Wall -Wextra -Werror \
+      $(pkg-config --cflags hidapi-libusb) \
+      tests/pkg-config/test.c \
+      -o build/hidapi-libusb-pkg-config-test \
+      $(pkg-config --libs hidapi-libusb)
+    ./build/hidapi-libusb-pkg-config-test
     make clean
 - build-cmake: |
-    cd hidapi/build
-    ninja
-    ninja install
-    ninja clean
+    cd hidapi
+    cmake --build build/shared --target install
+    cmake --build build/static --target install
+    cmake --build build/cxx
+    cmake -GNinja -B build/shared_test -S hidtest \
+      -Dhidapi_ROOT="$PWD/install_cmake/shared" \
+      -DCMAKE_INSTALL_PREFIX="$PWD/install_cmake/shared_test"
+    cmake --build build/shared_test --target install
+    cmake -GNinja -B build/static_test -S hidtest \
+      -Dhidapi_ROOT="$PWD/install_cmake/static" \
+      -DCMAKE_INSTALL_PREFIX="$PWD/install_cmake/static_test"
+    cmake --build build/static_test --target install
+    test -x install_cmake/shared_test/bin/hidtest_hidraw
+    test -x install_cmake/shared_test/bin/hidtest_libusb
+    test -x install_cmake/static_test/bin/hidtest_hidraw
+    test -x install_cmake/static_test/bin/hidtest_libusb
+    cmake --build build/shared --target clean
+    cmake --build build/static --target clean
+    cmake --build build/cxx --target clean
+- build-meson: |
+    cd hidapi
+    meson compile -C build/meson
 - build-manual: |
-    cd hidapi/libusb
+    cd hidapi/freebsd
+    gmake -f Makefile-manual
+    cd ../libusb
     gmake -f Makefile-manual
