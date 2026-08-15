@@ -32,6 +32,7 @@
 #include <ctype.h>
 #include <locale.h>
 #include <errno.h>
+#include <limits.h>
 
 /* Unix */
 #include <unistd.h>
@@ -49,6 +50,7 @@
 #endif
 
 #include "hidapi_libusb.h"
+#include "hidapi_libusb_report_descriptor.h"
 
 #ifndef HIDAPI_THREAD_MODEL_INCLUDE
 #define HIDAPI_THREAD_MODEL_INCLUDE "hidapi_thread_pthread.h"
@@ -112,6 +114,10 @@ struct hid_device_ {
 	int interface;
 
 	uint16_t report_descriptor_size;
+	uint8_t *report_descriptor;
+	size_t report_descriptor_length;
+	/* Includes report number. */
+	size_t max_input_report_size;
 
 	/* Endpoint information */
 	int input_endpoint;
@@ -131,6 +137,7 @@ struct hid_device_ {
 	hidapi_thread_state thread_state;
 	int shutdown_thread;
 	int transfer_loop_finished;
+	int read_thread_init_error;
 	struct libusb_transfer *transfer;
 
 	/* List of received input reports. */
@@ -161,6 +168,7 @@ static hidapi_error_ctx last_global_error;
 
 uint16_t get_usb_code_for_current_locale(void);
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
+static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size, unsigned char *buf, size_t buf_size);
 
 static hid_device *new_hid_device(void)
 {
@@ -191,6 +199,7 @@ static void free_hid_device(hid_device *dev)
 	hid_free_enumeration(dev->device_info);
 	free_hidapi_error(&dev->error);
 	free(dev->last_read_error_str);
+	free(dev->report_descriptor);
 
 	/* Free the device itself */
 	free(dev);
@@ -1173,12 +1182,34 @@ static void *read_thread(void *param)
 {
 	int res;
 	hid_device *dev = (hid_device *) param;
-	uint8_t *buf;
-	const size_t length = dev->input_ep_max_packet_size;
+	uint8_t *buf = NULL;
+	size_t length = (size_t)dev->input_ep_max_packet_size;
+
+	/* Never shrink below the endpoint packet size: some devices pad short
+	   reports to a complete USB packet. */
+	if (dev->max_input_report_size > length)
+		length = dev->max_input_report_size;
+
+	if (length == 0 || length > INT_MAX) {
+		LOG("Invalid input report buffer length: %zu\n", length);
+		dev->read_thread_init_error = LIBUSB_ERROR_INVALID_PARAM;
+		goto notify_main_thread;
+	}
 
 	/* Set up the transfer object. */
 	buf = (uint8_t*) malloc(length);
+	if (!buf) {
+		dev->read_thread_init_error = LIBUSB_ERROR_NO_MEM;
+		goto notify_main_thread;
+	}
+
 	dev->transfer = libusb_alloc_transfer(0);
+	if (!dev->transfer) {
+		free(buf);
+		dev->read_thread_init_error = LIBUSB_ERROR_NO_MEM;
+		goto notify_main_thread;
+	}
+
 	libusb_fill_interrupt_transfer(dev->transfer,
 		dev->device_handle,
 		dev->input_endpoint,
@@ -1193,12 +1224,17 @@ static void *read_thread(void *param)
 	res = libusb_submit_transfer(dev->transfer);
 	if(res < 0) {
                 LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
+                dev->read_thread_init_error = res;
                 dev->shutdown_thread = 1;
                 dev->transfer_loop_finished = 1;
 	}
 
+notify_main_thread:
 	/* Notify the main thread that the read thread is up and running. */
 	hidapi_thread_barrier_wait(&dev->thread_state);
+
+	if (dev->read_thread_init_error)
+		return NULL;
 
 	/* Handle all the events. */
 	while (!dev->shutdown_thread) {
@@ -1314,6 +1350,17 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	int i =0;
 	int res = 0;
 	struct libusb_device_descriptor desc;
+
+	/* hid_open_path() can retry another alternate setting after initialization
+	   fails. Clear all state owned by the previous attempt before doing so. */
+	free(dev->report_descriptor);
+	dev->report_descriptor = NULL;
+	dev->report_descriptor_length = 0;
+	dev->max_input_report_size = 0;
+	dev->shutdown_thread = 0;
+	dev->transfer_loop_finished = 0;
+	dev->read_thread_init_error = 0;
+
 	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);
 
 #ifdef DETACH_KERNEL_DRIVER
@@ -1367,6 +1414,25 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 
 	dev->report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
 
+	if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID) {
+		unsigned char report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+		int desc_size = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, report_descriptor, sizeof(report_descriptor));
+
+		if (desc_size > 0) {
+			ssize_t max_input_report_size;
+
+			dev->report_descriptor = (uint8_t *)malloc((size_t)desc_size);
+			if (dev->report_descriptor) {
+				memcpy(dev->report_descriptor, report_descriptor, (size_t)desc_size);
+				dev->report_descriptor_length = (size_t)desc_size;
+			}
+
+			max_input_report_size = get_max_report_size(report_descriptor, (size_t)desc_size, REPORT_DESCR_INPUT);
+			if (max_input_report_size > 0)
+				dev->max_input_report_size = (size_t)max_input_report_size;
+		}
+	}
+
 	dev->input_endpoint = 0;
 	dev->input_ep_max_packet_size = 0;
 	dev->output_endpoint = 0;
@@ -1407,6 +1473,26 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 
 	/* Wait here for the read thread to be initialized. */
 	hidapi_thread_barrier_wait(&dev->thread_state);
+	if (dev->read_thread_init_error) {
+		hidapi_thread_join(&dev->thread_state);
+		if (dev->transfer) {
+			free(dev->transfer->buffer);
+			dev->transfer->buffer = NULL;
+			libusb_free_transfer(dev->transfer);
+			dev->transfer = NULL;
+		}
+
+		libusb_release_interface(dev->device_handle, dev->interface);
+#ifdef DETACH_KERNEL_DRIVER
+		if (dev->is_driver_detached) {
+			res = libusb_attach_kernel_driver(dev->device_handle, dev->interface);
+			if (res < 0)
+				LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
+			dev->is_driver_detached = 0;
+		}
+#endif
+		return 0;
+	}
 	return 1;
 }
 
@@ -2079,7 +2165,12 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 
 	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
-	res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
+	if (dev->report_descriptor) {
+		res = dev->report_descriptor_length < buf_size ? (int)dev->report_descriptor_length : (int)buf_size;
+		memcpy(buf, dev->report_descriptor, (size_t)res);
+	} else {
+		res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
+	}
 
 	if (res < 0) {
 		register_libusb_error(&dev->error, res, "hid_get_report_descriptor");

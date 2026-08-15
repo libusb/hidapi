@@ -2,6 +2,7 @@ list(APPEND HIDAPI_PUBLIC_HEADERS "hidapi_libusb.h")
 
 add_library(hidapi_libusb
     ${HIDAPI_PUBLIC_HEADERS}
+    hidapi_libusb_report_descriptor.h
     hid.c
 )
 if(HIDAPI_BUILD_AS_CXX)
@@ -110,3 +111,7 @@ hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
     LIBRARY_NAME "hidapi-libusb"
     DESCRIPTION "C Library for USB HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the libusb implementation."
 )
+
+if(HIDAPI_WITH_TESTS)
+     add_subdirectory(test)
+endif()
