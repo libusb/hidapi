@@ -33,4 +33,6 @@ doxygen/html/
 
 # Visual Studio Code + CMake
 .vscode/
+
+# Local build directory
 build/
