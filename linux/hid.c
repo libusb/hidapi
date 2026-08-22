@@ -1216,6 +1216,8 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 
 int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char *data, size_t length)
 {
+	static const int MAX_RETRIES = 50;
+	int retry;
 	int res;
 
 	if (!data || (length == 0)) {
@@ -1226,10 +1228,17 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 
 	register_device_error(dev, NULL);
 
-	res = ioctl(dev->device_handle, HIDIOCSFEATURE(length), data);
-	if (res < 0)
-		register_device_error_format(dev, "ioctl (SFEATURE): %s", strerror(errno));
+	for (retry = 0; retry < MAX_RETRIES; ++retry) {
+		res = ioctl(dev->device_handle, HIDIOCSFEATURE(length), data);
+		if (res < 0 && errno == EPIPE) {
+			/* Try again... */
+			continue;
+		}
 
+		if (res < 0)
+			register_device_error_format(dev, "ioctl (SFEATURE): %s", strerror(errno));
+		break;
+	}
 	return res;
 }
 
