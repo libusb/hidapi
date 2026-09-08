@@ -2175,13 +2175,15 @@ static void* hotplug_thread(void* user_data)
 		if (socket_dead) {
 			/* The dead socket is no longer polled; release_monitor frees it
 			   when the last callback is gone. Pace replay flushes and exit checks. */
+			struct timespec pace = { 0, 5000000 };
 			ret = 0;
-			nanosleep(&(struct timespec){0, 5000000}, NULL);
+			nanosleep(&pace, NULL);
 			continue;
 		}
 		if (socket_error_polls && !(ret < 0 && poll_error == EINTR)) {
 			/* Pace persistent poll failures independently of poll() itself. */
-			nanosleep(&(struct timespec){0, 5000000}, NULL);
+			struct timespec pace = { 0, 5000000 };
+			nanosleep(&pace, NULL);
 		}
 
 		/* Wait for udev events; the timeout paces the mutex retries and caps
