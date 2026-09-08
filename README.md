@@ -63,6 +63,8 @@ this is not a problem.
 This back-end uses libusb-1.0 to communicate directly to a USB device. This
 back-end will of course not work with Bluetooth devices.
 
+Starting with HIDAPI 0.16, this back-end requires libusb 1.0.16 or newer.
+
 ### Test GUI
 
 HIDAPI also comes with a Test GUI. The Test GUI is cross-platform and uses
