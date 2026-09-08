@@ -878,7 +878,14 @@ static int hid_internal_hotplug_exit(void)
 	hid_internal_hotplug_cleanup();
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
-	/* Join the stopped event thread, with the hotplug mutex released */
+	/* Join the stopped event thread, with the hotplug mutex released.
+	   A failed join is a non-recoverable internal error: `exiting` stays set
+	   (hotplug registration keeps failing with "hid_exit() is in progress")
+	   and hid_exit() leaves hid_mgr alive, because the thread record must be
+	   retained until pthread_join() succeeds (see hid_internal_hotplug_collect_thread())
+	   and the unjoined thread may still use the run loop resources. It is
+	   practically unreachable: the thread is joinable, never detached, and
+	   the identity check keeps the event thread from joining itself. */
 	if (hid_internal_hotplug_collect_thread() != 0)
 		return -1;
 
@@ -1785,7 +1792,16 @@ static void* hotplug_thread(void* user_data)
 	   hid_internal_on_event_thread()). Destructor re-entry can fall back to the
 	   atomically published OS thread ID if Darwin has cleared the TLS marker. */
 	hid_hotplug_event_thread = 1;
-	pthread_threadid_np(NULL, &thread_id);
+	if (pthread_threadid_np(NULL, &thread_id) != 0 || thread_id == 0) {
+		/* Without a published OS thread id the destructor-phase identity
+		   fallback would silently be disabled (see hid_internal_on_event_thread()),
+		   so refuse to start rather than run with a weaker identity protocol.
+		   Apple's libpthread never fails this call for the calling thread; the
+		   registrant joins this thread on failure, and no callback exists yet
+		   that could observe the missing id. */
+		thread_id = 0;
+		hid_hotplug_context.startup_error = "failed to read the event thread id";
+	}
 	__atomic_store_n(&hid_hotplug_context.thread_id, thread_id, __ATOMIC_RELEASE);
 
 	/* Startup phase: the registering thread holds the hotplug mutex and is
@@ -1808,7 +1824,11 @@ static void* hotplug_thread(void* user_data)
 		hid_hotplug_context.run_loop_mode = CFStringCreateWithCString(NULL, str, kCFStringEncodingASCII);
 	}
 
-	if (hid_hotplug_context.run_loop_mode) {
+	if (hid_hotplug_context.startup_error) {
+		/* Thread id publication failed above: skip the startup, the epilogue
+		   below hands the reason to the registrant. */
+	}
+	else if (hid_hotplug_context.run_loop_mode) {
 		hid_hotplug_context.manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
 		if (!hid_hotplug_context.manager) {
 			hid_hotplug_context.startup_error = "failed to create the HID manager";
@@ -2256,6 +2276,11 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	   cannot join itself): its epilogue releases the resources, and the next
 	   application-thread collector joins it before reusing the thread record. */
 	if (hid_internal_hotplug_collect_thread() != 0) {
+		/* Reported as a failure even when the callback itself was removed above
+		   (its handle is dead either way): a failed join of the library's own
+		   thread is worth surfacing over the deregistration result, and the
+		   next collector retries the join. Practically unreachable, see
+		   hid_internal_hotplug_exit(). */
 		register_global_error("hid_hotplug_deregister_callback: failed to join the hotplug events thread");
 		return -1;
 	}
