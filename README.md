@@ -74,6 +74,12 @@ predecessor can produce `ARRIVED/LEFT/ARRIVED` for the successor connection.
 This back-end uses libusb-1.0 to communicate directly to a USB device. This
 back-end will of course not work with Bluetooth devices.
 
+#### __Windows__ (`windows/hid.c`):
+
+Hotplug callbacks require Windows 8 or later. Registration returns `-1` when
+the required PnP notification API is unavailable. Compiler and runtime
+requirements may impose a higher minimum Windows version.
+
 ### Test GUI
 
 HIDAPI also comes with a Test GUI. The Test GUI is cross-platform and uses
