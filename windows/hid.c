@@ -293,9 +293,12 @@ static struct hid_hotplug_context {
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
 
+	/* Recovered arrivals, dispatched between events in registration order */
+	struct hid_hotplug_recovered_event *recovered_events;
+
 	/* Linked list of the device infos (mandatory when the device is disconnected).
 	   Doubles as the arrival dedupe set: an arrival for a path that is already in
-	   here has already been reported (see hid_internal_notify_callback). */
+	   here has already been reported or queued (see hid_internal_notify_callback). */
 	struct hid_device_info *devs;
 	unsigned char devs_incomplete; /* An arrival could not be allocated */
 } hid_hotplug_context; /* zero-initialized (static storage); next_handle set on first init */
@@ -841,14 +844,32 @@ struct hid_hotplug_callback {
     void *user_data;
     hid_hotplug_callback_fn callback;
 
-    /* Registration-time HID_API_HOTPLUG_ENUMERATE snapshot and any recovered
-       arrivals, still to be replayed to this callback as synthetic
+    /* Registration-time HID_API_HOTPLUG_ENUMERATE snapshot,
+       still to be replayed to this callback as synthetic
        HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED events on the event context */
     struct hid_device_info *replay;
 
     /* Pointer to the next notification */
     struct hid_hotplug_callback *next;
 };
+
+struct hid_hotplug_recovered_event {
+	struct hid_device_info *device;
+	/* Handles increase monotonically: only earlier registrations receive this
+	   arrival. The repairing registration gets it through its own snapshot. */
+	hid_hotplug_callback_handle before_handle;
+	struct hid_hotplug_recovered_event *next;
+};
+
+static void hid_internal_hotplug_free_recovered(struct hid_hotplug_recovered_event *events)
+{
+	while (events != NULL) {
+		struct hid_hotplug_recovered_event *next = events->next;
+		hid_free_enumeration(events->device);
+		free(events);
+		events = next;
+	}
+}
 
 static struct hid_device_info *hid_internal_copy_device_info(const struct hid_device_info *src)
 {
@@ -1151,6 +1172,9 @@ static HCMNOTIFICATION hid_internal_hotplug_cleanup(void)
 		return NULL;
 	}
 
+	hid_internal_hotplug_free_recovered(hid_hotplug_context.recovered_events);
+	hid_hotplug_context.recovered_events = NULL;
+
 	if (hid_hotplug_context.devs) {
 		/* Cleanup connected device list */
 		hid_free_enumeration(hid_hotplug_context.devs);
@@ -1167,7 +1191,7 @@ static HCMNOTIFICATION hid_internal_hotplug_cleanup(void)
 	return notify_handle;
 }
 
-/* Deliver (and consume) a callback's pending snapshot and recovered arrivals.
+/* Deliver (and consume) a callback's pending snapshot.
    Always called inside a locked mutex, with mutex_in_use set. */
 static void hid_internal_hotplug_replay_flush(struct hid_hotplug_callback *callback)
 {
@@ -1200,6 +1224,8 @@ static void hid_internal_hotplug_replay_flush(struct hid_hotplug_callback *callb
 	}
 }
 
+static void hid_internal_hotplug_recovered_flush(void);
+
 /* Threadpool work item: delivers pending snapshots and recovered arrivals
    (unless a live event got to them first) and performs the cleanup the
    notification callback is not allowed to perform itself. */
@@ -1214,11 +1240,13 @@ static VOID WINAPI hid_internal_hotplug_event_work(PVOID instance, PVOID context
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
 	hid_hotplug_context.work_submitted = 0;
 
+	hid_internal_hotplug_recovered_flush();
 	hid_hotplug_context.mutex_in_use = 1;
 	for (struct hid_hotplug_callback *callback = hid_hotplug_context.hotplug_cbs; callback != NULL; callback = callback->next) {
 		hid_internal_hotplug_replay_flush(callback);
 	}
 	hid_hotplug_context.mutex_in_use = 0;
+	hid_internal_hotplug_recovered_flush();
 
 	notify_handle = hid_internal_hotplug_cleanup();
 
@@ -2067,14 +2095,12 @@ static int hid_internal_hotplug_copy_replay(const struct hid_hotplug_callback *c
 }
 
 /* Stage the new snapshot and any OOM repair under the critical section. No
-   cache or existing replay changes until every allocation has succeeded. */
+   cache or event queue changes until every allocation has succeeded. Recovered
+   arrivals wait for a dispatch boundary, including after reentrant repair. */
 static int hid_internal_hotplug_snapshot(struct hid_hotplug_callback *callback)
 {
-	struct replay_repair {
-		struct hid_hotplug_callback *callback;
-		struct hid_device_info *replay;
-		struct replay_repair *next;
-	} *repairs = NULL;
+	struct hid_hotplug_recovered_event *repairs = NULL;
+	struct hid_hotplug_recovered_event **tail = &repairs;
 	struct hid_device_info *recovered = NULL;
 	int enumerate_failure = 0;
 
@@ -2115,34 +2141,25 @@ static int hid_internal_hotplug_snapshot(struct hid_hotplug_callback *callback)
 	    || hid_internal_hotplug_copy_replay(callback, recovered, &callback->replay) < 0) {
 		goto fail;
 	}
-	for (struct hid_hotplug_callback *existing = hid_hotplug_context.hotplug_cbs;
-	     recovered != NULL && existing != NULL; existing = existing->next) {
-		struct replay_repair *repair;
-		if (!(existing->events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
-			continue;
-		}
-		repair = (struct replay_repair *)calloc(1, sizeof(struct replay_repair));
+	for (struct hid_device_info *device = recovered; device != NULL; device = device->next) {
+		struct hid_hotplug_recovered_event *repair = (struct hid_hotplug_recovered_event *)calloc(1, sizeof(struct hid_hotplug_recovered_event));
 		if (repair == NULL) {
 			goto fail;
 		}
-		repair->callback = existing;
-		repair->next = repairs;
-		repairs = repair;
-		if (hid_internal_hotplug_copy_replay(existing, recovered, &repair->replay) < 0) {
+		*tail = repair;
+		tail = &repair->next;
+		repair->before_handle = callback->handle;
+		repair->device = hid_internal_copy_device_info(device);
+		if (repair->device == NULL) {
 			goto fail;
 		}
 	}
 
-	while (repairs != NULL) {
-		struct replay_repair *repair = repairs;
-		struct hid_device_info **tail = &repair->callback->replay;
-		while (*tail != NULL) {
-			tail = &(*tail)->next;
-		}
-		*tail = repair->replay;
-		repairs = repair->next;
-		free(repair);
+	tail = &hid_hotplug_context.recovered_events;
+	while (*tail != NULL) {
+		tail = &(*tail)->next;
 	}
+	*tail = repairs;
 	if (recovered != NULL) {
 		struct hid_device_info *last = recovered;
 		while (last->next != NULL) {
@@ -2159,36 +2176,29 @@ static int hid_internal_hotplug_snapshot(struct hid_hotplug_callback *callback)
 
 fail:
 	register_global_error(L"Failed to allocate memory for a device info snapshot");
-	while (repairs != NULL) {
-		struct replay_repair *repair = repairs;
-		repairs = repair->next;
-		hid_free_enumeration(repair->replay);
-		free(repair);
-	}
+	hid_internal_hotplug_free_recovered(repairs);
 	hid_free_enumeration(recovered);
 	hid_free_enumeration(callback->replay);
 	callback->replay = NULL;
 	return -1;
 }
 
-/* Delivers one live event to every matching callback registered at this moment.
+/* Delivers one event to matching callbacks registered before `before_handle`.
    Always called inside a locked mutex. Does not consume `device`. */
-static void hid_internal_hotplug_dispatch(struct hid_device_info *device, hid_hotplug_event hotplug_event)
+static void hid_internal_hotplug_dispatch(struct hid_device_info *device, hid_hotplug_event hotplug_event,
+	hid_hotplug_callback_handle before_handle)
 {
 	/* Mark the critical section as IN USE, to prevent callback removal from inside a callback */
 	hid_hotplug_context.mutex_in_use = 1;
 
 	/* Callbacks registered from inside a callback are appended to the list
 	   and see this device in their registration-time HID_API_HOTPLUG_ENUMERATE
-	   snapshot (or don't, for a removal): the live dispatch is bound to the
-	   callbacks present at event time, so the connection is reported exactly once */
-	struct hid_hotplug_callback *last_at_event = hid_hotplug_context.hotplug_cbs;
-	while (last_at_event != NULL && last_at_event->next != NULL) {
-		last_at_event = last_at_event->next;
-	}
+	   snapshot (or don't, for a removal): the handle cutoff binds dispatch to
+	   the original recipients, so the connection is reported exactly once */
 
 	/* Call the notifications for the device */
-	for (struct hid_hotplug_callback *callback = hid_hotplug_context.hotplug_cbs; callback != NULL; callback = callback->next) {
+	for (struct hid_hotplug_callback *callback = hid_hotplug_context.hotplug_cbs;
+	     callback != NULL && callback->handle < before_handle; callback = callback->next) {
 		/* The registration-time enumeration pass is always delivered
 		   before any live events for the callback */
 		hid_internal_hotplug_replay_flush(callback);
@@ -2207,13 +2217,23 @@ static void hid_internal_hotplug_dispatch(struct hid_device_info *device, hid_ho
 				hid_hotplug_context.cb_list_dirty = 1;
 			}
 		}
-
-		if (callback == last_at_event) {
-			break;
-		}
 	}
 
 	hid_hotplug_context.mutex_in_use = 0;
+}
+
+/* Drain whole recovered events only between dispatches, never from a replay
+   flush or registration. Pop before dispatch so reentrant repair appends safely.
+   Always called inside a locked mutex, with mutex_in_use clear. */
+static void hid_internal_hotplug_recovered_flush(void)
+{
+	while (hid_hotplug_context.recovered_events != NULL) {
+		struct hid_hotplug_recovered_event *event = hid_hotplug_context.recovered_events;
+		hid_hotplug_context.recovered_events = event->next;
+		hid_internal_hotplug_dispatch(event->device, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, event->before_handle);
+		hid_free_enumeration(event->device);
+		free(event);
+	}
 }
 
 static DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID context, CM_NOTIFY_ACTION action, PCM_NOTIFY_EVENT_DATA event_data, DWORD event_data_size)
@@ -2231,6 +2251,10 @@ static DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID c
 
 	/* Lock the mutex to avoid race conditions */
 	EnterCriticalSection(&hid_hotplug_context.critical_section);
+
+	/* Drain before updating the cache: registrations made by recovered callbacks
+	   must snapshot the state preceding this live event. */
+	hid_internal_hotplug_recovered_flush();
 
 	if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL) {
 		hotplug_event = HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED;
@@ -2270,7 +2294,7 @@ static DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID c
 			}
 			/* else: nothing can be reported or cached for this arrival. Allocation
 			   failure marks the cache incomplete so a later ENUMERATE snapshot
-			   repairs missing paths and queues their arrivals before live delivery.
+			   repairs missing paths and queues arrivals before the next live dispatch.
 			   A removal still safely drops any record that was actually cached. */
 		}
 	} else if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL) {
@@ -2286,12 +2310,13 @@ static DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID c
 	}
 
 	if (device) {
-		hid_internal_hotplug_dispatch(device, hotplug_event);
+		hid_internal_hotplug_dispatch(device, hotplug_event, hid_hotplug_context.next_handle);
 
 		/* Free removed device */
 		if (hotplug_event == HID_API_HOTPLUG_EVENT_DEVICE_LEFT) {
 			hid_free_enumeration(device);
 		}
+		hid_internal_hotplug_recovered_flush();
 
 		/* Remove any callbacks that were marked for removal; if none are left,
 		   defer the teardown to the threadpool work item: unregistering the
