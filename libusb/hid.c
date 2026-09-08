@@ -279,8 +279,8 @@ static struct hid_hotplug_context {
 
 	/* Pending messages for the callback thread; protected by callback_thread's mutex */
 	struct hid_hotplug_queue* queue;
-	/* A removal was dropped; protected by callback_thread's mutex. Stays set
-	 * for this context so later snapshots and arrivals reconcile the cache. */
+	/* A removal was dropped; protected by callback_thread's mutex. Cleared
+	 * before reconciliation, restored on failure or another dropped removal. */
 	unsigned char cache_stale;
 
 	/* Linked list of the hotplug callbacks */
@@ -1757,8 +1757,14 @@ static int hid_internal_hotplug_cache_stale(void)
 static int hid_internal_hotplug_reconcile(void)
 {
 	libusb_device **devices;
+	hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
+	hid_hotplug_context.cache_stale = 0;
+	hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
 	ssize_t count = libusb_get_device_list(hid_hotplug_context.context, &devices);
 	if (count < 0) {
+		hidapi_thread_mutex_lock(&hid_hotplug_context.callback_thread);
+		hid_hotplug_context.cache_stale = 1;
+		hidapi_thread_mutex_unlock(&hid_hotplug_context.callback_thread);
 		return (int) count;
 	}
 
@@ -1952,9 +1958,10 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 					hid_internal_invoke_callbacks(&single, HID_API_HOTPLUG_EVENT_DEVICE_LEFT, last);
 				}
 			}
-			if (dev->removed_before && !dev->arrival_seen) {
+			if (dev->removed_before && !dev->arrival_seen && dev->info != NULL) {
 				/* Only snapshot entries can still have an unprocessed arrival.
-				 * Retain their identity until it is drained or the context exits. */
+				 * Retain their identity until it is drained, a queued LEFT
+				 * confirms no arrival is pending, or the context exits. */
 				hid_free_enumeration(dev->info);
 				dev->info = NULL;
 				dev->next = hid_hotplug_context.devs;
@@ -2271,16 +2278,17 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
-		if (hid_internal_hotplug_cache_stale()) {
-			int res = hid_internal_hotplug_reconcile();
-			if (res < 0) {
-				hid_internal_hotplug_unwind_registration(hotplug_cb, is_first_callback);
-				register_libusb_error(&last_global_error, res, "hotplug/libusb_get_device_list");
-				pthread_mutex_unlock(&hid_hotplug_context.mutex);
-				return -1;
-			}
+	if (hid_internal_hotplug_cache_stale()) {
+		int res = hid_internal_hotplug_reconcile();
+		if (res < 0) {
+			hid_internal_hotplug_unwind_registration(hotplug_cb, is_first_callback);
+			register_libusb_error(&last_global_error, res, "hotplug/libusb_get_device_list");
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			return -1;
 		}
+	}
+
+	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
 		/* Take a registration-time snapshot of the matching connected devices:
 		 * it is replayed asynchronously on the event thread as synthetic arrival
 		 * events, never from within this call (see hid_internal_flush_replay).
@@ -2314,7 +2322,14 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 	}
 
-	if (hotplug_cb->replay != NULL || hid_internal_hotplug_cache_stale()) {
+	int removals_pending = 0;
+	for (struct hid_hotplug_device *dev = hid_hotplug_context.devs; dev != NULL; dev = dev->next) {
+		if (dev->removed_before && dev->info != NULL) {
+			removals_pending = 1;
+			break;
+		}
+	}
+	if (hotplug_cb->replay != NULL || removals_pending || hid_internal_hotplug_cache_stale()) {
 		/* Wake the callback thread up so the snapshot is delivered promptly even
 		 * with no live event traffic, and reconciled removals are dispatched.
 		 * Enqueued (and, for the first callback,
