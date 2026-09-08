@@ -79,6 +79,7 @@ back-end will of course not work with Bluetooth devices.
 Hotplug callbacks require Windows 8 or later. Registration returns `-1` when
 the required PnP notification API is unavailable. Compiler and runtime
 requirements may impose a higher minimum Windows version.
+Starting with HIDAPI 0.16, this back-end requires libusb 1.0.16 or newer.
 
 ### Test GUI
 
