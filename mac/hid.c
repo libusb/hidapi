@@ -264,8 +264,8 @@ static void register_error_str_vformat(wchar_t **error_str, const char *format, 
 
 /* True when the calling thread is HIDAPI's internal hotplug event thread; used
    to suppress writes to the global error string made from that thread (see the
-   definition after the hotplug context for the full rationale). Must be called
-   with global_error_mutex held. */
+   definition after the hotplug context for the full rationale). The thread-local
+   read needs no lock. */
 static int hid_internal_on_event_thread(void);
 
 /* Serializes the mutations of the global error string: the hotplug API is
@@ -522,17 +522,18 @@ struct hid_device_info_ex
 
    Two locks are involved in the hotplug machinery:
 
-     (1) hid_hotplug_context.mutex - recursive; guards ALL of the hotplug
-         context: the callback list, the device cache and every lifecycle flag
-         (thread_state, thread_needs_join, join_in_progress, exiting, ...) as
+     (1) hid_hotplug_context.mutex - recursive; guards the shared hotplug
+         context, with the exceptions below: the callback list, the device cache
+         and lifecycle flags (thread_state, thread_needs_join, join_in_progress,
+         exiting, ...) as
          well as the CoreFoundation references of the event thread. It is held
          for the whole duration of every callback invocation, and it is
          re-entrant so that a callback may call hid_hotplug_register_callback()
          or hid_hotplug_deregister_callback() from the event thread itself -
          which the API documentation guarantees cannot deadlock.
 
-     (2) global_error_mutex - a leaf lock, held only while the global error
-         string is replaced. Nothing is ever acquired while it is held.
+     (2) global_error_mutex - a leaf lock; guards the global error string.
+         Nothing is ever acquired while it is held.
 
    The startup barrier's internal lock (inside pthread_barrier_wait()) is a leaf
    as well.
@@ -552,13 +553,14 @@ struct hid_device_info_ex
    pthread_cond_wait() only with exactly one recursion level held (see
    hid_internal_hotplug_collect_thread()).
 
-   The only exception to "all context state is accessed under the mutex" is the
-   event thread's startup phase - everything it does before reaching the startup
-   barrier: the registering thread that started it holds the mutex and is parked
-   at that barrier, so the event thread has exclusive access to the context and
+   The event-thread marker is thread-local. startup_phase is owned by the event
+   thread, and startup_ok/startup_error are published through the startup barrier.
+   Before that barrier, the registering thread holds the mutex and is parked
+   there, so the event thread has exclusive access to the context and
    MUST NOT take the mutex there (that would deadlock against the parked
    registrant). The barrier is the release/acquire edge that publishes what the
-   thread has set up. */
+   thread has set up. Its CoreFoundation objects also remain event-thread-owned
+   until the epilogue; see the manager release at the end of hotplug_thread(). */
 
 static struct hid_hotplug_context {
 	/* MacOS specific notification handles */
@@ -588,7 +590,7 @@ static struct hid_hotplug_context {
 	unsigned char mutex_ready; /* The mutex and the condition variable are usable (written once, under pthread_once) */
 	unsigned char mutex_in_use;
 	unsigned char cb_list_dirty;
-	unsigned char thread_needs_join; /* Event thread was started and has not been collected yet */
+	unsigned char thread_needs_join; /* Event thread was started and has not been joined yet, even after its epilogue */
 	unsigned char join_in_progress; /* A thread is currently joining the event thread (with the mutex released) */
 	unsigned char exiting; /* hid_exit() is tearing the hotplug machinery down */
 
@@ -602,15 +604,7 @@ static struct hid_hotplug_context {
 	/* Written by the event thread before the startup barrier, read by the
 	   registering thread after it (the barrier is the synchronization edge) */
 	unsigned char startup_ok;
-
-	/* Identity of the running hotplug event thread. Published by that thread as
-	   its first action and cleared in its epilogue, so it is valid exactly while
-	   an event thread exists. Guarded by global_error_mutex (a leaf mutex), NOT
-	   the hotplug mutex: the global-error writer consults it while holding
-	   global_error_mutex and must never take the hotplug mutex it may already
-	   hold. Read only via hid_internal_on_event_thread(). */
-	pthread_t event_thread_id;
-	unsigned char event_thread_id_valid;
+	const char *startup_error; /* Static reason string, published with startup_ok */
 
 	/* Linked list of the hotplug callbacks */
 	struct hid_hotplug_callback *hotplug_cbs;
@@ -624,22 +618,23 @@ static struct hid_hotplug_context {
    can ever lock a mutex that hid_exit() destroyed underneath it */
 static pthread_once_t hid_hotplug_init_once = PTHREAD_ONCE_INIT;
 
+/* Compiler TLS keeps this marker through pthread-specific destructors without
+   comparing a pthread_t whose lifetime may have ended in a concurrent join. */
+static __thread unsigned char hid_hotplug_event_thread;
+
 /* HIDAPI's public API contract (see hidapi.h) is that HIDAPI calls made from
    within a hotplug callback do not update the global error string: the callback
    runs on this internal event thread, and an application cannot serialize a
    hid_error(NULL) read against a write from that thread - that would be a
-   use-after-free of last_global_error_str. This mirrors the libusb and linux
-   backends, which likewise suppress such writes. A callback may re-enter the
-   public hid_hotplug_register_callback()/hid_hotplug_deregister_callback(),
-   whose success and failure paths both write the global error; those writes are
-   suppressed via this check in register_global_error()[_format]().
-   Returns non-zero when the caller is the hotplug event thread. Must be called
-   with global_error_mutex held (the event_thread_id* fields are guarded by it),
-   which the global-error writer already holds. */
+   use-after-free of last_global_error_str. A callback may re-enter the public
+   hid_hotplug_register_callback()/hid_hotplug_deregister_callback(), whose
+   failure paths report global errors; those writes are suppressed via this
+   check in register_global_error()[_format]().
+   Returns non-zero when the caller is the hotplug event thread, including during
+   its thread-specific destructors. The thread-local read needs no lock. */
 static int hid_internal_on_event_thread(void)
 {
-	return hid_hotplug_context.event_thread_id_valid
-		&& pthread_equal(pthread_self(), hid_hotplug_context.event_thread_id);
+	return hid_hotplug_event_thread;
 }
 
 static void hid_internal_hotplug_remove_postponed(void)
@@ -647,6 +642,7 @@ static void hid_internal_hotplug_remove_postponed(void)
 	/* Unregister the callbacks whose removal was postponed */
 	/* This function is always called inside a locked mutex */
 	/* However, any actions are only allowed if the mutex is NOT in use and if the DIRTY flag is set */
+	/* mutex_ready is defensive: callers must hold the initialized hotplug mutex. */
 	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use || !hid_hotplug_context.cb_list_dirty) {
 		return;
 	}
@@ -668,22 +664,19 @@ static void hid_internal_hotplug_remove_postponed(void)
 	hid_hotplug_context.cb_list_dirty = 0;
 }
 
-/* Releases everything that only the collector of the event thread may release.
-   Called with the hotplug mutex held, either by the thread that has just joined
-   the event thread, or by the event thread itself when nobody is joining it (it
-   then detaches itself - see hid_internal_hotplug_thread_epilogue()).
+/* Releases the startup barrier and run loop references in the event thread's
+   epilogue, with the hotplug mutex held. Join ownership remains with the
+   collector until pthread_join() completes, including thread-specific destructors.
    Both participants have left the startup barrier by then: the registering
    thread holds the mutex across the barrier and releases it only afterwards, so
    acquiring the mutex proves it is out. */
 static void hid_internal_hotplug_release_thread(void)
 {
-	hid_hotplug_context.thread_needs_join = 0;
-
 	pthread_barrier_destroy(&hid_hotplug_context.startup_barrier);
 
-	/* The run loop sources are created by the event thread, but the thread does
-	   not release them while it winds down: the references must stay valid so
-	   that the run loop can still be woken up until the thread is collected. */
+	/* Only the epilogue releases these references, after their last event-thread
+	   use. Cleanup reads them under this same mutex; NULL records their release,
+	   not completion of the still-joinable thread. */
 	if (hid_hotplug_context.source) {
 		CFRelease(hid_hotplug_context.source);
 		hid_hotplug_context.source = NULL;
@@ -695,12 +688,12 @@ static void hid_internal_hotplug_release_thread(void)
 	hid_hotplug_context.run_loop = NULL;
 }
 
-/* Collects (joins) the event thread once it has been told to stop, and releases
-   what only the collector may release. Serializes concurrent joiners and waits
+/* Collects (joins) the event thread once it has been told to stop, and clears
+   its join ownership. Serializes concurrent joiners and waits
    out a join running on another thread.
    Must be called with the hotplug mutex NOT held by the calling thread, except
    from the event thread itself, where it is a guaranteed no-op (the
-   pthread_equal() check below) - that is what keeps pthread_cond_wait() from
+   hid_internal_on_event_thread() check below) - that keeps pthread_cond_wait() from
    ever being reached with the recursive mutex locked more than once. */
 static void hid_internal_hotplug_collect_thread(void)
 {
@@ -709,7 +702,7 @@ static void hid_internal_hotplug_collect_thread(void)
 	while (hid_hotplug_context.thread_needs_join
 	       && hid_hotplug_context.hotplug_cbs == NULL
 	       && hid_hotplug_context.thread_state == 2
-	       && !pthread_equal(pthread_self(), hid_hotplug_context.thread)) {
+	       && !hid_internal_on_event_thread()) {
 		if (hid_hotplug_context.join_in_progress) {
 			/* Another thread is already joining: wait for it to finish.
 			   A condition variable (and not a spin) is essential: the joiner is
@@ -730,7 +723,7 @@ static void hid_internal_hotplug_collect_thread(void)
 
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
 		hid_hotplug_context.join_in_progress = 0;
-		hid_internal_hotplug_release_thread();
+		hid_hotplug_context.thread_needs_join = 0;
 
 		/* Wake the threads waiting for this join to complete */
 		pthread_cond_broadcast(&hid_hotplug_context.join_done);
@@ -742,6 +735,7 @@ static void hid_internal_hotplug_collect_thread(void)
 /* Must be called with the hotplug mutex held */
 static void hid_internal_hotplug_cleanup(void)
 {
+	/* mutex_ready is defensive: callers must hold the initialized hotplug mutex. */
 	if (!hid_hotplug_context.mutex_ready || hid_hotplug_context.mutex_in_use) {
 		return;
 	}
@@ -767,9 +761,8 @@ static void hid_internal_hotplug_cleanup(void)
 		hid_hotplug_context.thread_state = 2;
 
 		/* Wake up the run thread's event loop so that the thread can exit.
-		   Both references are still alive: they are only released once the
-		   thread has been collected, which cannot happen while this thread
-		   holds the mutex. */
+		   Both references are still alive: the epilogue releases them under
+		   this mutex, after thread_state has reached 2. */
 		if (hid_hotplug_context.source != NULL && hid_hotplug_context.run_loop != NULL) {
 			CFRunLoopSourceSignal(hid_hotplug_context.source);
 			CFRunLoopWakeUp(hid_hotplug_context.run_loop);
@@ -878,7 +871,8 @@ static void hid_internal_hotplug_exit_done(void)
 
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
-	/* The event thread has been collected by now, so it no longer uses the mode */
+	/* The event thread has been joined, including its thread-specific
+	   destructors; releasing its resources in the epilogue alone is not enough. */
 	if (hid_hotplug_context.run_loop_mode) {
 		CFRelease(hid_hotplug_context.run_loop_mode);
 		hid_hotplug_context.run_loop_mode = NULL;
@@ -908,12 +902,10 @@ int HID_API_EXPORT hid_init(void)
 
 int HID_API_EXPORT hid_exit(void)
 {
-	/* The hotplug thread and the callbacks are stopped/freed unconditionally:
-	   hid_hotplug_register_callback() may have initialized the library implicitly
-	   without ever creating hid_mgr.
-	   This leaves the hotplug API closed (`exiting`), so that a concurrent
-	   registration cannot re-enter hid_init() while hid_mgr is being destroyed
-	   below */
+	/* Hotplug synchronization state exists independently of hid_mgr; teardown
+	   is safe even when nothing was initialized. Set `exiting` under the hotplug
+	   mutex before destroying hid_mgr, so registration cannot re-enter hid_init()
+	   during the teardown below. */
 	hid_internal_hotplug_exit();
 
 	if (hid_mgr) {
@@ -1036,9 +1028,11 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		   9+1+20+1=31 bytes buffer, but allocate 32 for simple alignment */
 		const size_t path_len = 32;
 		cur_dev->path = (char *) calloc(1, path_len);
-		if (cur_dev->path != NULL) {
-			snprintf(cur_dev->path, path_len, "DevSrvsID:%llu", entry_id);
+		if (cur_dev->path == NULL) {
+			hid_free_enumeration(cur_dev);
+			return NULL;
 		}
+		snprintf(cur_dev->path, path_len, "DevSrvsID:%llu", entry_id);
 	}
 
 	if (cur_dev->path == NULL) {
@@ -1055,6 +1049,12 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	cur_dev->manufacturer_string = dup_wcs(buf);
 	get_product_string(dev, buf, BufLen);
 	cur_dev->product_string = dup_wcs(buf);
+
+	if (!cur_dev->path || !cur_dev->serial_number
+		|| !cur_dev->manufacturer_string || !cur_dev->product_string) {
+		hid_free_enumeration(cur_dev);
+		return NULL;
+	}
 
 	/* VID/PID */
 	cur_dev->vendor_id = dev_vid;
@@ -1102,7 +1102,8 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	return cur_dev;
 }
 
-static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
+/* Hotplug requires every usage entry; ordinary enumeration is best effort. */
+static struct hid_device_info *create_device_info(IOHIDDeviceRef device, int strict)
 {
 	const int32_t primary_usage_page = get_int_property(device, CFSTR(kIOHIDPrimaryUsagePageKey));
 	const int32_t primary_usage = get_int_property(device, CFSTR(kIOHIDPrimaryUsageKey));
@@ -1139,6 +1140,10 @@ static struct hid_device_info *create_device_info(IOHIDDeviceRef device)
 				continue; /* Already added. */
 
 			next = create_device_info_with_usage(device, usage_page, usage);
+			if (next == NULL && strict) {
+				hid_free_enumeration(root);
+				return NULL;
+			}
 			cur->next = next;
 			if (next != NULL) {
 				cur = next;
@@ -1208,7 +1213,7 @@ struct hid_device_info  HID_API_EXPORT *hid_enumerate(unsigned short vendor_id, 
 			continue;
 		}
 
-		struct hid_device_info *tmp = create_device_info(dev);
+		struct hid_device_info *tmp = create_device_info(dev, 0);
 		if (tmp == NULL) {
 			continue;
 		}
@@ -1348,7 +1353,10 @@ static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotp
 	   a callback registered from within a callback must not receive the
 	   in-flight event - its HID_API_HOTPLUG_ENUMERATE snapshot (taken at
 	   registration) and the subsequent events cover it with no losses or
-	   duplicates. The list is append-only while mutex_in_use is set. */
+	   duplicates. While mutex_in_use is set, the list grows only at the tail,
+	   except that a failed registration can unlink its own new tail before any
+	   traversal reaches it (see the snapshot rollback in
+	   hid_hotplug_register_callback()). */
 	struct hid_hotplug_callback *stop_after = hid_hotplug_context.hotplug_cbs;
 	while (stop_after != NULL && stop_after->next != NULL) {
 		stop_after = stop_after->next;
@@ -1366,8 +1374,8 @@ static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotp
 		if ((callback->events & event) && hid_internal_match_device_id(info->vendor_id, info->product_id,
 																	   callback->vendor_id, callback->product_id)) {
 			int result = callback->callback(callback->handle, info, event, callback->user_data);
-			/* If the result is non-zero, we mark the callback for removal */
-			/* Do not use the deregister call as it locks the mutex, and we are currently in a lock */
+			/* Traversal is active, so mark for postponed removal inline. Public
+			   deregistration would do the same, plus redundant lookup and bookkeeping. */
 			if (result) {
 				callback->events = 0;
 				hid_hotplug_context.cb_list_dirty = 1;
@@ -1388,7 +1396,10 @@ static void hid_internal_invoke_callbacks(struct hid_device_info *info, hid_hotp
    The entries of the cache are allocated as struct hid_device_info_ex and carry
    the io_service_t of the device: the path cannot be regenerated once the device
    is gone. Never pass an entry that did not come from the cache (see
-   hid_internal_copy_device_info()). */
+   hid_internal_copy_device_info()). Comparison uses task-local io_service_t
+   port names, not registry-entry IDs. The manager-owned IOHIDDevice must retain
+   its service right until removal or teardown evicts every corresponding cache
+   entry, preventing port-name reuse while entries are live. */
 static int match_ref_to_info(IOHIDDeviceRef device, struct hid_device_info *info)
 {
 	if (!device || !info) {
@@ -1451,8 +1462,8 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
 	}
 
-	/* Once the run loop runs, the IOHIDManager re-reports every device that was
-	   already connected when it was opened. Those devices are all in the cache -
+	/* Once the run loop runs, the IOHIDManager reports devices that were already
+	   connected when matching was set up. Those devices are all in the cache -
 	   it is completed synchronously during the thread's startup, before any
 	   callback can be registered - so they are NOT new arrivals and must never be
 	   dispatched as live events. This is what makes the snapshot boundary
@@ -1465,7 +1476,7 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 		return;
 	}
 
-	info = create_device_info(device);
+	info = create_device_info(device, 1);
 	if (!info) {
 		/* Out of memory on the live-arrival path: the device ends up neither in
 		   the cache nor in an event, so "reported exactly once" is best effort
@@ -1478,6 +1489,9 @@ static void hid_internal_hotplug_connect_callback(void *context, IOReturn result
 		   to fail or retry against. (During the startup phase the device is
 		   still picked up by hid_internal_hotplug_build_device_cache(), which
 		   does fail loudly if it cannot allocate either.) */
+		/* An uncached live device is also absent from later ENUMERATE snapshots
+		   and produces no LEFT callback until a successful arrival caches it,
+		   normally after replug or monitor restart. */
 		if (!startup) {
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
 		}
@@ -1602,23 +1616,20 @@ static void hotplug_replay_callback(void* context)
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 }
 
-/* Lets the hotplug IOHIDManager process the device-matching events it queued for
-   the already connected devices, exactly like the process_pending_events() call
+/* Gives the hotplug IOHIDManager a short best-effort pump of queued matching
+   events for connected devices, like the process_pending_events() call
    hid_enumerate() makes before IOHIDManagerCopyDevices().
 
    This is NOT the snapshot boundary - hid_internal_hotplug_build_device_cache()
-   below is - and nothing depends on it draining the burst completely: it can
-   only ADD devices to the cache, never move one from the initial snapshot to the
-   live events. It runs on the event thread during its startup phase, so the
-   connect/disconnect callbacks it triggers only maintain the cache and dispatch
+   below is - and nothing depends on it draining the burst completely. It may
+   add cache entries and remove devices disconnected meanwhile. It runs on the
+   event thread during startup, so the connect/disconnect callbacks it triggers
+   only maintain the cache and dispatch
    nothing (no callback is registered yet, and the mutex must not be taken - see
    the locking note at the top of the hotplug code). */
 static void hid_internal_hotplug_drain_pending_events(void)
 {
-	SInt32 res;
-	do {
-		res = CFRunLoopRunInMode(hid_hotplug_context.run_loop_mode, 0.001, FALSE);
-	} while (res != kCFRunLoopRunFinished && res != kCFRunLoopRunTimedOut && res != kCFRunLoopRunStopped);
+	CFRunLoopRunInMode(hid_hotplug_context.run_loop_mode, 0.001, FALSE);
 }
 
 /* Completes the initial device cache from the devices the hotplug IOHIDManager
@@ -1626,9 +1637,10 @@ static void hid_internal_hotplug_drain_pending_events(void)
    before any callback can be registered and without the mutex.
 
    This is the deterministic boundary between "was already connected" and
-   "arrived live": IOHIDManagerCopyDevices() answers synchronously - which is
-   exactly what hid_enumerate() relies on - so, unlike a timed pump of the run
-   loop, the completeness of the snapshot does not depend on how long the initial
+   "arrived live": IOHIDManagerSetDeviceMatching() populates the manager's device
+   set, which IOHIDManagerCopyDevices() copies synchronously - as hid_enumerate()
+   relies on - so, unlike a timed pump of the run loop, the completeness of the
+   snapshot does not depend on how long the initial
    matching burst takes. Every device connected at this point ends up in the
    cache; when the run loop later delivers the matching events for those same
    devices, they are recognized as already known and dropped (see
@@ -1688,7 +1700,7 @@ static int hid_internal_hotplug_build_device_cache(void)
 			continue;
 		}
 
-		info = create_device_info(device_array[i]);
+		info = create_device_info(device_array[i], 1);
 		if (info == NULL) {
 			/* Out of memory: fail the startup rather than commit a snapshot
 			   that is missing a connected device (it would later be reported as
@@ -1718,58 +1730,30 @@ static int hid_internal_hotplug_build_device_cache(void)
 	return 0;
 }
 
-/* Runs at the very end of the event thread. If no other thread is joining it,
-   the thread detaches itself and releases its own resources here: otherwise a
-   callback that deregisters the last callback from within a callback (including
-   by returning non-zero) would leave an unjoined thread, two run loop sources
-   and the run loop behind until the next register/deregister/hid_exit() - which
-   may never come. */
+/* Releases the event thread's resources after their last use. Self-removal
+   leaves the thread joinable: the next application-thread collector or hid_exit()
+   must wait for actual termination before the thread record can be reused. */
 static void hid_internal_hotplug_thread_epilogue(void)
 {
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
-	/* The event thread is exiting: stop suppressing global-error writes for its
-	   pthread id. Cleared under the hotplug mutex - before the thread is detached
-	   or collected, and thus before any replacement event thread can be started
-	   and publish its own id - so a later thread's id can never be clobbered.
-	   Ordering is hotplug mutex -> global_error_mutex, the same order the
-	   global-error writer uses when it is called under the hotplug mutex. */
-	pthread_mutex_lock(&global_error_mutex);
-	hid_hotplug_context.event_thread_id_valid = 0;
-	pthread_mutex_unlock(&global_error_mutex);
+	hid_internal_hotplug_release_thread();
 
-	if (hid_hotplug_context.thread_needs_join && !hid_hotplug_context.join_in_progress) {
-		/* Nobody is inside pthread_join() on this thread, and nobody can enter
-		   it any more: the decision is taken under the mutex on both sides (see
-		   hid_internal_hotplug_collect_thread()), so there is no double join and
-		   no join of a detached thread. */
-		pthread_detach(pthread_self());
-		hid_internal_hotplug_release_thread();
-		pthread_cond_broadcast(&hid_hotplug_context.join_done);
-	}
-
-	/* Past this point the thread must not touch the context any more: as soon as
-	   the mutex is released, a new event thread may be started */
+	/* The collector still owns the thread record until pthread_join() returns. */
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 }
 
 static void* hotplug_thread(void* user_data)
 {
-	int manager_opened = 0;
-
 	(void) user_data;
 
-	/* Publish this thread's identity as the very first action, before anything
+	/* Mark this event thread as the very first action, before anything
 	   here can attempt a global-error write, so that any such write on this
 	   internal event thread - notably from a user callback that re-enters
 	   hid_hotplug_(de)register_callback() - is suppressed (see
-	   hid_internal_on_event_thread()). Uses global_error_mutex only: the hotplug
-	   mutex must not be taken during the startup phase (the registrant holds it,
-	   parked at the startup barrier). */
-	pthread_mutex_lock(&global_error_mutex);
-	hid_hotplug_context.event_thread_id = pthread_self();
-	hid_hotplug_context.event_thread_id_valid = 1;
-	pthread_mutex_unlock(&global_error_mutex);
+	   hid_internal_on_event_thread()). The marker remains set through pthread
+	   destructors and is private to this thread; no lock is needed. */
+	hid_hotplug_event_thread = 1;
 
 	/* Startup phase: the registering thread holds the hotplug mutex and is
 	   parked at the startup barrier, so this thread has exclusive access to the
@@ -1778,9 +1762,8 @@ static void* hotplug_thread(void* user_data)
 	   can be dispatched here either: none is registered yet (the first one is
 	   inserted only after the barrier). */
 
-	/* The device cache is empty at this point: the event thread is only ever
-	   started with no callbacks registered, which is exactly when the previous
-	   cache was freed by hid_internal_hotplug_cleanup() */
+	/* The cache should already be empty after the previous generation's
+	   hid_internal_hotplug_cleanup(); clear it defensively before startup. */
 	hid_free_enumeration(hid_hotplug_context.devs);
 	hid_hotplug_context.devs = NULL;
 
@@ -1794,6 +1777,12 @@ static void* hotplug_thread(void* user_data)
 
 	if (hid_hotplug_context.run_loop_mode) {
 		hid_hotplug_context.manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+		if (!hid_hotplug_context.manager) {
+			hid_hotplug_context.startup_error = "failed to create the HID manager";
+		}
+	}
+	else {
+		hid_hotplug_context.startup_error = "failed to create the run loop mode";
 	}
 
 	if (hid_hotplug_context.manager) {
@@ -1835,23 +1824,24 @@ static void* hotplug_thread(void* user_data)
 														hid_internal_hotplug_disconnect_callback,
 														NULL);
 
-			/* Opening the manager enqueues the device-matching events for all
-			   the devices that are already connected */
-			if (IOHIDManagerOpen(hid_hotplug_context.manager, kIOHIDOptionsTypeNone) == kIOReturnSuccess) {
-				manager_opened = 1;
+			/* Give the manager a chance to process the matching events
+			   (best effort; not a fence - see the function comment) ... */
+			hid_internal_hotplug_drain_pending_events();
 
-				/* Give the manager a chance to process what it just enqueued
-				   (best effort; not a fence - see the function comment) ... */
-				hid_internal_hotplug_drain_pending_events();
-
-				/* ... and then take the authoritative snapshot of the connected
-				   devices synchronously: THIS - and not a timed pump of the run
-				   loop - is the boundary between the initial
-				   HID_API_HOTPLUG_ENUMERATE pass and the live events */
-				if (hid_internal_hotplug_build_device_cache() == 0) {
-					hid_hotplug_context.startup_ok = 1;
-				}
+			/* ... and then take the authoritative snapshot of the connected
+			   devices synchronously: THIS - and not a timed pump of the run
+			   loop - is the boundary between the initial
+			   HID_API_HOTPLUG_ENUMERATE pass and the live events */
+			if (hid_internal_hotplug_build_device_cache() == 0) {
+				hid_hotplug_context.startup_ok = 1;
 			}
+			else {
+				hid_hotplug_context.startup_error = "failed to allocate the device cache";
+			}
+		}
+		else {
+			hid_hotplug_context.startup_error = !hid_hotplug_context.source
+				? "failed to create the stop source" : "failed to create the replay source";
 		}
 	}
 
@@ -1879,17 +1869,15 @@ static void* hotplug_thread(void* user_data)
 
 			code = CFRunLoopRunInMode(hid_hotplug_context.run_loop_mode, 1000/*sec*/, FALSE);
 
-			if (code == kCFRunLoopRunTimedOut || code == kCFRunLoopRunHandledSource) {
+			if (code == kCFRunLoopRunTimedOut) {
 				continue;
 			}
 
-			/* The run loop is gone: either the stop source stopped it
-			   (thread_state is already 2), or it exited on its own. Publish the
-			   shutdown under the mutex, so that a concurrent registration cannot
-			   observe a running thread (thread_state 1) and signal-and-wake a run
-			   loop that is winding down; a registration that finds the thread
-			   stopped while callbacks are still registered fails instead of
-			   attaching to a dead thread. */
+			/* Publish the stopped state under the mutex. Registration is rejected
+			   after publication while callbacks remain. An unsolicited stop can
+			   leave existing and just-accepted callbacks without delivery,
+			   including pending replay: a registration may still have observed
+			   state 1 between the run loop's return and this publication. */
 			pthread_mutex_lock(&hid_hotplug_context.mutex);
 			hid_hotplug_context.thread_state = 2;
 			pthread_mutex_unlock(&hid_hotplug_context.mutex);
@@ -1897,20 +1885,13 @@ static void* hotplug_thread(void* user_data)
 		}
 	}
 	/* else: the startup failed - hid_hotplug_register_callback() fails the
-	   registration and collects this thread (or lets it detach itself below);
-	   the run loop sources (if any got created) and the startup barrier are
-	   released by whoever collects it */
+	   registration and joins this thread after its epilogue releases the run
+	   loop sources (if any got created) and the startup barrier */
 
-	/* Kill the manager. No mutex is needed (and none may be held across
-	   IOHIDManagerClose()): nothing else ever touches the manager, and no other
-	   thread may start a new event thread or release the run loop mode before
-	   this thread has been collected - which cannot happen before the epilogue
-	   below, i.e. after the last use of the run loop and of its mode here. */
+	/* Release the manager. No mutex is needed: nothing else ever touches it,
+	   and no other thread may start a new event thread or release the run loop
+	   mode before this thread has been joined, after its last use of them here. */
 	if (hid_hotplug_context.manager) {
-		if (manager_opened) {
-			IOHIDManagerClose(hid_hotplug_context.manager, kIOHIDOptionsTypeNone);
-		}
-
 		IOHIDManagerUnscheduleFromRunLoop(hid_hotplug_context.manager, hid_hotplug_context.run_loop, hid_hotplug_context.run_loop_mode);
 
 		CFRelease(hid_hotplug_context.manager);
@@ -1965,13 +1946,11 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	   that it cannot race hid_exit() destroying hid_mgr (hid_exit() keeps
 	   `exiting` set across the whole of its teardown).
 	   NOTE: hid_init() schedules the global IOHIDManager on the run loop of the
-	   CURRENT thread. When the implicit initialization happens here, that is the
-	   registering thread rather than the thread that later calls hid_enumerate()
-	   or hid_open() - those pump their own run loop, so they no longer service
-	   the manager's run loop source. They do not depend on it (the manager
-	   answers IOHIDManagerCopyDevices() synchronously), but an application that
-	   wants the classic behavior should call hid_init() explicitly, from the
-	   thread it uses HIDAPI on, before registering a hotplug callback. */
+	   CURRENT thread. Implicit initialization makes the registering thread the
+	   hid_init() owner: on macOS it must remain alive until all devices are closed
+	   and hid_exit() has run, and hid_exit() must run on that same thread.
+	   Applications registering from a transient worker must call hid_init()
+	   first from their intended long-lived owner thread. */
 	if (!hid_mgr && hid_init() != 0) {
 		/* register_global_error: global error is already set by hid_init */
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
@@ -1998,9 +1977,17 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	/* If a stopped event thread has not been collected (joined) yet, collect
 	   it before the machinery can be restarted; the join must not happen with
 	   the mutex held, so drop the mutex for the collection and re-check.
-	   Never entered on the event thread itself: the list cannot be empty
-	   while a callback dispatch is in flight. */
+	   The list cannot be empty while a callback dispatch is in flight, but
+	   thread-specific destructors may re-enter after the epilogue. */
 	while (hid_hotplug_context.hotplug_cbs == NULL && hid_hotplug_context.thread_needs_join) {
+		if (hid_internal_on_event_thread()) {
+			/* A destructor cannot join itself or start a replacement generation. */
+			register_global_error("hid_hotplug_register_callback: the hotplug event thread is stopping");
+			pthread_mutex_unlock(&hid_hotplug_context.mutex);
+			free(hotplug_cb);
+			return -1;
+		}
+
 		/* Make sure the stop was actually requested (idempotent) */
 		hid_internal_hotplug_cleanup();
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
@@ -2062,6 +2049,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		   reports its result in startup_ok, which is published here instead. */
 		hid_hotplug_context.thread_state = 0;
 		hid_hotplug_context.startup_ok = 0;
+		hid_hotplug_context.startup_error = NULL;
 		hid_hotplug_context.startup_phase = 1;
 
 		if (pthread_create(&hid_hotplug_context.thread, NULL, hotplug_thread, NULL) != 0) {
@@ -2075,8 +2063,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 		hid_hotplug_context.thread_needs_join = 1;
 
-		/* Wait for the thread to finish setting up - without it the callback may be registered too early*/
-
+		/* Wait for the thread to finish setting up - without it the callback may be registered too early */
 		pthread_barrier_wait(&hid_hotplug_context.startup_barrier);
 
 		/* Publish the thread's startup result */
@@ -2085,7 +2072,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		if (!hid_hotplug_context.startup_ok) {
 			/* The thread failed to set up the device monitoring and is exiting:
 			   it must be collected (joined) with the mutex released */
-			register_global_error("hid_hotplug_register_callback: failed to start the device monitoring");
+			register_global_error_format("hid_hotplug_register_callback: %s", hid_hotplug_context.startup_error);
 
 			/* Free whatever the thread may have cached before it failed
 			   (the callback list is empty, so this also stops nothing and
@@ -2149,7 +2136,9 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		}
 
 		if (hotplug_cb->replay != NULL && hid_hotplug_context.thread_state == 1) {
-			/* Ask the event thread to deliver the initial pass */
+			/* Ask the event thread to deliver the initial pass. The state check
+			   is defensive: startup or the earlier running-state check established
+			   state 1 while this mutex has remained held. */
 			CFRunLoopSourceSignal(hid_hotplug_context.replay_source);
 			CFRunLoopWakeUp(hid_hotplug_context.run_loop);
 		}
@@ -2160,9 +2149,6 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	if (callback_handle != NULL) {
 		*callback_handle = hotplug_cb->handle;
 	}
-
-	/* Clear the stale global error on success, like hid_init()/hid_enumerate() do */
-	register_global_error(NULL);
 
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
@@ -2230,8 +2216,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 
 	/* If this deregistration stopped the event thread, join it with the mutex
 	   released. A no-op when called from within a callback (the event thread
-	   cannot join itself): the thread then detaches and releases itself in its
-	   epilogue - see hid_internal_hotplug_thread_epilogue() */
+	   cannot join itself): its epilogue releases the resources, and the next
+	   application-thread collector joins it before reusing the thread record. */
 	hid_internal_hotplug_collect_thread();
 
 	return result;
@@ -2922,7 +2908,7 @@ HID_API_EXPORT struct hid_device_info *HID_API_CALL hid_get_device_info(hid_devi
 		register_device_error(dev, NULL);
 	}
 	else {
-		dev->device_info = create_device_info(dev->device_handle);
+		dev->device_info = create_device_info(dev->device_handle, 0);
 		if (!dev->device_info) {
 			register_device_error(dev, "Failed to create hid_device_info");
 		}
