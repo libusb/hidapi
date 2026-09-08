@@ -1,13 +1,15 @@
 name: Linux libusb Virtual HID Device Test (manual)
 
-# Runs the device-I/O test against the HIDAPI *libusb* backend using a real
-# virtual USB HID device (USB Raw Gadget on top of dummy_hcd).
+# Runs the device-I/O and hotplug tests against the HIDAPI *libusb* backend
+# using a real virtual USB HID device (USB Raw Gadget on top of dummy_hcd).
 #
 # The hosted ubuntu-latest (azure) kernel is built without the USB gadget
 # subsystem, so raw_gadget/dummy_hcd can't be loaded (or even built) there. We
 # therefore run the test inside a lightweight VM (virtme-ng + QEMU) booting a
-# *generic* Ubuntu kernel, whose linux-modules-extra ships dummy_hcd and
-# raw_gadget. The VM shares the host filesystem, so it runs the binaries built
+# *generic* Ubuntu kernel: linux-modules-extra supplies raw_gadget; Ubuntu does
+# not package dummy_hcd, so this workflow builds it from matching upstream
+# kernel source against that kernel's headers and installs it alongside. The VM
+# shares the host filesystem, so it runs the binaries built
 # on the host. The same approach works locally and on WSL2 (which also lacks
 # those modules in its default kernel).
 #
@@ -42,6 +44,8 @@ jobs:
         find "/lib/modules/${KVER}" \( -name 'raw_gadget*' -o -name 'dummy_hcd*' \) || true
 
     - name: Build dummy_hcd for the generic kernel (Ubuntu ships no package)
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -eux
         KVER=$(ls -1 /lib/modules | grep -- '-generic$' | sort -V | tail -n1)
@@ -50,8 +54,14 @@ jobs:
         # Ubuntu packages no dummy_hcd; build it from the upstream source that
         # matches the generic kernel's major version (xairy's copy tracks newer
         # kernels and won't compile against an older one).
-        curl -fsSL -o dummyhcd/dummy_hcd.c \
-          "https://raw.githubusercontent.com/torvalds/linux/v${KMAJ}/drivers/usb/gadget/udc/dummy_hcd.c"
+        # Fetch through the authenticated contents API: anonymous runner fetches
+        # from raw.githubusercontent.com are rate-limited (HTTP 429) often enough
+        # to fail the job, and the API path counts against the token's quota.
+        curl -fsSL --retry 6 --retry-delay 15 --retry-all-errors \
+          -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+          -H "Accept: application/vnd.github.raw+json" \
+          -o dummyhcd/dummy_hcd.c \
+          "https://api.github.com/repos/torvalds/linux/contents/drivers/usb/gadget/udc/dummy_hcd.c?ref=v${KMAJ}"
         printf 'obj-m += dummy_hcd.o\n' > dummyhcd/Makefile
         make -C "/lib/modules/${KVER}/build" M="${PWD}/dummyhcd" modules
         sudo install -m 0644 "${PWD}/dummyhcd/dummy_hcd.ko" \
@@ -61,10 +71,10 @@ jobs:
     - name: Build HIDAPI + tests (libusb backend)
       run: |
         cmake -B build -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON
+          -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON -DHIDAPI_ENABLE_ASAN=ON
         cmake --build build
 
-    - name: Run DeviceIO_libusb inside a VM (generic kernel + raw_gadget)
+    - name: Run the virtual-device tests inside a VM (generic kernel + raw_gadget)
       run: |
         set -eux
         # The generic kernel just installed (has dummy_hcd + raw_gadget modules).

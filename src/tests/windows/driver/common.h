@@ -39,7 +39,9 @@ Environment:
 #define MAXIMUM_STRING_LENGTH           (126 * sizeof(WCHAR))
 #define VHIDMINI_MANUFACTURER_STRING    L"UMDF Virtual hidmini device Manufacturer string"  
 #define VHIDMINI_PRODUCT_STRING         L"UMDF Virtual hidmini device Product string"  
-#define VHIDMINI_SERIAL_NUMBER_STRING   L"UMDF Virtual hidmini device Serial Number string"  
+/* Must equal test_hotplug.c's TEST_SERIAL: the device-backed hotplug test
+   (Hotplug_winapi) matches this single static device by serial number. */
+#define VHIDMINI_SERIAL_NUMBER_STRING   L"HIDAPI-HOTPLUG-TEST"
 #define VHIDMINI_DEVICE_STRING          L"UMDF Virtual hidmini device"  
 #define VHIDMINI_DEVICE_STRING_INDEX    5
 #include <pshpack1.h>

@@ -779,7 +779,8 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 	(void)flags;
 	(void)callback;
 	(void)user_data;
-	(void)callback_handle;
+	if (callback_handle)
+		*callback_handle = 0;
 
 	return -1;
 }
