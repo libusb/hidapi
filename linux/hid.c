@@ -1060,6 +1060,8 @@ struct hid_hotplug_monitor_thread {
 	   any other reaper skips it (a second join of the same pthread_t is undefined
 	   behavior), and hid_exit() waits on thread_cond for the join to finish. */
 	unsigned char being_joined;
+	/* A failed join is never retried; retain the node instead. */
+	unsigned char join_failed;
 	struct hid_hotplug_monitor_thread *next;
 };
 
@@ -1212,6 +1214,7 @@ static void hid_internal_hotplug_retire_current(void)
 	node->thread = hid_hotplug_context.thread;
 	node->id = hid_hotplug_context.thread_id;
 	node->being_joined = 0;
+	node->join_failed = 0;
 	node->next = hid_hotplug_context.retired;
 	hid_hotplug_context.retired = node;
 
@@ -1282,14 +1285,14 @@ static void hid_internal_hotplug_reap_thread(void)
 		int join_error;
 
 		for (link = &hid_hotplug_context.retired; *link != NULL; link = &(*link)->next) {
-			if (!(*link)->being_joined) {
+			if (!(*link)->being_joined && !(*link)->join_failed) {
 				node = *link;
 				break;
 			}
 		}
 		if (node == NULL) {
 			/* Nothing left that we may join: the list is empty, or the only
-			   entries are already being joined by another reaper. */
+			   entries are already being joined by another reaper or failed a join. */
 			return;
 		}
 
@@ -1300,6 +1303,7 @@ static void hid_internal_hotplug_reap_thread(void)
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
 		if (join_error != 0) {
 			node->being_joined = 0;
+			node->join_failed = 1;
 			pthread_cond_broadcast(&hid_hotplug_context.thread_cond);
 			return;
 		}
@@ -1486,11 +1490,13 @@ static void hid_internal_hotplug_exit(void)
 		   dropped, so from here the retired list only ever shrinks. */
 		hid_internal_hotplug_cleanup();
 
-		/* EVERY generation must be joined before hid_exit() returns. cleanup's
-		   reap joined every retired thread it could, and `exiting` keeps new ones
-		   from appearing, so anything still on the list is either being joined by
-		   another (pre-exit) reaper - wait for that join to broadcast thread_cond,
-		   then re-evaluate - or was left after a failed join.
+		/* Join every generation possible before hid_exit() returns. `exiting`
+		   keeps new ones from appearing. cleanup may leave entries being joined
+		   by another (pre-exit) reaper, unattempted after a failed join, or marked
+		   join_failed. Wait for another reaper's thread_cond broadcast or retry
+		   cleanup for unattempted entries. Failed joins are never retried: once
+		   only those entries remain, leave them in place and re-open the API
+		   below instead of spinning.
 
 		   A monitor-thread destructor must neither join nor wait for a join:
 		   its own completion may be needed by another reaper. Leave all entries
@@ -1503,16 +1509,22 @@ static void hid_internal_hotplug_exit(void)
 		}
 		if (hid_hotplug_context.retired != NULL) {
 			int others = 0;
+			int joinable = 0;
 
 			for (struct hid_hotplug_monitor_thread *entry = hid_hotplug_context.retired; entry != NULL; entry = entry->next) {
 				if (entry->being_joined) {
 					others = 1;
 					break;
 				}
+				if (!entry->join_failed) {
+					joinable = 1;
+				}
 			}
 
 			if (others) {
 				pthread_cond_wait(&hid_hotplug_context.thread_cond, &hid_hotplug_context.mutex);
+			} else if (!joinable) {
+				break;
 			}
 			continue;
 		}
@@ -2030,8 +2042,10 @@ static void hid_internal_hotplug_process_event(struct udev_device *raw_dev)
 
 /* Consecutive poll() reports of an error condition on the udev monitor
    socket - with a drain attempt in between each - after which the socket is
-   considered dead. Receive errors, including ENOBUFS, stop live delivery
-   immediately: consuming an overrun error cannot restore lost event history. */
+   considered dead. ENOBUFS stops live delivery immediately because event
+   history was lost; EBADF, ENOTSOCK, ECONNRESET and ENOTCONN indicate a broken
+   transport. Other receive errors, such as per-message parse failures, end
+   the drain without killing the monitor. */
 #define HID_HOTPLUG_SOCKET_ERROR_POLL_LIMIT 100
 
 static void* hotplug_thread(void* user_data)
@@ -2146,7 +2160,10 @@ static void* hotplug_thread(void* user_data)
 
 			if (!socket_dead) {
 				/* Drain and dispatch the events queued on the (non-blocking)
-				   udev monitor socket */
+				   udev monitor socket. EINTR retries; EAGAIN/EWOULDBLOCK end the
+				   drain. Only the transport errors listed above stop live delivery;
+				   per-message failures have consumed the datagram, so end this
+				   drain and let poll() resume on any remaining data. */
 				for (;;) {
 					errno = 0;
 					struct udev_device *raw_dev = udev_monitor_receive_device(hid_hotplug_context.mon);
@@ -2154,7 +2171,8 @@ static void* hotplug_thread(void* user_data)
 						if (errno == EINTR) {
 							continue;
 						}
-						if (errno != 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+						if (errno == ENOBUFS || errno == EBADF || errno == ENOTSOCK
+						    || errno == ECONNRESET || errno == ENOTCONN) {
 							socket_dead = 1;
 							hid_hotplug_context.monitor_dead = 1;
 						}
