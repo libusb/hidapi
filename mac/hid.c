@@ -264,8 +264,7 @@ static void register_error_str_vformat(wchar_t **error_str, const char *format, 
 
 /* True when the calling thread is HIDAPI's internal hotplug event thread; used
    to suppress writes to the global error string made from that thread (see the
-   definition after the hotplug context for the full rationale). May take the
-   hotplug mutex, so call before taking global_error_mutex. */
+   definition after the hotplug context for the full rationale). Takes no lock. */
 static int hid_internal_on_event_thread(void);
 
 /* Serializes the mutations of the global error string: the hotplug API is
@@ -555,9 +554,10 @@ struct hid_device_info_ex
    pthread_cond_wait() only with exactly one recursion level held (see
    hid_internal_hotplug_collect_thread()).
 
-   The thread-local event-thread marker is only a fast-path hint. startup_phase
-   is owned by the event thread; startup_ok/startup_error/thread_id are published
-   through the startup barrier.
+   The thread-local event-thread marker is only a fast-path hint. The OS thread
+   ID is published atomically, so identity checks never need the hotplug mutex.
+   startup_phase is owned by the event thread; startup_ok/startup_error are
+   published through the startup barrier.
    Before that barrier, the registering thread holds the mutex and is parked
    there, so the event thread has exclusive access to the context and
    MUST NOT take the mutex there (that would deadlock against the parked
@@ -571,7 +571,7 @@ static struct hid_hotplug_context {
 
 	/* Thread and RunLoop for the manager to work in */
 	pthread_t thread;
-	uint64_t thread_id; /* OS thread ID; disambiguates pthread_t reuse during join */
+	uint64_t thread_id; /* Atomic OS thread ID; retained until a successful join */
 	CFRunLoopRef run_loop;
 	CFRunLoopSourceRef source;
 	CFRunLoopSourceRef replay_source; /* Delivers the initial HID_API_HOTPLUG_ENUMERATE pass of new registrations */
@@ -622,11 +622,9 @@ static struct hid_hotplug_context {
    can ever lock a mutex that hid_exit() destroyed underneath it */
 static pthread_once_t hid_hotplug_init_once = PTHREAD_ONCE_INIT;
 
-/* Avoids locking during startup. Darwin may clear this TLS before application
-   thread-specific destructors, so a zero marker requires checking the record. */
+/* Fast-path hint. Darwin may clear this TLS before application thread-specific
+   destructors, so a zero marker requires checking the published OS thread ID. */
 static __thread unsigned char hid_hotplug_event_thread;
-
-static int hid_internal_hotplug_init(void);
 
 /* HIDAPI's public API contract (see hidapi.h) is that HIDAPI calls made from
    within a hotplug callback do not update the global error string: the callback
@@ -637,31 +635,22 @@ static int hid_internal_hotplug_init(void);
    failure paths report global errors; those writes are suppressed via this
    check in register_global_error()[_format]().
    Returns non-zero when the caller is the hotplug event thread, including during
-   its thread-specific destructors. The fallback takes the hotplug mutex; the
-   thread record is retained until a successful join is published under it. */
+   its thread-specific destructors. The fallback reads the OS thread ID with
+   acquire/release atomics, independently of the hotplug mutex: an application
+   may hold its own serialization mutex while a callback waits for it. The ID
+   remains published until a successful join, and does not depend on pthread_t
+   storage that the join may already have freed. Compiler atomics also support
+   building this file as C++. */
 static int hid_internal_on_event_thread(void)
 {
-	int on_event_thread = 0;
-	uint64_t thread_id;
+	uint64_t event_thread_id, thread_id;
 
 	if (hid_hotplug_event_thread)
 		return 1;
-	if (hid_internal_hotplug_init() != 0)
-		return 0;
 
-	pthread_mutex_lock(&hid_hotplug_context.mutex);
-	if (hid_hotplug_context.thread_needs_join) {
-		/* pthread_join() can free the pthread_t before the collector reacquires
-		   this mutex. During a join, compare only on the still-living event
-		   thread, identified by its OS ID, never on a thread reusing its handle. */
-		if (!hid_hotplug_context.join_in_progress
-			|| (pthread_threadid_np(NULL, &thread_id) == 0 && thread_id == hid_hotplug_context.thread_id)) {
-			on_event_thread = pthread_equal(pthread_self(), hid_hotplug_context.thread);
-		}
-	}
-	pthread_mutex_unlock(&hid_hotplug_context.mutex);
-
-	return on_event_thread;
+	event_thread_id = __atomic_load_n(&hid_hotplug_context.thread_id, __ATOMIC_ACQUIRE);
+	return event_thread_id != 0 && pthread_threadid_np(NULL, &thread_id) == 0
+		&& thread_id == event_thread_id;
 }
 
 static void hid_internal_hotplug_remove_postponed(void)
@@ -753,8 +742,10 @@ static int hid_internal_hotplug_collect_thread(void)
 
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
 		hid_hotplug_context.join_in_progress = 0;
-		if (result == 0)
+		if (result == 0) {
+			__atomic_store_n(&hid_hotplug_context.thread_id, 0, __ATOMIC_RELEASE);
 			hid_hotplug_context.thread_needs_join = 0;
+		}
 
 		/* Wake the threads waiting for this join to complete */
 		pthread_cond_broadcast(&hid_hotplug_context.join_done);
@@ -1784,16 +1775,18 @@ static void hid_internal_hotplug_thread_epilogue(void)
 
 static void* hotplug_thread(void* user_data)
 {
+	uint64_t thread_id = 0;
 	(void) user_data;
 
 	/* Mark this event thread as the very first action, before anything
 	   here can attempt a global-error write, so that any such write on this
 	   internal event thread - notably from a user callback that re-enters
 	   hid_hotplug_(de)register_callback() - is suppressed (see
-	   hid_internal_on_event_thread()). The marker avoids locking before the
-	   startup barrier; destructor re-entry can fall back to the thread record. */
+	   hid_internal_on_event_thread()). Destructor re-entry can fall back to the
+	   atomically published OS thread ID if Darwin has cleared the TLS marker. */
 	hid_hotplug_event_thread = 1;
-	pthread_threadid_np(NULL, &hid_hotplug_context.thread_id);
+	pthread_threadid_np(NULL, &thread_id);
+	__atomic_store_n(&hid_hotplug_context.thread_id, thread_id, __ATOMIC_RELEASE);
 
 	/* Startup phase: the registering thread holds the hotplug mutex and is
 	   parked at the startup barrier, so this thread has exclusive access to the

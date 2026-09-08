@@ -124,12 +124,13 @@ static void test_concurrent_registration(void)
 	CHECK(pthread_mutex_destroy(&gate.mutex) == 0);
 }
 
-enum callback_action { REMOVE_BY_RETURN, REMOVE_EXPLICITLY, WAIT_FOR_RELEASE, REMOVE_THEN_EXIT };
+enum callback_action { REMOVE_BY_RETURN, REMOVE_EXPLICITLY, WAIT_FOR_RELEASE, REMOVE_THEN_EXIT, WAIT_FOR_APP_MUTEX };
 
 static pthread_key_t callback_key;
 
 struct callback_state {
 	pthread_mutex_t mutex;
+	pthread_mutex_t api_mutex;
 	pthread_cond_t cond;
 	enum callback_action action;
 	int entered;
@@ -179,6 +180,25 @@ static int HID_API_CALL lifecycle_callback(hid_hotplug_callback_handle handle,
 	return state->action == REMOVE_BY_RETURN || state->action == REMOVE_THEN_EXIT;
 }
 
+static int HID_API_CALL serialized_callback(hid_hotplug_callback_handle handle,
+	struct hid_device_info *device, hid_hotplug_event event, void *user_data)
+{
+	struct callback_state *state = (struct callback_state *)user_data;
+	(void)handle;
+	(void)device;
+	CHECK(event == HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED);
+	CHECK(pthread_mutex_lock(&state->mutex) == 0);
+	state->entered = 1;
+	CHECK(pthread_cond_broadcast(&state->cond) == 0);
+	CHECK(pthread_mutex_unlock(&state->mutex) == 0);
+	/* The owner holds api_mutex across hid_init(); this callback already holds
+	   HIDAPI's hotplug mutex. General API calls are serialized by api_mutex. */
+	CHECK(pthread_mutex_lock(&state->api_mutex) == 0);
+	hid_close(NULL);
+	CHECK(pthread_mutex_unlock(&state->api_mutex) == 0);
+	return 0;
+}
+
 static void *deregister_worker(void *arg)
 {
 	struct callback_state *state = (struct callback_state *)arg;
@@ -197,7 +217,7 @@ static void *deregister_worker(void *arg)
 
 static void test_device_callback(enum callback_action action, const char *name)
 {
-	struct callback_state state = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER,
+	struct callback_state state = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER,
 		action, 0, 0, 0, 0, 0, 0, 0 };
 	struct hid_device_info *devices = hid_enumerate(0, 0);
 	unsigned short vendor_id, product_id;
@@ -210,14 +230,23 @@ static void test_device_callback(enum callback_action action, const char *name)
 		product_id = devices->product_id;
 		hid_free_enumeration(devices);
 		printf("%s (VID %04hx, PID %04hx)\n", name, vendor_id, product_id);
+		if (action == WAIT_FOR_APP_MUTEX)
+			CHECK(pthread_mutex_lock(&state.api_mutex) == 0);
 		CHECK(hid_hotplug_register_callback(vendor_id, product_id,
 			HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED, HID_API_HOTPLUG_ENUMERATE,
-			lifecycle_callback, &state, &state.handle) == 0);
+			action == WAIT_FOR_APP_MUTEX ? serialized_callback : lifecycle_callback,
+			&state, &state.handle) == 0);
 		CHECK(pthread_mutex_lock(&state.mutex) == 0);
 		wait_flag(&state.cond, &state.mutex, &state.entered);
 		CHECK(pthread_mutex_unlock(&state.mutex) == 0);
 
-		if (action == WAIT_FOR_RELEASE) {
+		if (action == WAIT_FOR_APP_MUTEX) {
+			/* The process alarm bounds this call if its error-clearing path tries
+			   to take the hotplug mutex held by the callback waiting for us. */
+			CHECK(hid_init() == 0);
+			CHECK(pthread_mutex_unlock(&state.api_mutex) == 0);
+			CHECK(hid_hotplug_deregister_callback(state.handle) == 0);
+		} else if (action == WAIT_FOR_RELEASE) {
 			pthread_t worker;
 			struct timespec deadline;
 			int result = 0;
@@ -254,6 +283,7 @@ static void test_device_callback(enum callback_action action, const char *name)
 		}
 	}
 	CHECK(pthread_cond_destroy(&state.cond) == 0);
+	CHECK(pthread_mutex_destroy(&state.api_mutex) == 0);
 	CHECK(pthread_mutex_destroy(&state.mutex) == 0);
 }
 
@@ -275,6 +305,7 @@ int main(void)
 	test_device_callback(REMOVE_EXPLICITLY, "Last callback explicit deregistration and restart");
 	test_device_callback(REMOVE_THEN_EXIT, "Last callback removal followed by owner-thread hid_exit");
 	test_device_callback(WAIT_FOR_RELEASE, "External deregistration waits for an in-flight callback");
+	test_device_callback(WAIT_FOR_APP_MUTEX, "Owner hid_init while a callback waits for the application mutex");
 	CHECK(pthread_key_delete(callback_key) == 0);
 	CHECK(hid_exit() == 0);
 	puts("Repeated owner-thread hid_init/register/hid_exit");
