@@ -264,8 +264,8 @@ static void register_error_str_vformat(wchar_t **error_str, const char *format, 
 
 /* True when the calling thread is HIDAPI's internal hotplug event thread; used
    to suppress writes to the global error string made from that thread (see the
-   definition after the hotplug context for the full rationale). The thread-local
-   read needs no lock. */
+   definition after the hotplug context for the full rationale). May take the
+   hotplug mutex, so call before taking global_error_mutex. */
 static int hid_internal_on_event_thread(void);
 
 /* Serializes the mutations of the global error string: the hotplug API is
@@ -280,15 +280,16 @@ static pthread_mutex_t global_error_mutex = PTHREAD_MUTEX_INITIALIZER;
  * Use register_global_error(NULL) to indicate "no error". */
 static void register_global_error(const char *msg)
 {
-	pthread_mutex_lock(&global_error_mutex);
 	/* Honor the cross-backend contract (see hidapi.h): a global-error write
 	   attempted on the internal hotplug event thread - e.g. from a
 	   hid_hotplug_(de)register_callback() call re-entered from within a user
 	   callback - must not touch the global error string. Per-device errors go
 	   through register_error_str() with a different target and are unaffected;
 	   only this process-global string is suppressed. */
-	if (!hid_internal_on_event_thread())
-		register_error_str(&last_global_error_str, msg);
+	if (hid_internal_on_event_thread())
+		return;
+	pthread_mutex_lock(&global_error_mutex);
+	register_error_str(&last_global_error_str, msg);
 	pthread_mutex_unlock(&global_error_mutex);
 }
 
@@ -296,11 +297,12 @@ static void register_global_error(const char *msg)
 static void register_global_error_format(const char *format, ...)
 {
 	va_list args;
+	/* See register_global_error(): suppressed on the internal event thread. */
+	if (hid_internal_on_event_thread())
+		return;
 	va_start(args, format);
 	pthread_mutex_lock(&global_error_mutex);
-	/* See register_global_error(): suppressed on the internal event thread. */
-	if (!hid_internal_on_event_thread())
-		register_error_str_vformat(&last_global_error_str, format, args);
+	register_error_str_vformat(&last_global_error_str, format, args);
 	pthread_mutex_unlock(&global_error_mutex);
 	va_end(args);
 }
@@ -553,8 +555,9 @@ struct hid_device_info_ex
    pthread_cond_wait() only with exactly one recursion level held (see
    hid_internal_hotplug_collect_thread()).
 
-   The event-thread marker is thread-local. startup_phase is owned by the event
-   thread, and startup_ok/startup_error are published through the startup barrier.
+   The thread-local event-thread marker is only a fast-path hint. startup_phase
+   is owned by the event thread; startup_ok/startup_error/thread_id are published
+   through the startup barrier.
    Before that barrier, the registering thread holds the mutex and is parked
    there, so the event thread has exclusive access to the context and
    MUST NOT take the mutex there (that would deadlock against the parked
@@ -568,6 +571,7 @@ static struct hid_hotplug_context {
 
 	/* Thread and RunLoop for the manager to work in */
 	pthread_t thread;
+	uint64_t thread_id; /* OS thread ID; disambiguates pthread_t reuse during join */
 	CFRunLoopRef run_loop;
 	CFRunLoopSourceRef source;
 	CFRunLoopSourceRef replay_source; /* Delivers the initial HID_API_HOTPLUG_ENUMERATE pass of new registrations */
@@ -618,9 +622,11 @@ static struct hid_hotplug_context {
    can ever lock a mutex that hid_exit() destroyed underneath it */
 static pthread_once_t hid_hotplug_init_once = PTHREAD_ONCE_INIT;
 
-/* Compiler TLS keeps this marker through pthread-specific destructors without
-   comparing a pthread_t whose lifetime may have ended in a concurrent join. */
+/* Avoids locking during startup. Darwin may clear this TLS before application
+   thread-specific destructors, so a zero marker requires checking the record. */
 static __thread unsigned char hid_hotplug_event_thread;
+
+static int hid_internal_hotplug_init(void);
 
 /* HIDAPI's public API contract (see hidapi.h) is that HIDAPI calls made from
    within a hotplug callback do not update the global error string: the callback
@@ -631,10 +637,31 @@ static __thread unsigned char hid_hotplug_event_thread;
    failure paths report global errors; those writes are suppressed via this
    check in register_global_error()[_format]().
    Returns non-zero when the caller is the hotplug event thread, including during
-   its thread-specific destructors. The thread-local read needs no lock. */
+   its thread-specific destructors. The fallback takes the hotplug mutex; the
+   thread record is retained until a successful join is published under it. */
 static int hid_internal_on_event_thread(void)
 {
-	return hid_hotplug_event_thread;
+	int on_event_thread = 0;
+	uint64_t thread_id;
+
+	if (hid_hotplug_event_thread)
+		return 1;
+	if (hid_internal_hotplug_init() != 0)
+		return 0;
+
+	pthread_mutex_lock(&hid_hotplug_context.mutex);
+	if (hid_hotplug_context.thread_needs_join) {
+		/* pthread_join() can free the pthread_t before the collector reacquires
+		   this mutex. During a join, compare only on the still-living event
+		   thread, identified by its OS ID, never on a thread reusing its handle. */
+		if (!hid_hotplug_context.join_in_progress
+			|| (pthread_threadid_np(NULL, &thread_id) == 0 && thread_id == hid_hotplug_context.thread_id)) {
+			on_event_thread = pthread_equal(pthread_self(), hid_hotplug_context.thread);
+		}
+	}
+	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+
+	return on_event_thread;
 }
 
 static void hid_internal_hotplug_remove_postponed(void)
@@ -666,7 +693,7 @@ static void hid_internal_hotplug_remove_postponed(void)
 
 /* Releases the startup barrier and run loop references in the event thread's
    epilogue, with the hotplug mutex held. Join ownership remains with the
-   collector until pthread_join() completes, including thread-specific destructors.
+   collector until pthread_join() succeeds, including thread-specific destructors.
    Both participants have left the startup barrier by then: the registering
    thread holds the mutex across the barrier and releases it only afterwards, so
    acquiring the mutex proves it is out. */
@@ -694,9 +721,12 @@ static void hid_internal_hotplug_release_thread(void)
    Must be called with the hotplug mutex NOT held by the calling thread, except
    from the event thread itself, where it is a guaranteed no-op (the
    hid_internal_on_event_thread() check below) - that keeps pthread_cond_wait() from
-   ever being reached with the recursive mutex locked more than once. */
-static void hid_internal_hotplug_collect_thread(void)
+   ever being reached with the recursive mutex locked more than once.
+   Returns the pthread_join() error, if any, without releasing the thread record. */
+static int hid_internal_hotplug_collect_thread(void)
 {
+	int result = 0;
+
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 
 	while (hid_hotplug_context.thread_needs_join
@@ -719,17 +749,21 @@ static void hid_internal_hotplug_collect_thread(void)
 		   mutex to finish an in-flight callback dispatch (issue #794 and the
 		   matching cross-thread deadlock). No new event thread can be started
 		   while thread_needs_join is set, so the thread handle is stable. */
-		pthread_join(hid_hotplug_context.thread, NULL);
+		result = pthread_join(hid_hotplug_context.thread, NULL);
 
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
 		hid_hotplug_context.join_in_progress = 0;
-		hid_hotplug_context.thread_needs_join = 0;
+		if (result == 0)
+			hid_hotplug_context.thread_needs_join = 0;
 
 		/* Wake the threads waiting for this join to complete */
 		pthread_cond_broadcast(&hid_hotplug_context.join_done);
+		if (result != 0)
+			break;
 	}
 
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
+	return result;
 }
 
 /* Must be called with the hotplug mutex held */
@@ -827,14 +861,14 @@ static int hid_internal_hotplug_init(void)
    that a concurrent hid_hotplug_register_callback()/hid_hotplug_deregister_callback()
    fails instead of racing the rest of hid_exit(); hid_internal_hotplug_exit_done()
    clears it once hid_exit() is finished. */
-static void hid_internal_hotplug_exit(void)
+static int hid_internal_hotplug_exit(void)
 {
 	struct hid_hotplug_callback **current;
 
 	if (hid_internal_hotplug_init() != 0) {
 		/* The hotplug mutex could not be created: nothing can ever have been
 		   registered, and there is nothing to tear down */
-		return;
+		return 0;
 	}
 
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
@@ -854,12 +888,14 @@ static void hid_internal_hotplug_exit(void)
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 
 	/* Join the stopped event thread, with the hotplug mutex released */
-	hid_internal_hotplug_collect_thread();
+	if (hid_internal_hotplug_collect_thread() != 0)
+		return -1;
 
 	/* The hotplug mutex is deliberately NOT destroyed: another thread may be
 	   about to lock it (it only has to observe `exiting` afterwards), and
 	   destroying a mutex under it would be undefined behavior. It costs nothing
 	   to keep it for the lifetime of the process. */
+	return 0;
 }
 
 /* Re-opens the hotplug API after hid_exit() has finished. */
@@ -906,7 +942,10 @@ int HID_API_EXPORT hid_exit(void)
 	   is safe even when nothing was initialized. Set `exiting` under the hotplug
 	   mutex before destroying hid_mgr, so registration cannot re-enter hid_init()
 	   during the teardown below. */
-	hid_internal_hotplug_exit();
+	if (hid_internal_hotplug_exit() != 0) {
+		register_global_error("hid_exit: failed to join the hotplug events thread");
+		return -1;
+	}
 
 	if (hid_mgr) {
 		/* Close the HID manager. */
@@ -1739,7 +1778,7 @@ static void hid_internal_hotplug_thread_epilogue(void)
 
 	hid_internal_hotplug_release_thread();
 
-	/* The collector still owns the thread record until pthread_join() returns. */
+	/* The collector still owns the thread record until pthread_join() succeeds. */
 	pthread_mutex_unlock(&hid_hotplug_context.mutex);
 }
 
@@ -1751,9 +1790,10 @@ static void* hotplug_thread(void* user_data)
 	   here can attempt a global-error write, so that any such write on this
 	   internal event thread - notably from a user callback that re-enters
 	   hid_hotplug_(de)register_callback() - is suppressed (see
-	   hid_internal_on_event_thread()). The marker remains set through pthread
-	   destructors and is private to this thread; no lock is needed. */
+	   hid_internal_on_event_thread()). The marker avoids locking before the
+	   startup barrier; destructor re-entry can fall back to the thread record. */
 	hid_hotplug_event_thread = 1;
+	pthread_threadid_np(NULL, &hid_hotplug_context.thread_id);
 
 	/* Startup phase: the registering thread holds the hotplug mutex and is
 	   parked at the startup barrier, so this thread has exclusive access to the
@@ -1991,7 +2031,11 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 		/* Make sure the stop was actually requested (idempotent) */
 		hid_internal_hotplug_cleanup();
 		pthread_mutex_unlock(&hid_hotplug_context.mutex);
-		hid_internal_hotplug_collect_thread();
+		if (hid_internal_hotplug_collect_thread() != 0) {
+			register_global_error("hid_hotplug_register_callback: failed to join the hotplug events thread");
+			free(hotplug_cb);
+			return -1;
+		}
 		pthread_mutex_lock(&hid_hotplug_context.mutex);
 
 		/* hid_exit() may have started while the mutex was released */
@@ -2218,7 +2262,10 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_call
 	   released. A no-op when called from within a callback (the event thread
 	   cannot join itself): its epilogue releases the resources, and the next
 	   application-thread collector joins it before reusing the thread record. */
-	hid_internal_hotplug_collect_thread();
+	if (hid_internal_hotplug_collect_thread() != 0) {
+		register_global_error("hid_hotplug_deregister_callback: failed to join the hotplug events thread");
+		return -1;
+	}
 
 	return result;
 }
