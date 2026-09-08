@@ -2,7 +2,7 @@
 
 This directory contains a small **virtual HID minidriver** used only by the
 HIDAPI virtual-device tests on Windows (the `winapi` backend's
-`DeviceIO_winapi` test). It is **not** part of the HIDAPI library: it is a
+`DeviceIO_winapi` and `Hotplug_winapi` tests). It is **not** part of the HIDAPI library: it is a
 standalone UMDF 2 driver that the `win-vhid-test` CI job builds, self-signs and
 installs out-of-band, runs the test against, then removes.
 
@@ -38,4 +38,5 @@ presence in the source tree is therefore mere aggregation, not a combined work.
 |------|--------|
 | `vhidmini.c` | **Modified** — default report descriptor matches the Linux uhid test device byte-for-byte; implements the HIDAPI pre-recorded "scenario" protocol (a Feature `SET_REPORT` command makes the device replay a canned input report; see `../../test_virtual_device.h`). |
 | `vhidmini.h` | **Modified** — supporting declarations for the scenario protocol. |
-| `common.h`, `util.c`, `vhidmini.rc`, `VhidminiUm.inx`, `VhidminiUm.vcxproj` | Used essentially as-is (no HIDAPI-specific changes beyond what's needed to build the standalone `VhidminiUm.dll`). |
+| `common.h` | **Modified** — test serial-number declarations. |
+| `util.c`, `vhidmini.rc`, `VhidminiUm.inx`, `VhidminiUm.vcxproj` | Used essentially as-is (no HIDAPI-specific changes beyond what's needed to build the standalone `VhidminiUm.dll`). |

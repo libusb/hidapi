@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <wchar.h>
 
 #include <hidapi.h>
 
@@ -108,13 +110,14 @@ static int HID_API_CALL cb_noop(hid_hotplug_callback_handle callback_handle,
 /* ------------------------------------------------------------------ */
 /* T4 doubles as the support probe: hid_hotplug_register_callback() as
    the very FIRST library call must initialize the library implicitly
-   and succeed. If it fails, this backend/host has no hotplug support
-   (e.g. a libusb without LIBUSB_CAP_HAS_HOTPLUG) and the whole test is
-   skipped: the libusb backend checks the capability before validating
-   arguments, so not even T1 is meaningful without support. */
+   and succeed. If it still fails after an explicit hid_init(), this
+   backend/host has a hotplug capability or setup failure and the whole
+   test is skipped: the libusb backend checks the capability before
+   validating arguments, so not even T1 is meaningful without support. */
 static int t4_implicit_init_probe(int *supported)
 {
 	hid_hotplug_callback_handle handle = -123;
+	const wchar_t *error;
 	int rc;
 
 	*supported = 0;
@@ -122,7 +125,31 @@ static int t4_implicit_init_probe(int *supported)
 	step("register as the very first library call");
 	rc = hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_noop, NULL, &handle);
 	if (rc != 0) {
-		printf("    hotplug reported unsupported here (rc=%d) - skipping\n", rc);
+		error = hid_error(NULL);
+		printf("    first registration failed (rc=%d): %ls; retry after hid_init()\n",
+		       rc, error != NULL ? error : L"(no error string)");
+		fflush(stdout);
+		if (hid_init() != 0) {
+			error = hid_error(NULL);
+			printf("    hid_init() failed after the first registration failure: %ls\n",
+			       error != NULL ? error : L"(no error string)");
+			fflush(stdout);
+			g_failures++;
+			return -1;
+		}
+		handle = -123;
+		rc = hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_noop, NULL, &handle);
+		if (rc == 0) {
+			printf("    registration succeeded after explicit initialization\n");
+			fflush(stdout);
+			*supported = 1;
+			CHECK(hid_hotplug_deregister_callback(handle) == 0);
+			g_failures++;
+			return -1;
+		}
+		error = hid_error(NULL);
+		printf("    registration still failed after explicit initialization (rc=%d): %ls - skipping\n",
+		       rc, error != NULL ? error : L"(no error string)");
 		fflush(stdout);
 		return 0;
 	}
@@ -136,17 +163,40 @@ static int t4_implicit_init_probe(int *supported)
 
 /* ------------------------------------------------------------------ */
 /* T1: invalid registration arguments -> -1, *callback_handle zeroed,
-   and a retrievable (non-NULL) global error string. The exact error
-   text is backend-specific, so only its existence is asserted. */
+   and a global error string different from the no-error baseline. The
+   exact error text is backend-specific. */
+
+static wchar_t *copy_global_error(void)
+{
+	const wchar_t *error = hid_error(NULL);
+	size_t length;
+	wchar_t *copy;
+
+	if (error == NULL)
+		return NULL;
+	length = wcslen(error);
+	copy = (wchar_t *)malloc((length + 1) * sizeof(*copy));
+	if (copy != NULL)
+		memcpy(copy, error, (length + 1) * sizeof(*copy));
+	return copy;
+}
 
 static int t1_check_invalid(unsigned short vid, unsigned short pid,
                             int events, int flags, hid_hotplug_callback_fn cb)
 {
 	hid_hotplug_callback_handle handle = 12345; /* poisoned: must be zeroed */
-	int rc = hid_hotplug_register_callback(vid, pid, events, flags, cb, NULL, &handle);
-	CHECK(rc == -1);
-	CHECK(handle == 0);
-	CHECK(hid_error(NULL) != NULL);
+	wchar_t *baseline;
+	const wchar_t *error;
+	int rc, valid;
+
+	CHECK(hid_init() == 0);
+	baseline = copy_global_error();
+	CHECK(baseline != NULL);
+	rc = hid_hotplug_register_callback(vid, pid, events, flags, cb, NULL, &handle);
+	error = hid_error(NULL);
+	valid = rc == -1 && handle == 0 && error != NULL && wcscmp(error, baseline) != 0;
+	free(baseline);
+	CHECK(valid);
 	return 0;
 }
 
@@ -194,29 +244,63 @@ static int t2_handle_properties(hid_hotplug_callback_handle *out_stale)
 }
 
 /* ------------------------------------------------------------------ */
-/* T3: deregistering 0, negative, never-issued and already-deregistered
+/* T3: deregistering 0, negative, not-registered and already-deregistered
    handles fails with -1, sets an error string and leaves a
    still-registered callback untouched. */
+static int t3_check_invalid(hid_hotplug_callback_handle handle)
+{
+	wchar_t *baseline;
+	const wchar_t *error;
+	int rc, valid;
+
+	CHECK(hid_init() == 0);
+	baseline = copy_global_error();
+	CHECK(baseline != NULL);
+	rc = hid_hotplug_deregister_callback(handle);
+	error = hid_error(NULL);
+	valid = rc == -1 && error != NULL && wcscmp(error, baseline) != 0;
+	free(baseline);
+	CHECK(valid);
+	return 0;
+}
+
 static int t3_stale_handles(hid_hotplug_callback_handle stale)
 {
 	hid_hotplug_callback_handle live = 0;
+	hid_hotplug_callback_handle unregistered;
 
 	step("register a live callback");
 	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_noop, NULL, &live) == 0);
 	CHECK(live > 0);
+	unregistered = live == INT_MAX ? INT_MAX - 1 : INT_MAX;
 
 	step("deregister invalid handles");
-	CHECK(hid_hotplug_deregister_callback(0) == -1);
-	CHECK(hid_error(NULL) != NULL);
-	CHECK(hid_hotplug_deregister_callback(-1) == -1);
-	CHECK(hid_error(NULL) != NULL);
-	CHECK(hid_hotplug_deregister_callback(live + 1000) == -1); /* never issued */
-	CHECK(hid_error(NULL) != NULL);
-	CHECK(hid_hotplug_deregister_callback(stale) == -1); /* already deregistered */
-	CHECK(hid_error(NULL) != NULL);
+	if (t3_check_invalid(0) != 0)
+		return -1;
+	if (t3_check_invalid(-1) != 0)
+		return -1;
+	if (t3_check_invalid(unregistered) != 0) /* not a registered handle */
+		return -1;
+	if (t3_check_invalid(stale) != 0) /* already deregistered */
+		return -1;
 
 	step("the live callback is unaffected");
 	CHECK(hid_hotplug_deregister_callback(live) == 0);
+	return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* T19: callback_handle is optional for a successful registration. */
+static int t19_null_output_handle(void)
+{
+	int user_data = 0;
+
+	step("register with a NULL callback-handle pointer");
+	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0,
+	                                    cb_noop, &user_data, NULL) == 0);
+	step("clean up the anonymous registration with hid_exit()");
+	CHECK(hid_exit() == 0);
+	CHECK(hid_init() == 0);
 	return 0;
 }
 
@@ -231,14 +315,24 @@ static int t5_hid_exit_teardown(void)
 	int i;
 
 	step("register two callbacks");
-	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_record, NULL, &ha) == 0);
-	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_record, NULL, &hb) == 0);
+	test_mutex_lock(&g_lock);
+	g_exit_returned = 0;
+	g_fired_after_exit = 0;
+	test_mutex_unlock(&g_lock);
+	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, HID_API_HOTPLUG_ENUMERATE,
+	                                    cb_record, NULL, &ha) == 0);
+	test_mutex_lock(&g_lock);
+	g_exit_returned = 0;
+	test_mutex_unlock(&g_lock);
+	CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, HID_API_HOTPLUG_ENUMERATE,
+	                                    cb_record, NULL, &hb) == 0);
 
 	step("hid_exit() with callbacks still registered");
 	CHECK(hid_exit() == 0);
 	test_mutex_lock(&g_lock);
 	g_exit_returned = 1;
 	test_mutex_unlock(&g_lock);
+	CHECK(hid_hotplug_deregister_callback(ha) == -1);
 
 	step("old handles are invalid after re-init");
 	CHECK(hid_init() == 0);
@@ -249,19 +343,31 @@ static int t5_hid_exit_teardown(void)
 	test_sleep_ms(SETTLE_MS);
 	test_mutex_lock(&g_lock);
 	i = g_fired_after_exit;
+	printf("    callback invocations: %d\n", g_cb_invocations);
+	fflush(stdout);
 	test_mutex_unlock(&g_lock);
 	CHECK(i == 0);
 
 	step("register -> immediate hid_exit stress loop");
 	for (i = 0; i < 50; i++) {
 		hid_hotplug_callback_handle h = 0;
-		CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_record, NULL, &h) == 0);
+		test_mutex_lock(&g_lock);
+		g_exit_returned = 0;
+		test_mutex_unlock(&g_lock);
+		CHECK(hid_hotplug_register_callback(0, 0, ALL_EVENTS, HID_API_HOTPLUG_ENUMERATE,
+		                                    cb_record, NULL, &h) == 0);
 		CHECK(h > 0);
 		CHECK(hid_exit() == 0);
+		test_mutex_lock(&g_lock);
+		g_exit_returned = 1;
+		test_mutex_unlock(&g_lock);
 	}
 	test_mutex_lock(&g_lock);
-	g_exit_returned = 0;
+	i = g_fired_after_exit;
+	printf("    callback invocations: %d\n", g_cb_invocations);
+	fflush(stdout);
 	test_mutex_unlock(&g_lock);
+	CHECK(i == 0);
 	CHECK(hid_init() == 0);
 	return 0;
 }
@@ -274,7 +380,7 @@ static int t5_hid_exit_teardown(void)
    hotplug API the application must serialize itself. */
 
 typedef struct churn_ctx {
-	volatile int stop;
+	test_atomic_int stop;
 	long iterations;
 	long failures;
 } churn_ctx;
@@ -283,7 +389,7 @@ static void churn_thread_fn(void *arg)
 {
 	churn_ctx *ctx = (churn_ctx *)arg;
 
-	while (!ctx->stop) {
+	while (!test_atomic_load(&ctx->stop)) {
 		hid_hotplug_callback_handle h = 0;
 		if (hid_hotplug_register_callback(0, 0, ALL_EVENTS, 0, cb_noop, NULL, &h) != 0) {
 			ctx->failures++;
@@ -294,6 +400,15 @@ static void churn_thread_fn(void *arg)
 		if (hid_hotplug_deregister_callback(h) != 0)
 			ctx->failures++;
 		ctx->iterations++;
+	}
+}
+
+static void join_churn_thread_or_abort(test_thread *thread, int timeout_ms)
+{
+	if (test_thread_join_timeout(thread, timeout_ms) != 0) {
+		printf("    churn thread did not stop within %d ms\n", timeout_ms);
+		fflush(stdout);
+		abort();
 	}
 }
 
@@ -308,18 +423,18 @@ static int t16_thread_churn(void)
 	step("start two register/deregister churn threads");
 	CHECK(test_thread_start(&threads[0], churn_thread_fn, &ctxs[0]) == 0);
 	if (test_thread_start(&threads[1], churn_thread_fn, &ctxs[1]) != 0) {
-		ctxs[0].stop = 1;
-		(void)test_thread_join_timeout(&threads[0], 10000);
+		test_atomic_store(&ctxs[0].stop, 1);
+		join_churn_thread_or_abort(&threads[0], 10000);
 		CHECK(!"failed to start the second churn thread");
 	}
 
 	test_sleep_ms(CHURN_MS);
-	ctxs[0].stop = 1;
-	ctxs[1].stop = 1;
+	test_atomic_store(&ctxs[0].stop, 1);
+	test_atomic_store(&ctxs[1].stop, 1);
 
 	step("join the churn threads");
-	CHECK(test_thread_join_timeout(&threads[0], 30000) == 0);
-	CHECK(test_thread_join_timeout(&threads[1], 30000) == 0);
+	join_churn_thread_or_abort(&threads[0], 30000);
+	join_churn_thread_or_abort(&threads[1], 30000);
 
 	for (i = 0; i < 2; i++) {
 		printf("    thread %d: %ld iterations, %ld failures\n",
@@ -350,11 +465,12 @@ int main(void)
 	printf("T4: implicit init (register as first library call)\n");
 	fflush(stdout);
 	rc = t4_implicit_init_probe(&supported);
-	if (!supported) {
-		test_mutex_destroy(&g_lock);
-		return EXIT_SKIP;
-	}
 	report("T4 implicit_init", rc);
+	if (!supported) {
+		hid_exit();
+		test_mutex_destroy(&g_lock);
+		return rc == 0 ? EXIT_SKIP : EXIT_FAILURE;
+	}
 
 	printf("T1: registration argument validation\n");
 	fflush(stdout);
@@ -367,6 +483,10 @@ int main(void)
 	printf("T3: stale/unknown handle deregistration\n");
 	fflush(stdout);
 	report("T3 stale_handles", t3_stale_handles(stale));
+
+	printf("T19: NULL callback-handle output\n");
+	fflush(stdout);
+	report("T19 null_output_handle", t19_null_output_handle());
 
 	printf("T5: hid_exit teardown with registered callbacks\n");
 	fflush(stdout);

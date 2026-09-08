@@ -14,8 +14,25 @@ modprobe dummy_hcd || true
 modprobe raw_gadget || true
 ls -l /dev/raw-gadget || true
 
-ctest --test-dir build --output-on-failure
-rc=$?
+rc=0
+for test in DeviceIO_libusb HotplugAPI_libusb Hotplug_libusb; do
+    listed=$(ctest --test-dir build -N -R "^${test}$" 2>&1)
+    listed_rc=$?
+    printf '%s\n' "$listed"
+    if [ "$listed_rc" -ne 0 ] || ! printf '%s\n' "$listed" | grep -q 'Total Tests: 1'; then
+        echo "Required CTest case '${test}' was not found."
+        rc=1
+        continue
+    fi
+
+    result=$(ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build -R "^${test}$" --output-on-failure 2>&1)
+    result_rc=$?
+    printf '%s\n' "$result"
+    if [ "$result_rc" -ne 0 ] || ! printf '%s\n' "$result" | grep -Eq "^[[:space:]]*1/1 Test #[0-9]+: ${test} .* [P]assed[[:space:]]+[0-9]+([.][0-9]+)?[[:space:]]+sec[[:space:]]*$"; then
+        echo "Required CTest case '${test}' did not pass."
+        rc=1
+    fi
+done
 
 echo "=== diag ==="
 lsmod | grep -E "raw_gadget|dummy_hcd|udc" || true

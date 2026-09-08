@@ -18,9 +18,9 @@ Environment:
 
 /*
  * Modified by the libusb/hidapi team for the HIDAPI virtual-device tests
- * (implements the HIDAPI "scenario" protocol; see
- * src/tests/test_virtual_device.h). Derived from the vhidmini2 sample in
- * microsoft/Windows-driver-samples, which is licensed under the Microsoft
+ * (implements the HIDAPI "scenario" protocol used by test_device_io.c and
+ * test_hotplug.c; see src/tests/test_virtual_device.h). Derived from the
+ * vhidmini2 sample in microsoft/Windows-driver-samples, which is licensed under the Microsoft
  * Public License (MS-PL); see README.md and LICENSE.txt in this directory.
  */
 
