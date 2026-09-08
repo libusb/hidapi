@@ -28,12 +28,14 @@
  * (it only ever calls public hid_*() functions); all device behaviour lives in
  * the per-backend provider:
  *
- *   - Linux:   test_virtual_device_uhid.c   (kernel /dev/uhid -> hidraw)
- *   - Windows: test_virtual_device_win.c     (modified vhidmini2 UMDF driver)
- *   - others:  (future)
+ *   - Linux / hidraw: test_virtual_device_uhid.c       (kernel /dev/uhid)
+ *   - Linux / libusb: test_virtual_device_rawgadget.c  (/dev/raw-gadget + dummy_hcd)
+ *   - Windows:        test_virtual_device_win.c        (modified vhidmini2 UMDF driver)
+ *   - macOS:          test_virtual_device_mac.c        (IOHIDUserDevice)
  *
- * The provider only needs to implement create / open / destroy; the scenario
- * playback is part of the virtual device (the uhid event pump, or the driver).
+ * The provider implements create / open / destroy / unplug / replug / trigger;
+ * scenario playback is part of the virtual device (the uhid event pump, or the
+ * driver).
  */
 
 #ifndef HIDAPI_TEST_VIRTUAL_DEVICE_H__
@@ -94,6 +96,26 @@ hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeou
 
 /* Destroy the virtual device and free all resources. */
 void test_virtual_device_destroy(test_virtual_device *dev);
+
+/*
+ * Make the device disappear from the system (as if physically unplugged)
+ * WITHOUT destroying the test_virtual_device context: the context stays valid
+ * and the device can be re-plugged later with test_virtual_device_replug().
+ * Used by the hotplug tests to generate disconnect/reconnect events.
+ *
+ * Returns TEST_VDEV_OK on success, TEST_VDEV_UNAVAILABLE when this provider
+ * cannot toggle device presence (the caller should then skip the test), or
+ * TEST_VDEV_ERROR on a hard failure.
+ */
+int test_virtual_device_unplug(test_virtual_device *dev);
+
+/*
+ * Make an unplugged device reappear, with the same VID/PID/serial (the
+ * platform device path MAY differ from the previous appearance). Only valid
+ * after a successful test_virtual_device_unplug(). Same return codes as
+ * test_virtual_device_unplug().
+ */
+int test_virtual_device_replug(test_virtual_device *dev);
 
 /*
  * Trigger a pre-recorded scenario on the device by sending the given command
