@@ -1432,6 +1432,9 @@ static int hid_internal_hotplug_exit(void)
 		return -1;
 	}
 	if (wait_error != ERROR_SUCCESS) {
+		/* Report the OS synchronization failure with -1 even when the polling
+		   fallback completed teardown without leaking an object or notification.
+		   The wait anomaly is worth surfacing; callers can re-initialize normally. */
 		register_global_winapi_error_code(wait_error, L"hid_exit/WaitForSingleObject");
 		return -1;
 	}
@@ -2096,7 +2099,20 @@ static int hid_internal_hotplug_copy_replay(const struct hid_hotplug_callback *c
 
 /* Stage the new snapshot and any OOM repair under the critical section. No
    cache or event queue changes until every allocation has succeeded. Recovered
-   arrivals wait for a dispatch boundary, including after reentrant repair. */
+   arrivals wait for a dispatch boundary, including after reentrant repair.
+
+   The repairing callback receives the recovered device through its own snapshot;
+   earlier callbacks receive it through the recovered-event queue drained at the
+   next dispatch boundary. Which sees it first depends on whether repair was
+   triggered from a replay callback, a live-dispatch callback or an application
+   thread. All orders satisfy the contract: the snapshot is delivered later,
+   and each recovered event's recipients are called in registration order.
+
+   Recovery reports ARRIVED to every earlier matching callback armed at repair
+   time, even one registered without HID_API_HOTPLUG_ENUMERATE after the lost
+   arrival, provided it remains armed for ARRIVED at delivery. The lost arrival
+   cannot be ordered against intervening registrations, so consistent pairing
+   with the cached device's later LEFT is preferred over precision. */
 static int hid_internal_hotplug_snapshot(struct hid_hotplug_callback *callback)
 {
 	struct hid_hotplug_recovered_event *repairs = NULL;
@@ -2263,7 +2279,10 @@ static DWORD WINAPI hid_internal_notify_callback(HCMNOTIFICATION notify, PVOID c
 			/* This connection is already known: registration enumeration or OOM
 			   repair cached it while the OS had an arrival queued (see
 			   hid_internal_hotplug_is_cached). Drop it whole: no second cache
-			   entry, no second dispatch. */
+			   entry, no second dispatch. OOM repair queues ARRIVED for every earlier
+			   matching callback armed at repair time, including registrations without
+			   HID_API_HOTPLUG_ENUMERATE made after the lost arrival; see snapshot above
+			   for the delivery conditions and pairing rationale. */
 		} else {
 			/* Device description stays locked to preserve cache/delivery ordering.
 			   Registration, deregistration and hid_exit latency can include driver
