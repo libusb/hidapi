@@ -436,9 +436,12 @@ extern "C" {
 			hid_enumerate / hid_open* / hid_close / hid_error(NULL) across all
 			threads, including HIDAPI's internal event context (hid_exit()
 			additionally must never be called from within the callback
-			itself - see below). Functions in this group that report global
-			errors set hid_error(NULL) as usual, which is why they must be
-			serialized against it. If your application
+			itself - see below). Functions in this group may update the
+			global error string, which is why they must be serialized
+			against hid_error(NULL); whether a call made from the internal
+			event context records a diagnostic at all is not portable (some
+			backends suppress every global-error write in that context), so
+			rely on return values there. If your application
 			already calls those functions only from one thread, calling them
 			from the internal event context is therefore
 			UNSAFE unless the application adds synchronisation itself. The
@@ -616,7 +619,8 @@ extern "C" {
 				return and the zeroed @p callback_handle are guaranteed.
 
 			@note On backends without hotplug support (e.g. NetBSD)
-				this function always returns -1. On Windows, hotplug
+				this function always returns -1 and leaves the global
+				error string untouched. On Windows, hotplug
 				requires Windows 8 or later (CM_Register_Notification): on
 				older versions hid_init() succeeds but this function returns
 				-1 with an explanatory hid_error(NULL) message. On the libusb
