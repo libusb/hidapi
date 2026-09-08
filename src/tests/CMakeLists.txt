@@ -1,6 +1,6 @@
-# Backend-generic HIDAPI (unit-)tests, run against a virtual HID device.
+# Backend-generic device-I/O tests and macOS hotplug lifecycle tests.
 #
-# The tests are written against the public HIDAPI API and the backend-agnostic
+# The device-I/O tests use the public HIDAPI API and the backend-agnostic
 # test_virtual_device interface (test_virtual_device.h), so the same test runs
 # against any backend for which a virtual-device provider exists. Each provider
 # implements the pre-recorded "scenario" protocol: the test triggers a scenario
@@ -170,4 +170,16 @@ if(APPLE AND TARGET hidapi_darwin)
         "-framework IOKit" "-framework CoreFoundation")
     target_link_libraries(Hotplug_darwin PRIVATE
         "-framework IOKit" "-framework CoreFoundation")
+
+    add_executable(HotplugLifecycle_darwin test_hotplug_mac.c)
+    set_target_properties(HotplugLifecycle_darwin PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED TRUE
+    )
+    target_link_libraries(HotplugLifecycle_darwin PRIVATE hidapi_darwin Threads::Threads)
+    if(HIDAPI_ENABLE_ASAN)
+        target_link_options(HotplugLifecycle_darwin PRIVATE -fsanitize=address)
+    endif()
+    add_test(NAME HotplugLifecycle_darwin COMMAND HotplugLifecycle_darwin)
+    set_tests_properties(HotplugLifecycle_darwin PROPERTIES TIMEOUT 60)
 endif()
