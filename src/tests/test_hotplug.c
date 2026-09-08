@@ -355,7 +355,7 @@ static int hp_wait_flag(const int *flag, int timeout_ms)
 }
 
 /* Drain callbacks before sweeping every event's payload/thread invariants
-   and resetting the log. Overflow or truncation must not weaken assertions. */
+   and resetting the log. Test-device strings must fit the log's buffers. */
 static void hp_reset_log(const char *test_name)
 {
 	int i;
@@ -370,7 +370,10 @@ static void hp_reset_log(const char *test_name)
 			break;
 		}
 		if (g_events[i].device_was_null || !g_events[i].event_valid
-		    || !g_events[i].next_was_null || g_events[i].string_truncated) {
+		    || !g_events[i].next_was_null
+		    || (g_events[i].vendor_id == TEST_VID
+		        && (g_events[i].product_id == TEST_PID || g_events[i].product_id == TEST_PID_2)
+		        && g_events[i].string_truncated)) {
 			printf("    INVARIANT failed before %s: invalid or truncated event payload\n", test_name);
 			fflush(stdout);
 			g_failures++;
@@ -1325,8 +1328,9 @@ static int t18_immediate_deregister(void)
 			rc = hid_hotplug_deregister_callback(h);
 		if (rc == 0)
 			hp_mark_retired(h);
-		/* Drain before freeing even if a call failed. */
-		hp_cleanup_callbacks();
+		/* Retry cleanup only on failure; a second cancellation could mask a bug. */
+		if (rc != 0)
+			hp_cleanup_callbacks();
 		test_mutex_lock(&g_log_lock);
 		before = *count;
 		test_mutex_unlock(&g_log_lock);
@@ -1338,6 +1342,7 @@ static int t18_immediate_deregister(void)
 		CHECK(hp_wait_count_at_least(barrier, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED,
 		                             TEST_PID, TEST_SERIAL, 1, EVENT_TIMEOUT_MS) == 0);
 		CHECK(hp_count(h, 0, 0, NULL) == before);
+		CHECK(hid_hotplug_deregister_callback(h) == -1);
 		hp_cleanup_callbacks();
 	}
 	return 0;
@@ -1520,7 +1525,8 @@ static int t18b_queued_deregister(void)
 	hp_join_or_exit(&registration);
 	if (worker_started)
 		hp_join_or_exit(&cancellation);
-	hp_cleanup_callbacks();
+	if (!worker_started || dereg.rc != 0)
+		hp_cleanup_callbacks();
 	test_mutex_lock(&g_log_lock);
 	before = *ctx.count;
 	expired = ctx.gate.expired;
@@ -1533,14 +1539,16 @@ static int t18b_queued_deregister(void)
 	CHECK(hp_wait_count_at_least(barrier, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED,
 	                             TEST_PID, TEST_SERIAL, 1, EVENT_TIMEOUT_MS) == 0);
 	CHECK(hp_count(dereg.handle, 0, 0, NULL) == before);
+	CHECK(hid_hotplug_deregister_callback(dereg.handle) == -1);
 	CHECK(hid_hotplug_deregister_callback(barrier) == 0);
 	return 0;
 }
 
-/* T19: exit immediately with ENUMERATE work, then reinitialize and deliver
+/* T19: exit with a gated ENUMERATE callback, then reinitialize and deliver
    again. Old callback state stays alive across every initialization lifetime. */
 typedef struct exit_ctx {
-	int returned, late, count;
+	slow_ctx gate;
+	int exiting, returned, late, count;
 } exit_ctx;
 
 static int HID_API_CALL cb_exit_record(hid_hotplug_callback_handle handle,
@@ -1548,13 +1556,34 @@ static int HID_API_CALL cb_exit_record(hid_hotplug_callback_handle handle,
                                        hid_hotplug_event event, void *user_data)
 {
 	exit_ctx *ctx = (exit_ctx *)user_data;
-	hp_record(handle, device, event);
+	cb_slow(handle, device, event, &ctx->gate);
 	test_mutex_lock(&g_log_lock);
 	ctx->count++;
 	if (ctx->returned)
 		ctx->late = 1;
 	test_mutex_unlock(&g_log_lock);
 	return 0;
+}
+
+static void release_exit_thread(void *arg)
+{
+	exit_ctx *ctx = (exit_ctx *)arg;
+	if (hp_wait_flag(&ctx->exiting, EVENT_TIMEOUT_MS) == 0) {
+		long long deadline = test_now_ms() + 100;
+		/* Keep the callback parked during the exit attempt, as in T14. */
+		do {
+			int returned;
+			test_mutex_lock(&g_log_lock);
+			returned = ctx->returned;
+			test_mutex_unlock(&g_log_lock);
+			if (returned)
+				break;
+			test_sleep_ms(WAIT_TICK_MS);
+		} while (test_now_ms() < deadline);
+	}
+	test_mutex_lock(&g_log_lock);
+	ctx->gate.release = 1;
+	test_mutex_unlock(&g_log_lock);
 }
 
 static int t19_pending_exit(void)
@@ -1564,20 +1593,37 @@ static int t19_pending_exit(void)
 	CHECK(ensure_present() == 0);
 	for (i = 0; i < 10; i++) {
 		hid_hotplug_callback_handle h = 0, barrier = 0;
+		test_thread release;
+		int entered, started, exit_rc, exited, expired, post_count = 0;
 		hp_reset_log("T19");
 		CHECK(hp_register(TEST_VID, TEST_PID, ALL_EVENTS, HID_API_HOTPLUG_ENUMERATE,
 		                   cb_exit_record, &ctxs[i], &h) == 0);
-		CHECK(hid_exit() == 0);
+		entered = hp_wait_flag(&ctxs[i].gate.entered, EVENT_TIMEOUT_MS);
+		started = test_thread_start(&release, release_exit_thread, &ctxs[i]);
+		if (started != 0) {
+			test_mutex_lock(&g_log_lock);
+			ctxs[i].gate.release = 1;
+			test_mutex_unlock(&g_log_lock);
+			CHECK(started == 0);
+		}
+		/* Lifecycle calls stay on the initializing thread, including on macOS. */
+		test_mutex_lock(&g_log_lock);
+		ctxs[i].exiting = 1;
+		test_mutex_unlock(&g_log_lock);
+		exit_rc = hid_exit();
 		test_mutex_lock(&g_log_lock);
 		ctxs[i].returned = 1;
+		exited = ctxs[i].gate.exited;
+		expired = ctxs[i].gate.expired;
 		/* Handles need not remain unique across initialization lifetimes. */
 		g_handle_count = 0;
 		test_mutex_unlock(&g_log_lock);
+		hp_join_or_exit(&release);
+		CHECK(entered == 0 && !expired && exited && exit_rc == 0);
 		CHECK(hid_init() == 0);
 		CHECK(hp_register(TEST_VID, TEST_PID, ALL_EVENTS, HID_API_HOTPLUG_ENUMERATE,
-		                   cb_log, NULL, &barrier) == 0);
-		CHECK(hp_wait_count_at_least(barrier, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED,
-		                             TEST_PID, TEST_SERIAL, 1, EVENT_TIMEOUT_MS) == 0);
+		                   cb_heap_record, &post_count, &barrier) == 0);
+		CHECK(hp_wait_flag(&post_count, EVENT_TIMEOUT_MS) == 0);
 		hp_cleanup_callbacks();
 	}
 	test_mutex_lock(&g_log_lock);

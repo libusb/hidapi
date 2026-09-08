@@ -21,9 +21,10 @@
  * afterwards. That driver implements the same pre-recorded scenario protocol
  * as the Linux uhid provider (see test_virtual_device.h).
  *
- * create() just records the ids; presence is confirmed by open_hidapi(), which
- * also caches the device's feature-report length so that trigger() can send a
- * feature report of exactly the size Windows requires.
+ * create() rejects unsupported ids, re-enables a disabled HID child if needed,
+ * and confirms presence by enumeration. open_hidapi() caches the device's
+ * feature-report length so that trigger() can send a feature report of exactly
+ * the size Windows requires.
  */
 
 #include "test_virtual_device.h"
@@ -115,7 +116,7 @@ static CONFIGRET locate_vhid_devnode(DEVINST *out_devinst)
 			cr = CM_Get_DevNode_Registry_PropertyA(devinst, CM_DRP_HARDWAREID, NULL,
 			                                        NULL, &hwlen, 0);
 			if (cr != CR_BUFFER_SMALL && cr != CR_SUCCESS) {
-				if (cr == CR_NO_SUCH_VALUE)
+				if (cr == CR_NO_SUCH_VALUE || cr == CR_INVALID_DEVNODE || cr == CR_NO_SUCH_DEVNODE)
 					break;
 				free(list);
 				return cr;
@@ -135,12 +136,14 @@ static CONFIGRET locate_vhid_devnode(DEVINST *out_devinst)
 				break;
 			free(hwids);
 			hwids = NULL;
+			if (cr == CR_NO_SUCH_VALUE || cr == CR_INVALID_DEVNODE || cr == CR_NO_SUCH_DEVNODE)
+				break;
 			if (cr != CR_BUFFER_SMALL) {
 				free(list);
 				return cr;
 			}
 		}
-		if (cr == CR_NO_SUCH_VALUE)
+		if (cr == CR_NO_SUCH_VALUE || cr == CR_INVALID_DEVNODE || cr == CR_NO_SUCH_DEVNODE)
 			continue;
 		if (!hwids) {
 			free(list);
@@ -256,8 +259,7 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 	if (serial)
 		strncpy_s(dev->serial, sizeof(dev->serial), serial, _TRUNCATE);
 
-	/* The device (if any) is installed by the harness; presence is verified
-	   by open_hidapi(). */
+	/* The harness installed the device; enumeration above confirmed presence. */
 	*out_dev = dev;
 	return TEST_VDEV_OK;
 }
