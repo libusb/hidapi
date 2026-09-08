@@ -1,9 +1,9 @@
 name: Windows Virtual HID Device Test (manual)
 
 # Builds and self-signs a modified vhidmini2 UMDF2 driver, installs it on a
-# hosted runner, then runs the backend-agnostic device-I/O test against that
-# real virtual HID device (winapi backend). It installs a driver, so it is not
-# part of the per-push CI matrix; run it on demand from the Actions tab, or by
+# hosted runner, then runs the backend-agnostic device-I/O and hotplug tests
+# against that real virtual HID device (winapi backend). It installs a driver,
+# so it is not part of the per-push CI matrix; run it on demand from the Actions tab, or by
 # adding the 'ci-virtual-device' label to a pull request.
 #
 # The work is split across two runners because no single hosted image can do
@@ -138,14 +138,27 @@ jobs:
     - name: Build HIDAPI + tests
       shell: pwsh
       run: |
-        cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DHIDAPI_WITH_TESTS=ON
+        cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DHIDAPI_WITH_TESTS=ON -DHIDAPI_ENABLE_ASAN=ON
         cmake --build build --config Release
 
-    - name: Run device-I/O test against the virtual device
+    - name: Run device-I/O and hotplug tests against the virtual device
       shell: pwsh
       working-directory: build
       run: |
-        ctest -C Release -R "_winapi" --output-on-failure
+        $env:ASAN_OPTIONS = "detect_leaks=0"
+        $tests = @("DeviceIO_winapi", "HotplugAPI_winapi", "Hotplug_winapi")
+        foreach ($test in $tests) {
+          $listed = & ctest -C Release -N -R "^$test$" 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $listed -notmatch "Total Tests: 1") {
+            throw "Required CTest case '$test' was not found."
+          }
+          $result = & ctest -C Release -R "^$test$" --output-on-failure 2>&1 | Out-String
+          $passed = "(?m)^\s*1/1 Test #\d+: " + [regex]::Escape($test) + ".*\sPassed\s+\d+(?:\.\d+)?\s+sec\s*$"
+          Write-Host $result
+          if ($LASTEXITCODE -ne 0 -or $result -notmatch $passed) {
+            throw "Required CTest case '$test' did not pass."
+          }
+        }
 
     - name: Cleanup virtual device
       if: always()

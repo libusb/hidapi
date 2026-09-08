@@ -107,6 +107,7 @@ struct test_virtual_device {
 	pthread_mutex_t lock;
 	pthread_cond_t cond;
 	int ready;                      /* run loop scheduled and running */
+	int shutdown;                   /* protected by lock */
 
 	unsigned short vendor_id;
 	unsigned short product_id;
@@ -199,16 +200,26 @@ static IOReturn get_report_cb(void *refcon, IOHIDReportType type,
 static void *runloop_thread_fn(void *arg)
 {
 	struct test_virtual_device *dev = (struct test_virtual_device *)arg;
+	CFRunLoopRef runloop = CFRunLoopGetCurrent();
 
-	dev->runloop = CFRunLoopGetCurrent();
-	dev->spi.schedule(dev->device, dev->runloop, kCFRunLoopDefaultMode);
+	dev->spi.schedule(dev->device, runloop, kCFRunLoopDefaultMode);
 
 	pthread_mutex_lock(&dev->lock);
+	dev->runloop = runloop;
 	dev->ready = 1;
 	pthread_cond_signal(&dev->cond);
 	pthread_mutex_unlock(&dev->lock);
 
-	CFRunLoopRun();
+	for (;;) {
+		int shutdown;
+
+		pthread_mutex_lock(&dev->lock);
+		shutdown = dev->shutdown;
+		pthread_mutex_unlock(&dev->lock);
+		if (shutdown)
+			break;
+		CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, true);
+	}
 
 	if (dev->spi.unschedule)
 		dev->spi.unschedule(dev->device, dev->runloop, kCFRunLoopDefaultMode);
@@ -380,8 +391,19 @@ void test_virtual_device_destroy(test_virtual_device *dev)
 		return;
 
 	if (dev->thread_started) {
-		if (dev->runloop)
-			CFRunLoopStop(dev->runloop);
+		CFRunLoopRef runloop;
+
+		pthread_mutex_lock(&dev->lock);
+		dev->shutdown = 1;
+		runloop = dev->runloop;
+		if (runloop)
+			CFRetain(runloop);
+		pthread_mutex_unlock(&dev->lock);
+		if (runloop) {
+			CFRunLoopWakeUp(runloop);
+			CFRunLoopStop(runloop);
+			CFRelease(runloop);
+		}
 		pthread_join(dev->runloop_thread, NULL);
 		dev->thread_started = 0;
 	}

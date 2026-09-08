@@ -23,17 +23,23 @@ command bytes, expected payloads).
 |------|-------------------|
 | `test_device_io.c` | open → write an output report → trigger+read input reports (Feature-report write, then input-report read-back) → close |
 | `test_hotplug_api.c` | tier-1 hotplug API contract, no device needed: argument validation, handle properties, implicit init, `hid_exit()` teardown, register/deregister thread churn |
-| `test_hotplug.c` | tier-2 hotplug scenarios against a virtual device whose presence is toggled: async delivery, exactly-once ENUMERATE pass, callback-return deregistration, pass-before-live ordering, payloads, filtering, dispatch order, deregistration post-condition, re-entrant registration |
+| `test_hotplug.c` | tier-2 hotplug scenarios against a virtual device whose presence is toggled: async delivery, event masks, exactly-once ENUMERATE pass, callback-return deregistration, pass-before-live ordering, full payloads, filtering, dispatch order, deregistration post-condition, re-entrant registration and callback error isolation |
 
 ## Hotplug tests
 
 The hotplug tests come in two tiers:
 
-* **Tier 1 — `HotplugAPI_<backend>`** (`test_hotplug_api.c`): everything in the
-  hotplug contract observable *without* a device event. Needs no virtual
-  device, no privileges, so it runs against **every** backend in the ordinary
-  per-push CI matrix. Self-skips (77) when the backend reports hotplug as
-  unsupported at runtime (e.g. a libusb without `LIBUSB_CAP_HAS_HOTPLUG`).
+* **Tier 1 — `HotplugAPI_<backend>`** (`test_hotplug_api.c`): the parts of the
+  hotplug contract observable *without* a device event: argument validation,
+  callback-handle properties and stale-handle safety, implicit `hid_init()`,
+  `hid_exit()` teardown (including the register-to-immediate-`hid_exit()` loop),
+  and two-thread register/deregister churn. Needs no virtual device or
+  privileges, so it runs against **every** backend in the ordinary per-push CI
+  matrix. If the first registration fails, the probe retries after explicit
+  `hid_init()`: a successful retry fails the test for broken implicit
+  initialization; it self-skips (77) only when the retry also fails, including
+  a backend that reports hotplug as unsupported at runtime (e.g. a libusb
+  without `LIBUSB_CAP_HAS_HOTPLUG`).
 * **Tier 2 — `Hotplug_<backend>`** (`test_hotplug.c`): device-backed hotplug
   scenarios. On top of a virtual device, the provider must be able to *toggle
   the device's presence* (`test_virtual_device_unplug()` /
@@ -49,11 +55,15 @@ The hotplug tests come in two tiers:
   `TEST_VDEV_UNAVAILABLE` from the toggle calls, so `Hotplug_darwin`
   self-skips until presence toggling is implemented for it.
 
+  T8b, cancellation during an ENUMERATE pass, needs two concurrent devices and
+  is reported as a distinct skipped subtest for the single-device Raw Gadget and
+  Windows providers; the UHID provider exercises it.
+
 | Test | Runs per-push in `builds.yml` | Notes |
 |------|-------------------------------|-------|
 | `HotplugAPI_hidraw` | yes (ubuntu-cmake) | |
 | `HotplugAPI_libusb` | yes (ubuntu-cmake) | needs libusb hotplug support at runtime |
-| `HotplugAPI_winapi` | yes (windows-cmake, MSVC/NMake/ClangCL/MinGW) | |
+| `HotplugAPI_winapi` | yes (windows-cmake-msvc: MSVC/NMake/ClangCL; windows-cmake-mingw) | |
 | `HotplugAPI_darwin` | yes (macos-cmake) | |
 | `Hotplug_hidraw` | yes (ubuntu-cmake, via `uhid`) | the tier-2 test that runs per-push |
 | `Hotplug_libusb` | builds, self-skips | runs in the label-gated `libusb-vhid-test` VM job |
@@ -61,23 +71,32 @@ The hotplug tests come in two tiers:
 | `Hotplug_darwin` | builds, self-skips | needs `IOHIDUserDevice` re-creation (future) |
 
 The tier-2 test is written against strict synchronization rules (hotplug tests
-are notoriously flaky otherwise): callbacks only deep-copy the event into a
-log under a lock; every expectation is awaited with a deadline-based predicate
-poll (never a bare sleep); the *absence* of an event is asserted behind an
+are notoriously flaky otherwise): recording callbacks only deep-copy the event
+into a log under a lock and never call `hid_enumerate`, `hid_open`, or
+`hid_error(NULL)`; T14 deliberately holds a callback open so deregistration's
+wait is observable, and T15 registers/deregisters from a callback as the API
+allows. Every expectation is awaited with a deadline-based predicate poll; the
+*absence* of an event is asserted behind an
 **event barrier** — a later event that is provably ordered after the missing
 one — never behind a time window; and a missed event within the (generous)
 budget is treated as a bug, not retried.
+
+T9b holds a snapshot callback while the device disconnects; T18/T18b exercise
+immediate and queued-snapshot cancellation, and T19 exits with ENUMERATE work
+before reinitializing. Set `HIDAPI_HOTPLUG_STRESS=1` to additionally run T20's
+25 arrival-versus-snapshot races. After an event deadline fails, the suite
+cleans up and prints its summary without starting another scenario.
 
 ## Providers
 
 | Platform / backend | Provider | Mechanism | CI |
 |--------------------|----------|-----------|----|
 | Linux / hidraw | `test_virtual_device_uhid.c` | kernel `/dev/uhid` | runs in `builds.yml` (ubuntu-cmake) |
-| Linux / libusb | `test_virtual_device_rawgadget.c` | `/dev/raw-gadget` + `dummy_hcd` (in a VM) | builds + self-skips in `builds.yml`; runs in the manual `libusb-vhid-test` job (in a VM) |
-| Windows / winapi | `test_virtual_device_win.c` + `windows/driver/` | modified vhidmini2 UMDF2 driver | builds + self-skips in `builds.yml`; runs in the manual `win-vhid-test` job |
+| Linux / libusb | `test_virtual_device_rawgadget.c` | `/dev/raw-gadget` + `dummy_hcd` (in a VM) | builds + self-skips in `builds.yml`; runs in `libusb-vhid-test` (workflow dispatch or the `ci-virtual-device` PR label), in a VM |
+| Windows / winapi | `test_virtual_device_win.c` + `windows/driver/` | modified vhidmini2 UMDF2 driver | builds + self-skips in `builds.yml`; runs in `win-vhid-test` (workflow dispatch or the `ci-virtual-device` PR label) |
 | macOS / darwin | `test_virtual_device_mac.c` | `IOHIDUserDevice` (IOKit) | builds + self-skips in `builds.yml` (macos-cmake); runs on a real Mac |
 
-Whenever a virtual device cannot be created or does not enumerate, the test
+Whenever a virtual device cannot initially be created or does not initially enumerate, the test
 returns CTest's **skip** code (77) instead of failing, so ordinary builds on any
 host stay green.
 
@@ -97,8 +116,10 @@ for the per-push CI matrix:
 * **Linux / libusb** — needs the `raw_gadget` and `dummy_hcd` kernel modules,
   which the hosted `ubuntu-latest` kernel is built *without* (it has no USB
   gadget subsystem). The `libusb-vhid-test` workflow therefore runs the test
-  inside a lightweight VM (`virtme-ng` + QEMU) booting a *generic* Ubuntu kernel
-  whose `linux-modules-extra` ships both modules; the VM shares the host
+  inside a lightweight VM (`virtme-ng` + QEMU) booting a *generic* Ubuntu kernel:
+  `linux-modules-extra` supplies `raw_gadget`; Ubuntu does not package
+  `dummy_hcd`, so the workflow builds it from matching upstream kernel source
+  against that kernel's headers and installs it alongside. The VM shares the host
   filesystem, so it runs the host-built binaries. The same approach works
   locally and on WSL2 (whose default kernel also lacks these modules).
 * **macOS** — creating an `IOHIDUserDevice` is gated by the
@@ -134,10 +155,11 @@ the device-I/O test is not wired up there.
 cmake -B build -S . -DHIDAPI_WITH_TESTS=ON
 cmake --build build
 sudo modprobe uhid
-sudo ctest --test-dir build -R DeviceIO_hidraw --output-on-failure
-sudo ctest --test-dir build -R Hotplug_hidraw --output-on-failure
+cd build
+sudo ctest -R DeviceIO_hidraw --output-on-failure
+sudo ctest -R Hotplug_hidraw --output-on-failure
 # tier-1 hotplug API tests need no device and no root:
-ctest --test-dir build -R HotplugAPI --output-on-failure
+ctest -R HotplugAPI --output-on-failure
 ```
 
 On Windows/macOS configure with `-DHIDAPI_WITH_TESTS=ON` and run `ctest`; the

@@ -1,13 +1,15 @@
 name: Linux libusb Virtual HID Device Test (manual)
 
-# Runs the device-I/O test against the HIDAPI *libusb* backend using a real
-# virtual USB HID device (USB Raw Gadget on top of dummy_hcd).
+# Runs the device-I/O and hotplug tests against the HIDAPI *libusb* backend
+# using a real virtual USB HID device (USB Raw Gadget on top of dummy_hcd).
 #
 # The hosted ubuntu-latest (azure) kernel is built without the USB gadget
 # subsystem, so raw_gadget/dummy_hcd can't be loaded (or even built) there. We
 # therefore run the test inside a lightweight VM (virtme-ng + QEMU) booting a
-# *generic* Ubuntu kernel, whose linux-modules-extra ships dummy_hcd and
-# raw_gadget. The VM shares the host filesystem, so it runs the binaries built
+# *generic* Ubuntu kernel: linux-modules-extra supplies raw_gadget; Ubuntu does
+# not package dummy_hcd, so this workflow builds it from matching upstream
+# kernel source against that kernel's headers and installs it alongside. The VM
+# shares the host filesystem, so it runs the binaries built
 # on the host. The same approach works locally and on WSL2 (which also lacks
 # those modules in its default kernel).
 #
@@ -61,7 +63,7 @@ jobs:
     - name: Build HIDAPI + tests (libusb backend)
       run: |
         cmake -B build -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON
+          -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON -DHIDAPI_ENABLE_ASAN=ON
         cmake --build build
 
     - name: Run the virtual-device tests inside a VM (generic kernel + raw_gadget)

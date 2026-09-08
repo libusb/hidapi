@@ -25,6 +25,31 @@
   #include <time.h>
 #endif
 
+/* A small cross-platform atomic integer for test state shared by threads. */
+#ifdef _WIN32
+typedef volatile LONG test_atomic_int;
+#else
+typedef int test_atomic_int;
+#endif
+
+static inline int test_atomic_load(test_atomic_int *value)
+{
+#ifdef _WIN32
+	return (int)InterlockedCompareExchange(value, 0, 0);
+#else
+	return __atomic_load_n(value, __ATOMIC_ACQUIRE);
+#endif
+}
+
+static inline void test_atomic_store(test_atomic_int *value, int new_value)
+{
+#ifdef _WIN32
+	InterlockedExchange(value, (LONG)new_value);
+#else
+	__atomic_store_n(value, new_value, __ATOMIC_RELEASE);
+#endif
+}
+
 /* Monotonic milliseconds for measuring elapsed time. */
 static inline long long test_now_ms(void)
 {

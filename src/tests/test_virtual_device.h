@@ -28,12 +28,14 @@
  * (it only ever calls public hid_*() functions); all device behaviour lives in
  * the per-backend provider:
  *
- *   - Linux:   test_virtual_device_uhid.c   (kernel /dev/uhid -> hidraw)
- *   - Windows: test_virtual_device_win.c     (modified vhidmini2 UMDF driver)
- *   - others:  (future)
+ *   - Linux / hidraw: test_virtual_device_uhid.c       (kernel /dev/uhid)
+ *   - Linux / libusb: test_virtual_device_rawgadget.c  (/dev/raw-gadget + dummy_hcd)
+ *   - Windows:        test_virtual_device_win.c        (modified vhidmini2 UMDF driver)
+ *   - macOS:          test_virtual_device_mac.c        (IOHIDUserDevice)
  *
- * The provider only needs to implement create / open / destroy; the scenario
- * playback is part of the virtual device (the uhid event pump, or the driver).
+ * The provider implements create / open / destroy / unplug / replug / trigger;
+ * scenario playback is part of the virtual device (the uhid event pump, or the
+ * driver).
  */
 
 #ifndef HIDAPI_TEST_VIRTUAL_DEVICE_H__
