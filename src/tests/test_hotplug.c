@@ -214,6 +214,18 @@ static void hp_copy_wide(wchar_t *out, size_t capacity, const wchar_t *in,
 	}
 }
 
+/* Non-empty environment variable check. MSVC's /W4 /WX flags getenv() as
+   deprecated (C4996), so use the Win32 API there. */
+static int hp_env_set(const char *name)
+{
+#ifdef _WIN32
+	return GetEnvironmentVariableA(name, NULL, 0) != 0;
+#else
+	const char *v = getenv(name);
+	return v != NULL && v[0] != '\0';
+#endif
+}
+
 /* Deep-copy the fields the assertions need. Called from the callbacks, with
    g_log_lock held for the shortest possible time; the device pointer is only
    valid for the duration of the callback. */
@@ -258,12 +270,12 @@ static void hp_record(hid_hotplug_callback_handle handle,
 				snprintf(e->path, sizeof(e->path), "%s", device->path);
 			}
 			if (device->serial_number) {
-				size_t i;
-				for (i = 0; i + 1 < sizeof(e->serial) && device->serial_number[i]; i++) {
-					wchar_t wc = device->serial_number[i];
-					e->serial[i] = (wc > 0 && wc < 128) ? (char)wc : '?';
+				size_t k;
+				for (k = 0; k + 1 < sizeof(e->serial) && device->serial_number[k]; k++) {
+					wchar_t wc = device->serial_number[k];
+					e->serial[k] = (wc > 0 && wc < 128) ? (char)wc : '?';
 				}
-				e->serial[i] = '\0';
+				e->serial[k] = '\0';
 			}
 		}
 	} else {
@@ -619,6 +631,11 @@ static int HID_API_CALL cb_publication(hid_hotplug_callback_handle handle,
                                        hid_hotplug_event event, void *user_data)
 {
 	publication_ctx *ctx = (publication_ctx *)user_data;
+	/* *out_handle is the registering thread's local written by
+	   hid_hotplug_register_callback(). Reading it here without application
+	   synchronization is legitimate only because the contract requires that
+	   write to be ordered before any event can be delivered; that ordering
+	   is exactly what T6 checks. */
 	int published = (*ctx->out_handle == handle);
 	test_mutex_lock(&g_log_lock);
 	ctx->published = published;
@@ -1233,7 +1250,13 @@ static int t15_reentrant_registration(void)
 	                    TEST_PID, TEST_SERIAL) == 0);
 	CHECK(hp_find_first(&child_event, h_child, HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED,
 	                    TEST_PID, TEST_SERIAL) == 0);
-	CHECK(parent_event.thread_id == child_event.thread_id);
+	/* Both callbacks ran on HIDAPI's internal event context, never on the
+	   registering (main) thread. The contract only promises that the context
+	   is not the application's thread: the Windows backend delivers from a
+	   threadpool / CM notification thread, so the two invocations may carry
+	   different thread ids. */
+	CHECK(parent_event.thread_id != g_main_tid);
+	CHECK(child_event.thread_id != g_main_tid);
 
 	step("the parent saw only its one ARRIVED and its handle is dead");
 	CHECK(hp_count(h_parent, 0, 0, NULL) == 1);
@@ -1780,7 +1803,7 @@ int main(void)
 	RUN_TEST("T9b parked_snapshot", t9b_parked_snapshot());
 	RUN_TEST("T18b queued_deregister", t18b_queued_deregister());
 	RUN_TEST("T19 pending_exit", t19_pending_exit());
-	if (getenv("HIDAPI_HOTPLUG_STRESS"))
+	if (hp_env_set("HIDAPI_HOTPLUG_STRESS"))
 		RUN_TEST("T20 arrival_stress", t20_arrival_stress());
 
 done:
