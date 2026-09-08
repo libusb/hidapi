@@ -217,8 +217,11 @@ struct hid_hotplug_queue {
 };
 
 struct hid_hotplug_device {
+	/* NULL after a reconciled removal while a snapshot arrival is pending. */
 	struct hid_device_info *info;
 	libusb_device *device; /* Referenced identity of this connection */
+	/* A snapshot entry may still have an unprocessed live arrival. */
+	unsigned char arrival_seen;
 	/* Nonzero once reconciliation finds it gone: hide it from snapshots and
 	 * deliver its removal only to handles below this registration boundary. */
 	hid_hotplug_callback_handle removed_before;
@@ -277,8 +280,7 @@ static struct hid_hotplug_context {
 	/* Pending messages for the callback thread; protected by callback_thread's mutex */
 	struct hid_hotplug_queue* queue;
 	/* A removal was dropped; protected by callback_thread's mutex. Stays set
-	 * for this context so an older queued arrival cannot restore an entry that
-	 * reconciliation has already retired. */
+	 * for this context so later snapshots and arrivals reconcile the cache. */
 	unsigned char cache_stale;
 
 	/* Linked list of the hotplug callbacks */
@@ -1720,13 +1722,19 @@ static void hid_internal_invoke_callbacks(struct hid_device_info* info, hid_hotp
 	}
 }
 
-/* Is this libusb device already represented in the device cache? Uses the same
- * referenced connection identity as the removal path, so an arrival is only
- * ever deduplicated against the very entries a later removal would match. */
+/* Record an arrival already represented in the cache, including a retired
+ * snapshot identity retained only to suppress this delayed arrival. */
 static int hid_internal_hotplug_is_known_device(libusb_device *device)
 {
-	for (struct hid_hotplug_device *dev = hid_hotplug_context.devs; dev != NULL; dev = dev->next) {
+	for (struct hid_hotplug_device **current = &hid_hotplug_context.devs; *current; current = &(*current)->next) {
+		struct hid_hotplug_device *dev = *current;
 		if (device == dev->device) {
+			dev->arrival_seen = 1;
+			if (dev->info == NULL) {
+				*current = dev->next;
+				dev->next = NULL;
+				hid_internal_hotplug_free_devices(dev);
+			}
 			return 1;
 		}
 	}
@@ -1745,13 +1753,11 @@ static int hid_internal_hotplug_cache_stale(void)
 
 /* Called with `mutex` held. Mark departed entries without freeing infos that
  * an active callback may still be using; the callback thread dispatches their
- * removals after the current message. If supplied, also check an arrival's
- * identity before allowing it to restore an already retired cache entry. */
-static int hid_internal_hotplug_reconcile(libusb_device *arrived)
+ * removals after the current message. */
+static int hid_internal_hotplug_reconcile(void)
 {
 	libusb_device **devices;
 	ssize_t count = libusb_get_device_list(hid_hotplug_context.context, &devices);
-	int present = (arrived == NULL);
 	if (count < 0) {
 		return (int) count;
 	}
@@ -1767,11 +1773,8 @@ static int hid_internal_hotplug_reconcile(libusb_device *arrived)
 			dev->removed_before = hid_hotplug_context.next_handle;
 		}
 	}
-	for (ssize_t i = 0; i < count && !present; i++) {
-		present = (devices[i] == arrived);
-	}
 	libusb_free_device_list(devices, 1);
-	return present;
+	return 0;
 }
 
 /* Appends a message for the callback thread to the queue and wakes it up.
@@ -1865,13 +1868,18 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 		 * before the initial enumeration, so a device that connects in between
 		 * is reported both by the snapshot and as a live arrival. Match only
 		 * connection identity: an older queued arrival must not evict a newer
-		 * connection already captured at the same port by the snapshot. */
-		if (!hid_internal_hotplug_is_known_device(msg->device) &&
-			(!hid_internal_hotplug_cache_stale() || hid_internal_hotplug_reconcile(msg->device) > 0)) {
+		 * connection already captured at the same port by the snapshot. Suppress
+		 * retired snapshot identities, but deliver an unseen queued arrival even
+		 * if the device has already disconnected. */
+		if (!hid_internal_hotplug_is_known_device(msg->device)) {
+			if (hid_internal_hotplug_cache_stale()) {
+				hid_internal_hotplug_reconcile();
+			}
 			struct hid_device_info* info = hid_enumerate_from_libusb(msg->device, 0, 0, NULL);
 			struct hid_hotplug_device *dev = info ? hid_internal_hotplug_create_device(msg->device, info) : NULL;
 
 			if (dev) {
+				dev->arrival_seen = 1;
 				/* Append everything we got to the end of the device list BEFORE
 				 * invoking any callback: a callback registered from within a
 				 * callback takes its HID_API_HOTPLUG_ENUMERATE snapshot from
@@ -1944,7 +1952,16 @@ static void process_hotplug_event(struct hid_hotplug_queue* msg)
 					hid_internal_invoke_callbacks(&single, HID_API_HOTPLUG_EVENT_DEVICE_LEFT, last);
 				}
 			}
-			hid_internal_hotplug_free_devices(dev);
+			if (dev->removed_before && !dev->arrival_seen) {
+				/* Only snapshot entries can still have an unprocessed arrival.
+				 * Retain their identity until it is drained or the context exits. */
+				hid_free_enumeration(dev->info);
+				dev->info = NULL;
+				dev->next = hid_hotplug_context.devs;
+				hid_hotplug_context.devs = dev;
+			} else {
+				hid_internal_hotplug_free_devices(dev);
+			}
 		}
 	}
 
@@ -1969,7 +1986,7 @@ static void hid_internal_hotplug_dispatch_removed(void)
 	pthread_mutex_lock(&hid_hotplug_context.mutex);
 	while (1) {
 		struct hid_hotplug_device *dev = hid_hotplug_context.devs;
-		while (dev != NULL && !dev->removed_before) {
+		while (dev != NULL && (!dev->removed_before || dev->info == NULL)) {
 			dev = dev->next;
 		}
 		if (dev == NULL) {
@@ -2256,7 +2273,7 @@ int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short ven
 
 	if ((flags & HID_API_HOTPLUG_ENUMERATE) && (events & HID_API_HOTPLUG_EVENT_DEVICE_ARRIVED)) {
 		if (hid_internal_hotplug_cache_stale()) {
-			int res = hid_internal_hotplug_reconcile(NULL);
+			int res = hid_internal_hotplug_reconcile();
 			if (res < 0) {
 				hid_internal_hotplug_unwind_registration(hotplug_cb, is_first_callback);
 				register_libusb_error(&last_global_error, res, "hotplug/libusb_get_device_list");
