@@ -56,14 +56,16 @@ jobs:
     - name: Build CMake Framework
       working-directory: build/framework
       run: make install
-    - name: Run virtual-device tests (IOHIDUserDevice self-skips on hosted CI)
+    - name: Run device-I/O and hotplug lifecycle tests
       working-directory: build/shared
       run: |
         # The macOS virtual device needs the com.apple.developer.hid.virtual.device
         # entitlement and interactive user consent, neither available on a hosted
         # runner, so DeviceIO_darwin self-skips (CTest code 77). This still
         # verifies the provider builds and the test runs/links.
-        ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
+        # Verbose output also reports individual hotplug cases skipped when
+        # no real device is available; device-independent lifecycle checks run.
+        ASAN_OPTIONS=detect_leaks=0 ctest --verbose --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:

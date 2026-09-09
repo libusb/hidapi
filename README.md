@@ -58,10 +58,28 @@ Keyboards, mice, and some other devices which are blacklisted from having
 hidraw nodes will not work. Fortunately, for nearly all the uses of hidraw,
 this is not a problem.
 
+Hotplug delivery is best-effort under kernel event-buffer overruns. An overrun
+or unrecoverable udev monitor failure stops live events without notifying existing
+callbacks; pending initial `ENUMERATE` passes still run. Once the failure is
+recorded, new registrations fail with `-1`, so an application can detect it by
+attempting a registration. Deregister all surviving callbacks before registering
+again to create a fresh monitor.
+
+The initial hotplug snapshot is keyed by `/dev/hidrawN`. If that node is reused
+while the monitor is armed and the snapshot is taken, queued events from its
+predecessor can produce `ARRIVED/LEFT/ARRIVED` for the successor connection.
+
 #### __Linux/FreeBSD/libusb__ (`libusb/hid.c`):
 
 This back-end uses libusb-1.0 to communicate directly to a USB device. This
 back-end will of course not work with Bluetooth devices.
+
+#### __Windows__ (`windows/hid.c`):
+
+Hotplug callbacks require Windows 8 or later. Registration returns `-1` when
+the required PnP notification API is unavailable. Compiler and runtime
+requirements may impose a higher minimum Windows version.
+Starting with HIDAPI 0.16, this back-end requires libusb 1.0.16 or newer.
 
 ### Test GUI
 

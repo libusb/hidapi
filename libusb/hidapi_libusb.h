@@ -56,6 +56,9 @@ extern "C" {
 			If the error occurred is not immediately caused by a libusb function call,
 			the returned value is 1. @ref hid_error would still contain a valid and meaningful error message.
 
+			With a NULL device, this function follows the same application
+			serialization rules as hid_error(NULL), including against hotplug registration/deregistration.
+
 			@ingroup API
 			@param dev A device handle returned from hid_open(),
 			or NULL to get the last non-device-specific error

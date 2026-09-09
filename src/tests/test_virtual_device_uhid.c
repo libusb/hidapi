@@ -206,6 +206,33 @@ static void *pump_thread_fn(void *arg)
 	return NULL;
 }
 
+/* Announce the device to the kernel (UHID_CREATE2 on the open uhid fd).
+ * Returns 0 on success, -1 on failure (with errno set by write()). Used both
+ * by the initial create() and by test_virtual_device_replug(): the kernel
+ * allows a new UHID_CREATE2 on the same fd after a UHID_DESTROY. */
+static int uhid_write_create2(struct test_virtual_device *dev)
+{
+	struct uhid_event ev;
+	ssize_t written;
+
+	memset(&ev, 0, sizeof(ev));
+	ev.type = UHID_CREATE2;
+	snprintf((char *)ev.u.create2.name, sizeof(ev.u.create2.name), "HIDAPI Test Device");
+	snprintf((char *)ev.u.create2.uniq, sizeof(ev.u.create2.uniq), "%s", dev->serial);
+	memcpy(ev.u.create2.rd_data, k_report_descriptor, sizeof(k_report_descriptor));
+	ev.u.create2.rd_size = (uint16_t)sizeof(k_report_descriptor);
+	ev.u.create2.bus = 0x03;          /* BUS_USB */
+	ev.u.create2.vendor = dev->vendor_id;
+	ev.u.create2.product = dev->product_id;
+	ev.u.create2.version = 0;
+	ev.u.create2.country = 0;
+
+	pthread_mutex_lock(&dev->write_lock);
+	written = write(dev->fd, &ev, sizeof(ev));
+	pthread_mutex_unlock(&dev->write_lock);
+	return written < 0 ? -1 : 0;
+}
+
 int test_virtual_device_create(test_virtual_device **out_dev,
                                unsigned short vendor_id,
                                unsigned short product_id,
@@ -239,19 +266,7 @@ int test_virtual_device_create(test_virtual_device **out_dev,
 		return TEST_VDEV_ERROR;
 	}
 
-	memset(&ev, 0, sizeof(ev));
-	ev.type = UHID_CREATE2;
-	snprintf((char *)ev.u.create2.name, sizeof(ev.u.create2.name), "HIDAPI Test Device");
-	snprintf((char *)ev.u.create2.uniq, sizeof(ev.u.create2.uniq), "%s", dev->serial);
-	memcpy(ev.u.create2.rd_data, k_report_descriptor, sizeof(k_report_descriptor));
-	ev.u.create2.rd_size = (uint16_t)sizeof(k_report_descriptor);
-	ev.u.create2.bus = 0x03;          /* BUS_USB */
-	ev.u.create2.vendor = vendor_id;
-	ev.u.create2.product = product_id;
-	ev.u.create2.version = 0;
-	ev.u.create2.country = 0;
-
-	if (write(dev->fd, &ev, sizeof(ev)) < 0) {
+	if (uhid_write_create2(dev) != 0) {
 		int e = errno;
 		close(dev->fd);
 		pthread_mutex_destroy(&dev->write_lock);
@@ -319,6 +334,37 @@ hid_device *test_virtual_device_open_hidapi(test_virtual_device *dev, int timeou
 		sleep_ms(50);
 		waited += 50;
 	}
+}
+
+int test_virtual_device_unplug(test_virtual_device *dev)
+{
+	struct uhid_event ev;
+	ssize_t written;
+
+	if (!dev || dev->fd < 0)
+		return TEST_VDEV_ERROR;
+
+	/* UHID_DESTROY unregisters the HID device from the kernel (the hidraw
+	   node disappears) but keeps the uhid fd usable: a later UHID_CREATE2 on
+	   the same fd brings the device back. The event pump keeps running; it
+	   simply sees no events while the device is unplugged. */
+	memset(&ev, 0, sizeof(ev));
+	ev.type = UHID_DESTROY;
+
+	pthread_mutex_lock(&dev->write_lock);
+	written = write(dev->fd, &ev, sizeof(ev));
+	pthread_mutex_unlock(&dev->write_lock);
+	return written < 0 ? TEST_VDEV_ERROR : TEST_VDEV_OK;
+}
+
+int test_virtual_device_replug(test_virtual_device *dev)
+{
+	if (!dev || dev->fd < 0)
+		return TEST_VDEV_ERROR;
+
+	/* Same ids and serial as the original appearance; the kernel assigns a
+	   fresh hidraw node, so the HIDAPI path may differ. */
+	return uhid_write_create2(dev) != 0 ? TEST_VDEV_ERROR : TEST_VDEV_OK;
 }
 
 int test_virtual_device_trigger(test_virtual_device *dev, hid_device *handle,

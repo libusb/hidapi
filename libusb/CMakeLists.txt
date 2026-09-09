@@ -13,7 +13,7 @@ if(TARGET usb-1.0)
     target_link_libraries(hidapi_libusb PRIVATE usb-1.0)
 else()
     include(FindPkgConfig)
-    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
+    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.16)
     target_link_libraries(hidapi_libusb PRIVATE PkgConfig::libusb)
 endif()
 
