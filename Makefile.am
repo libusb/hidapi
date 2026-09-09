@@ -7,10 +7,30 @@ else
 pkgconfigdir=$(libdir)/pkgconfig
 endif
 
-if OS_LINUX
-pkgconfig_DATA=pc/hidapi-hidraw.pc pc/hidapi-libusb.pc
-else
 pkgconfig_DATA=pc/hidapi.pc
+
+if OS_LINUX
+pkgconfig_DATA += pc/hidapi-hidraw.pc pc/hidapi-libusb.pc
+endif
+
+if OS_DARWIN
+pkgconfig_DATA += pc/hidapi-darwin.pc
+endif
+
+if OS_FREEBSD
+pkgconfig_DATA += pc/hidapi-libusb.pc
+endif
+
+if OS_KFREEBSD
+pkgconfig_DATA += pc/hidapi-libusb.pc
+endif
+
+if OS_HAIKU
+pkgconfig_DATA += pc/hidapi-libusb.pc
+endif
+
+if OS_WINDOWS
+pkgconfig_DATA += pc/hidapi-winapi.pc
 endif
 
 SUBDIRS=
@@ -45,7 +65,12 @@ if BUILD_TESTGUI
 SUBDIRS += testgui
 endif
 
-EXTRA_DIST = udev doxygen
+EXTRA_DIST = \
+ udev \
+ doxygen \
+ tests/pkg-config/configure.ac \
+ tests/pkg-config/Makefile.am \
+ tests/pkg-config/test.c
 
 dist_doc_DATA = \
  README.md \
