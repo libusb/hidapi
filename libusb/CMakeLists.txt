@@ -13,7 +13,7 @@ if(TARGET usb-1.0)
     target_link_libraries(hidapi_libusb PRIVATE usb-1.0)
 else()
     include(FindPkgConfig)
-    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.9)
+    pkg_check_modules(libusb REQUIRED IMPORTED_TARGET libusb-1.0>=1.0.16)
     target_link_libraries(hidapi_libusb PRIVATE PkgConfig::libusb)
 endif()
 
@@ -105,4 +105,8 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-libusb.pc.in")
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
+    OUTPUT_NAME "hidapi-libusb"
+    LIBRARY_NAME "hidapi-libusb"
+    DESCRIPTION "C Library for USB HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the libusb implementation."
+)
