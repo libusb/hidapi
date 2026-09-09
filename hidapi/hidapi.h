@@ -198,10 +198,15 @@ extern "C" {
 
 			This function initializes the HIDAPI library. Calling it is not
 			strictly necessary, as it will be called automatically by
-			hid_enumerate() and any of the hid_open_*() functions if it is
-			needed.  This function should be called at the beginning of
-			execution however, if there is a chance of HIDAPI handles
-			being opened by different threads simultaneously.
+			hid_enumerate(), any of the hid_open_*() functions and
+			hid_hotplug_register_callback() if it is needed (see the latter
+			for the macOS thread-binding caveat). This function should be
+			called explicitly at the beginning of execution (on macOS, from
+			the thread that will later call hid_exit()) whenever HIDAPI is
+			used from more than one thread, to avoid a racing implicit
+			initialization; hid_enumerate()/hid_open*() themselves must
+			still be serialized across threads - see the Multi-threading
+			Notes in the project wiki.
 
 			@ingroup API
 
@@ -216,6 +221,15 @@ extern "C" {
 			This function frees all of the static data associated with
 			HIDAPI. It should be called at the end of execution to avoid
 			memory leaks.
+
+			Since version 0.16.0: stops the hotplug machinery, blocking until
+			any in-progress hotplug callback returns, and deregisters all
+			remaining hotplug callbacks (their handles become invalid).
+			Must not be called from within a hotplug callback, and must not
+			run concurrently with hid_hotplug_register_callback() or
+			hid_hotplug_deregister_callback() on another thread. On macOS it
+			must be called from the thread that initialized the library
+			(explicitly or implicitly, see hid_hotplug_register_callback()).
 
 			@ingroup API
 
@@ -321,6 +335,21 @@ extern "C" {
 				disconnects and reconnects is a new connection and is
 				reported again.)
 
+				These guarantees describe the hand-off between the initial
+				pass and live events and assume HIDAPI can observe and
+				describe the device. Delivery is best-effort under resource
+				exhaustion: a device whose description cannot be allocated
+				when it arrives, or an interface the backend cannot describe
+				because it cannot open it for its attributes (as with
+				hid_enumerate()), is not reported at all, and no "left" event
+				follows for it; each device entry for a connection is reported
+				at most once to the same callback. If the device-notification
+				transport fails irrecoverably, no further events are delivered to the
+				registered callbacks. On linux/hidraw (udev monitor socket
+				failure) and macOS (event thread failure), new registrations
+				then fail until every callback has been deregistered, after
+				which a new registration can restart the machinery.
+
 				The initial pass is delivered before any live events for
 				this callback. In particular, a callback registered with
 				this flag for both event types never observes a
@@ -347,9 +376,14 @@ extern "C" {
 			@par Execution context
 
 			The callback is only ever invoked on HIDAPI's internal event
-			context, never on an application thread (including the
-			application's main thread). This includes the synthetic
-			"arrived" events requested with #HID_API_HOTPLUG_ENUMERATE:
+			context (an internal thread on most backends; on Windows, OS
+			notification callbacks and a threadpool work item, with callback
+			invocations serialized), never on an application thread
+			(including the application's main thread). Do not rely on thread
+			identity, thread-local state or COM apartment inside the callback.
+
+			This execution context also applies to the synthetic "arrived"
+			events requested with #HID_API_HOTPLUG_ENUMERATE:
 			they are delivered asynchronously on that same context and are
 			never delivered from within the hid_hotplug_register_callback()
 			call itself. (When a hotplug callback itself registers a new
@@ -367,6 +401,12 @@ extern "C" {
 			that is what makes them safe to call from inside the callback
 			(see below). Keep the callback short.
 
+			Consequently the callback must never block waiting on a thread
+			that may be calling hid_hotplug_register_callback(),
+			hid_hotplug_deregister_callback() or hid_exit(), or the two will
+			deadlock; hand work off asynchronously (queue + wake, never
+			post-and-join).
+
 			When multiple callbacks are registered, each event is delivered
 			to every matching callback sequentially, in the order the
 			callbacks were registered.
@@ -379,34 +419,41 @@ extern "C" {
 
 			  - hid_hotplug_register_callback()
 			  - hid_hotplug_deregister_callback()   (including on its own handle)
-			  - hid_error(dev)   with a non-NULL device handle, provided no
-			                     other thread uses that same handle concurrently
 
-			HIDAPI calls made from within the callback do not update the
-			global error string: the callback runs on HIDAPI's internal
-			event context, and internal contexts never write that string
-			(an application has no way to serialize against them, so writing
-			it there would be a use-after-free waiting to happen). Failures
-			are still reported through return values as usual, and
-			hid_error(dev) still works for a device handle - only
-			hid_error(NULL) is left untouched by calls made from the
-			callback.
+			Per-device calls such as hid_error(dev) on a non-NULL handle
+			the callback owns follow the normal per-device rule (no
+			concurrent use of that handle from another thread).
+
+			Calls to the hotplug API (hid_hotplug_register_callback() and
+			hid_hotplug_deregister_callback()) made from within the callback
+			do not update the global error string. Failures of these calls
+			are reported only through their -1 return values;
+			hid_error(NULL) does not provide a failure reason for them.
 
 			Any other HIDAPI function follows HIDAPI's general thread-safety
 			rule (see the Multi-threading Notes in the project wiki): it is
 			the application's responsibility to serialize hid_init / hid_exit /
 			hid_enumerate / hid_open* / hid_close / hid_error(NULL) across all
-			threads, including the hotplug callback thread (hid_exit()
+			threads, including HIDAPI's internal event context (hid_exit()
 			additionally must never be called from within the callback
-			itself - see below). If your application
+			itself - see below). Functions in this group may update the
+			global error string, which is why they must be serialized
+			against hid_error(NULL); whether a call made from the internal
+			event context records a diagnostic at all is not portable (some
+			backends suppress every global-error write in that context), so
+			rely on return values there. If your application
 			already calls those functions only from one thread, calling them
-			from the hotplug callback adds a second thread and is therefore
+			from the internal event context is therefore
 			UNSAFE unless the application adds synchronisation itself. The
 			recommended pattern is to copy the needed fields of @p device out
 			of the callback and handle open/close on your own thread.
 
 			Calling hid_exit() from within the callback has undefined behavior:
-			hid_exit() joins the hotplug thread, which would be joining itself.
+			hid_exit() tears down the hotplug machinery and normally waits
+			for the internal event context to drain (joining its thread or
+			waiting for OS notification callbacks). Calling it from within
+			a callback can wait on itself or invalidate state still in use
+			by the callback.
 
 			@par The device parameter
 
@@ -418,20 +465,32 @@ extern "C" {
 
 			The @p device->next pointer is always NULL. Each callback
 			invocation describes exactly one device; compound or composite
-			devices that expose multiple interfaces produce multiple callback
-			invocations (typically delivered in quick succession).
+			devices that expose multiple interfaces - or, on backends that
+			enumerate one entry per top-level usage (linux/hidraw, macOS),
+			multiple usages - produce one callback invocation per entry
+			hid_enumerate() would list for them (typically delivered in
+			quick succession). Such sibling entries may share the same
+			path and differ only in usage_page/usage.
 
 			For #HID_API_HOTPLUG_EVENT_DEVICE_LEFT events @p device points to
 			a copy captured when the device arrived (or was enumerated): all
 			fields, including the strings, are valid and describe the device
 			as it was while connected. A "left" event is delivered for any
 			matching device that disconnects while the callback is
-			registered, including devices that were already connected
+			registered, subject to the best-effort delivery caveat under
+			#HID_API_HOTPLUG_ENUMERATE, including devices already connected
 			before the registration (their arrival is reported to this
 			callback only if #HID_API_HOTPLUG_ENUMERATE was used). When the
 			callback has observed the device's arrival, the path field
-			matches the one reported then and may be used to correlate the
-			two events.
+			matches the one reported then; use path together with
+			usage_page/usage (and interface_number) to correlate a specific
+			sibling's two events.
+
+			As with hid_enumerate(), string fields may be NULL when the
+			backend could not read them at arrival time (e.g. the libusb
+			backend on a device it cannot open yet, before udev permission
+			rules apply); re-enumerate from an application thread if they
+			are needed.
 
 			@par Return value
 
@@ -471,12 +530,17 @@ extern "C" {
 			If @p vendor_id and @p product_id are both set to 0, then all HID devices will be notified.
 
 			If HIDAPI is not initialized yet, this function initializes it
-			implicitly (as if by hid_init()). On some backends this binds
-			HIDAPI's device-monitoring facilities to the calling thread (for
-			example, the macOS backend schedules its run loop there). An
-			application that cares which thread owns those facilities should
-			call hid_init() explicitly from that thread first, rather than
-			relying on the implicit initialization performed here.
+			implicitly (as if by hid_init()). That implicit initialization
+			follows the same rules as an explicit hid_init() (see the
+			Multi-threading Notes): it must not run concurrently with
+			hid_init()/hid_exit()/hid_enumerate()/hid_open*()/hid_close()/
+			hid_error(NULL) on another thread. On macOS the registering
+			thread then becomes the thread that must later call hid_exit()
+			and must stay alive until then: the library's IOHIDManager used
+			by hid_enumerate()/hid_open*() is scheduled on that thread's run
+			loop; hotplug events are still delivered on HIDAPI's internal
+			event context, never on that thread. Call hid_init() explicitly
+			from your HIDAPI thread before registering to avoid this.
 
 			When #HID_API_HOTPLUG_ENUMERATE is set, the synthetic "arrived"
 			events are delivered asynchronously on HIDAPI's internal event
@@ -490,30 +554,41 @@ extern "C" {
 
 			@par Thread safety
 
-			hid_hotplug_register_callback() and hid_hotplug_deregister_callback()
-			are thread-safe with respect to each other and to HIDAPI's
-			internal hotplug machinery. They may be called from any thread,
-			including from within a hotplug callback. This is a deliberate
-			exception to HIDAPI's general "not thread-safe" rule (see the
+			Once the library is initialized, hid_hotplug_register_callback()
+			and hid_hotplug_deregister_callback() are thread-safe with
+			respect to each other and to HIDAPI's internal hotplug machinery.
+			They may be called from any thread, including from within a
+			hotplug callback. This is a deliberate exception to HIDAPI's
+			general "not thread-safe" rule (see the
 			Multi-threading Notes in the project wiki).
+			They must, however, be serialized against hid_init() and
+			hid_exit(): no hotplug API call may be in flight on any thread
+			while hid_exit() runs, and handles obtained before hid_exit()
+			must not be passed to hid_hotplug_deregister_callback() afterwards.
 
-			The one caveat is the global error string: on failure these two
-			functions set it, like every other HIDAPI function that reports
-			an error via hid_error(NULL). They therefore have to be
-			serialized against hid_error(NULL) - which the application is
-			already required to serialize across all threads - even though
-			they need no serialization against each other. HIDAPI's own
-			internal threads never write the global error string, so an
-			application that serializes its own hid_error(NULL) calls
-			against its other HIDAPI calls is safe.
+			The one caveat is the global error string. Called from an
+			application thread, these two functions write it like the
+			functions in the Multi-threading Notes group: they set it on
+			failure; a successful registration also resets it, as by
+			hid_init(). An application must therefore serialize them against
+			every call that touches that string - hid_init(), hid_exit(),
+			hid_enumerate(), hid_open*(), hid_close() and hid_error(NULL) -
+			on other threads, including calls made from a hotplug callback.
+			The two hotplug functions need no serialization against each
+			other, including when called from within a callback. In that
+			context they leave the global error string untouched and only
+			the -1 return is available on failure (see #hid_hotplug_callback_fn).
 
 			The first successful call to hid_hotplug_register_callback()
-			starts HIDAPI's internal hotplug machinery (on most platforms an
-			internal thread), which runs until either (a) the last callback
-			is deregistered, or (b) hid_exit() is called. hid_exit()
-			deregisters any callbacks that are still registered and
-			invalidates their handles. hid_exit() must not be called from
-			within a hotplug callback (see #hid_hotplug_callback_fn).
+			starts HIDAPI's internal event context, which runs until
+			(a) the last callback is deregistered, (b) hid_exit() is called,
+			or (c) the backend's monitoring facility fails (see
+			#HID_API_HOTPLUG_ENUMERATE). hid_exit() deregisters any callbacks
+			that are still registered and invalidates their handles.
+			Calling hid_exit() from within a
+			hotplug callback has undefined behavior: teardown can wait on
+			the current callback or invalidate state it still uses
+			(see #hid_hotplug_callback_fn).
 
 			@ingroup API
 
@@ -532,7 +607,10 @@ extern "C" {
 
 			@returns
 				This function returns 0 on success or -1 on error.
-				Call hid_error(NULL) to get the failure reason.
+				Call hid_error(NULL) to get the failure reason (not applicable
+				to a call made from within a hotplug callback). On success
+				the global error string is reset, as by hid_init(), unless
+				this call is made from within a hotplug callback.
 				Registration fails if @p callback is NULL, if @p events
 				contains no valid #hid_hotplug_event bit, or if @p events
 				or @p flags contain unknown bits. When more than one argument
@@ -541,7 +619,20 @@ extern "C" {
 				return and the zeroed @p callback_handle are guaranteed.
 
 			@note On backends without hotplug support (e.g. NetBSD)
-				this function always returns -1.
+				this function always returns -1 and leaves the global
+				error string untouched. On Windows, hotplug
+				requires Windows 8 or later (CM_Register_Notification): on
+				older versions hid_init() succeeds but this function returns
+				-1 with an explanatory hid_error(NULL) message. On the libusb
+				backend it additionally requires a libusb that reports
+				LIBUSB_CAP_HAS_HOTPLUG at runtime; otherwise both this
+				function and hid_hotplug_deregister_callback() return -1.
+
+			@note On macOS the first registration (and the first after the
+				last deregistration) opens the system's HID devices through
+				an IOHIDManager: it may fail with -1 if a device is seized
+				exclusively by another process or Input Monitoring access
+				is denied, and may trigger the Input Monitoring prompt.
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_hotplug_register_callback(unsigned short vendor_id, unsigned short product_id, int events, int flags, hid_hotplug_callback_fn callback, void *user_data, hid_hotplug_callback_handle *callback_handle);
 
@@ -549,11 +640,17 @@ extern "C" {
 
 			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
 
-			Thread-safe. May be called from any thread, including from within
-			a hotplug callback (on its own handle or on another callback's
-			handle). Calling it on a handle that was already deregistered,
-			or on a handle that was never valid, is safe: it has no effect
-			and returns -1.
+			Thread-safe (subject to the initialization and global-error
+			caveats under "Thread safety" on #hid_hotplug_register_callback).
+			May be called from any thread, including from within a hotplug
+			callback (on its own handle or on another callback's handle).
+			Calling it on a handle that was already deregistered, or on a
+			handle that was never valid, is safe while the library remains
+			initialized (see #hid_hotplug_callback_handle): it does not
+			affect any registered callback and returns -1 (it may still
+			complete a pending internal wind-down before returning).
+			Handles obtained before hid_exit() must not be reused after a
+			subsequent hid_init().
 
 			When called from any thread other than HIDAPI's internal event
 			context, this function does not return until an in-progress
@@ -576,6 +673,9 @@ extern "C" {
 				This function returns 0 when the callback was found and
 				deregistered, or -1 on error (including when
 				@p callback_handle is not a registered handle).
+				Call hid_error(NULL) to get the failure reason (not applicable
+				to a call made from within a hotplug callback).
+				On success the global error string is left unchanged.
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_hotplug_deregister_callback(hid_hotplug_callback_handle callback_handle);
 
