@@ -344,6 +344,68 @@ jobs:
         ninja
 
 
+  windows-cmake-no-crt:
+
+    name: windows no-CRT (${{ matrix.name }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - name: MSVC
+          compiler: cl
+        - name: clang-cl
+          compiler: clang-cl
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        path: hidapisrc
+    - name: Set up MSVC developer environment
+      uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
+    - name: Install Ninja
+      shell: cmd
+      run: choco install ninja -y --no-progress
+    - name: Configure no-CRT static library
+      shell: pwsh
+      run: |
+        cmake -G Ninja -B build\no-crt -S hidapisrc `
+          -DCMAKE_C_COMPILER=${{ matrix.compiler }} -DCMAKE_BUILD_TYPE=Release `
+          -DBUILD_SHARED_LIBS=OFF -DHIDAPI_NO_CRT=ON `
+          -DHIDAPI_WITH_TESTS=OFF -DHIDAPI_BUILD_HIDTEST=OFF
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build build\no-crt
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    - name: Check no CRT imports
+      shell: pwsh
+      run: |
+        @'
+        #include <windows.h>
+        #include <hidapi.h>
+
+        void __cdecl mainCRTStartup(void)
+        {
+            if (hid_init() == 0)
+                hid_exit();
+            ExitProcess(0);
+        }
+        '@ | Set-Content -Encoding ascii no_crt_probe.c
+
+        & ${{ matrix.compiler }} /nologo /c /GS- /Gs9999999 /DHID_API_NO_EXPORT_DEFINE /Ihidapisrc\hidapi no_crt_probe.c
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        link /nologo /NODEFAULTLIB /ENTRY:mainCRTStartup /SUBSYSTEM:CONSOLE `
+          /OUT:no_crt_probe.exe no_crt_probe.obj `
+          build\no-crt\src\windows\hidapi.lib kernel32.lib user32.lib
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        $deps = dumpbin /nologo /dependents no_crt_probe.exe | Out-String
+        $deps
+        if ($deps -match '(?i)(vcruntime|ucrtbase|msvcrt|api-ms-win-crt)') {
+            throw 'CRT dependency found in the no-CRT probe'
+        }
+
   windows-cmake-mingw:
 
     runs-on: windows-latest

@@ -82,6 +82,7 @@ endif()
 
 if(WIN32)
     option(HIDAPI_BUILD_PP_DATA_DUMP "Build small Windows console application pp_data_dump.exe" ${IS_DEBUG_BUILD})
+    option(HIDAPI_NO_CRT "Build the Windows backend without the C runtime" OFF)
 endif()
 
 add_subdirectory(src)
