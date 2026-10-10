@@ -44,7 +44,7 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cmake -B build/framework -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/framework -DCMAKE_FRAMEWORK=ON -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared
@@ -56,6 +56,14 @@ jobs:
     - name: Build CMake Framework
       working-directory: build/framework
       run: make install
+    - name: Run virtual-device tests (IOHIDUserDevice self-skips on hosted CI)
+      working-directory: build/shared
+      run: |
+        # The macOS virtual device needs the com.apple.developer.hid.virtual.device
+        # entitlement and interactive user consent, neither available on a hosted
+        # runner, so DeviceIO_darwin self-skips (CTest code 77). This still
+        # verifies the provider builds and the test runs/links.
+        ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
@@ -117,7 +125,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install libudev-dev libusb-1.0-0-dev python3-pip ninja-build
+        sudo apt install autoconf automake libudev-dev libusb-1.0-0-dev pkg-config python3-pip ninja-build
         sudo -H pip3 install meson
     - name: Configure CMake
       run: |
@@ -130,25 +138,34 @@ jobs:
     - name: Build CMake Static
       working-directory: build/static
       run: make install
-    - name: Run hidraw unit tests (virtual uhid device)
+    - name: Check pkg-config package
+      run: |
+        autoreconf --install --force hidapisrc/tests/pkg-config
+        mkdir -p build/pkg-config-test
+        cd build/pkg-config-test
+        CFLAGS="${GNU_COMPILE_FLAGS}" \
+          PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/install/shared/lib/pkgconfig" \
+          "${GITHUB_WORKSPACE}/hidapisrc/tests/pkg-config/configure"
+        make V=1
+    - name: Run virtual-device tests (uhid -> hidraw; raw-gadget self-skips)
       working-directory: build/shared
       run: |
-        # uhid is shipped in the 'extra' modules package on the runner kernel.
-        # All of this is best-effort: if uhid still can't be provided the test
-        # self-skips (CTest code 77) instead of failing.
+        # uhid ships in the 'extra' modules package on the runner kernel.
+        # Everything here is best-effort: if a virtual device can't be provided
+        # the matching test self-skips (CTest code 77) instead of failing.
         sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
         sudo modprobe uhid || true
         ls -l /dev/uhid || echo "/dev/uhid not present"
-        # Run as root so the test can create the /dev/uhid device and open the
-        # resulting /dev/hidrawN node. LeakSanitizer is disabled (udev keeps
-        # some global allocations alive at exit) but ASan use-after-free /
-        # overflow detection stays active.
+        # Run as root so the test can create /dev/uhid and open the resulting
+        # /dev/hidrawN. LeakSanitizer off (udev keeps allocations alive at
+        # exit); ASan use-after-free / overflow detection stays active.
         sudo env "ASAN_OPTIONS=detect_leaks=0" ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
       with:
         files: "install/shared/lib/libhidapi-libusb.so, \
                 install/shared/lib/libhidapi-hidraw.so, \
+                install/shared/lib/pkgconfig/hidapi.pc, \
                 install/shared/include/hidapi/hidapi.h, \
                 install/shared/include/hidapi/hidapi_libusb.h, \
                 install/static/lib/libhidapi-libusb.a, \

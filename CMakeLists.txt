@@ -72,8 +72,10 @@ endif()
 
 if(WIN32)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
-elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")
-    # Linux has virtual-device (uhid) based tests for the hidraw backend
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
+    # Linux and macOS have virtual-device based tests (uhid / raw-gadget /
+    # IOHIDUserDevice). Off by default: they need a virtual device at runtime
+    # and otherwise self-skip.
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 else()
     set(HIDAPI_WITH_TESTS OFF)
@@ -99,7 +101,7 @@ if(HIDAPI_BUILD_HID_READ_TEST)
     add_subdirectory(hid_read_test)
 endif()
 
-if(HIDAPI_WITH_TESTS AND CMAKE_SYSTEM_NAME MATCHES "Linux")
+if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
     add_subdirectory(src/tests)
 endif()
 

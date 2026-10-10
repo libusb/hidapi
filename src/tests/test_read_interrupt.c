@@ -7,8 +7,9 @@
 
  The scenarios use only the public HIDAPI API and the backend-agnostic
  test_virtual_device interface, so the same test can be reused for any
- backend that provides a virtual-device implementation. Today the only
- provider is Linux uhid (see src/tests/CMakeLists.txt).
+ backend that provides a virtual-device implementation. It is currently
+ built only for the Linux hidraw backend (uhid provider), as it uses
+ pthread_timedjoin_np (see src/tests/CMakeLists.txt).
 
  The contents of this file may be used by anyone for any
  reason without any conditions and may be used as a
@@ -85,18 +86,18 @@ static int join_with_timeout(pthread_t thread, int timeout_ms)
 
 /* --- Individual scenarios ------------------------------------------------ */
 
-/* Sanity: an injected input report is delivered by a normal read. */
+/* Sanity: a triggered input report is delivered by a normal read. */
 static int test_normal_read(test_virtual_device *vdev)
 {
 	hid_device *h = test_virtual_device_open_hidapi(vdev, 5000);
 	CHECK(h != NULL);
 	drain(h);
 
-	const unsigned char payload[TEST_VDEV_REPORT_SIZE] = {1, 2, 3, 4, 5, 6, 7, 8};
+	const unsigned char payload[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_A;
 	unsigned char buf[64];
 	int n;
 
-	CHECK(test_virtual_device_send_input(vdev, payload, sizeof(payload)) == 0);
+	CHECK(test_virtual_device_trigger(vdev, h, TEST_VDEV_CMD_EMIT_A) >= 0);
 	n = hid_read_timeout(h, buf, sizeof(buf), 2000);
 	CHECK(n == (int)sizeof(payload));
 	CHECK(memcmp(buf, payload, sizeof(payload)) == 0);
@@ -147,7 +148,7 @@ static int test_blocking_read_interrupted_from_thread(test_virtual_device *vdev)
 	pthread_t reader;
 	CHECK(pthread_create(&reader, NULL, reader_fn, &ctx) == 0);
 
-	/* Let the reader settle into the blocking read (no input is injected,
+	/* Let the reader settle into the blocking read (no input is triggered,
 	   so it can only be released by the interrupt). */
 	struct timespec ts = {0, 200 * 1000000L};
 	nanosleep(&ts, NULL);
@@ -226,7 +227,7 @@ static int test_interrupt_is_sticky(test_virtual_device *vdev)
 }
 
 /* After clearing the interrupt, reads resume working: a timed read with no
-   data returns 0 (not -1), and an injected report is then delivered. */
+   data returns 0 (not -1), and a triggered report is then delivered. */
 static int test_clear_resumes_reads(test_virtual_device *vdev)
 {
 	hid_device *h = test_virtual_device_open_hidapi(vdev, 5000);
@@ -242,8 +243,8 @@ static int test_clear_resumes_reads(test_virtual_device *vdev)
 	int n = hid_read_timeout(h, buf, sizeof(buf), 0);   /* no data queued */
 	CHECK(n == 0);
 
-	const unsigned char payload[TEST_VDEV_REPORT_SIZE] = {9, 8, 7, 6, 5, 4, 3, 2};
-	CHECK(test_virtual_device_send_input(vdev, payload, sizeof(payload)) == 0);
+	const unsigned char payload[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_B;
+	CHECK(test_virtual_device_trigger(vdev, h, TEST_VDEV_CMD_EMIT_B) >= 0);
 	n = hid_read_timeout(h, buf, sizeof(buf), 2000);
 	CHECK(n == (int)sizeof(payload));
 	CHECK(memcmp(buf, payload, sizeof(payload)) == 0);
