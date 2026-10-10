@@ -51,6 +51,22 @@ endfunction()
 # --- Linux: hidraw backend via /dev/uhid -----------------------------------
 if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND TARGET hidapi_hidraw)
     hidapi_add_vdev_test(DeviceIO_hidraw test_virtual_device_uhid.c hidapi_hidraw)
+
+    # hid_read_interrupt() scenarios (Linux-only for now: pthread_timedjoin_np).
+    add_executable(test_read_interrupt test_read_interrupt.c test_virtual_device_uhid.c)
+    set_target_properties(test_read_interrupt PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED TRUE
+    )
+    target_link_libraries(test_read_interrupt PRIVATE hidapi_hidraw Threads::Threads)
+    if(HIDAPI_ENABLE_ASAN AND NOT MSVC)
+        target_link_options(test_read_interrupt PRIVATE -fsanitize=address)
+    endif()
+    add_test(NAME ReadInterrupt_hidraw COMMAND test_read_interrupt)
+    set_tests_properties(ReadInterrupt_hidraw PROPERTIES
+        SKIP_RETURN_CODE 77
+        TIMEOUT 60
+    )
 endif()
 
 # --- Linux: libusb backend via /dev/raw-gadget (+ dummy_hcd) ----------------
