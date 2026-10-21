@@ -2017,6 +2017,9 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	/* Close the handle */
 	libusb_close(dev->device_handle);
 
+	fprintf(stderr, "HIDAPI-STATS TEST-1024: received=%llu dropped=%llu max_queue=%u\n",
+		dev->reports_received, dev->reports_dropped, dev->queue_max);
+
 	/* Clear out the queue of received reports. */
 	hidapi_thread_mutex_lock(&dev->thread_state);
 	while (dev->input_reports) {
