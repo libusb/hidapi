@@ -160,6 +160,17 @@ static libusb_context *usb_context = NULL;
 static hidapi_error_ctx last_global_error;
 
 uint16_t get_usb_code_for_current_locale(void);
+/* Maximum number of queued input reports for the libusb backend.
+ * Applications may override this at build time. The previous default
+ * of approximately 32 reports could lose data during scheduling delays.
+ */
+#ifndef HIDAPI_LIBUSB_INPUT_REPORT_QUEUE_SIZE
+#define HIDAPI_LIBUSB_INPUT_REPORT_QUEUE_SIZE 1024
+#endif
+#if HIDAPI_LIBUSB_INPUT_REPORT_QUEUE_SIZE < 2
+#error HIDAPI_LIBUSB_INPUT_REPORT_QUEUE_SIZE must be at least 2
+#endif
+
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
 
 static hid_device *new_hid_device(void)
@@ -1132,10 +1143,10 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 			}
 			cur->next = rpt;
 
-			/* Pop one off if we've reached 30 in the queue. This
-			   way we don't grow forever if the user never reads
-			   anything from the device. */
-			if (num_queued > 30) {
+			/* Bound memory usage if the application stops reading.
+			   A short queue can silently lose reports during brief scheduling
+			   delays at high report rates. */
+			if (num_queued > HIDAPI_LIBUSB_INPUT_REPORT_QUEUE_SIZE - 2) {
 				return_data(dev, NULL, 0);
 			}
 		}
