@@ -50,3 +50,35 @@ The work is split across two upstream repositories; the local experimental build
 ## Source of truth
 
 The local experimental source files under `essais-hidapi/hidapi-0.15.0` on the development workstation are the reference implementation. Do not substitute a reimplementation when preparing patches.
+
+## API and compatibility
+
+`hid_get_queue_stats(dev, &received, &dropped, &max_queue)` returns zero
+for an open libusb device. All pointers are required; invalid arguments return
+-1 without changing outputs. The existing receive mutex protects the snapshot.
+Other backends export the same function and return -1 without changing outputs.
+`HID_API_HAS_QUEUE_STATS` identifies headers declaring this API.
+
+The 1024-report limit preserves the tested oldest-report discard policy.
+`max_queue` measures depth before overflow removal and can therefore reach 1025.
+Counters are cumulative for the lifetime of an open device and do not reset
+when read. Closing a libusb device logs the native counters to standard error.
+Callers must serialize close against statistics reads, as for other device APIs.
+
+## Hardware-free regression
+
+From the repository root, compile and run sequentially:
+
+```sh
+mkdir -p build-local
+cc -g -fsanitize=address,undefined -pthread -Ihidapi -Ilibusb \
+  $(pkg-config --cflags libusb-1.0) tests/queue-stats/test_queue_stats.c \
+  -o build-local/test-queue-stats $(pkg-config --libs libusb-1.0)
+./build-local/test-queue-stats
+```
+
+The test uses the actual receive callback and queue with mocked USB initialization,
+shutdown and transfer submission. It verifies invalid arguments, initial counters,
+the 1024/1025 overflow boundary, FIFO retention of the newest 1024 reports,
+and cumulative counters after 22658 synthetic reports. It never discovers or
+opens a USB device.

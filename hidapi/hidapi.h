@@ -547,9 +547,18 @@ extern "C" {
 		*/
 		void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev);
 
-		/** @brief Read libusb receive queue diagnostics for an open device.
-		 * @returns 0 on success, -1 for invalid parameters.
+		/** @brief Read native libusb receive queue diagnostics.
+		 *
+		 * received counts reports queued since opening the device, including
+		 * reports subsequently dropped. dropped counts oldest reports removed
+		 * on overflow. max_queue is the peak depth before overflow removal,
+		 * so it may reach 1025 with the 1024-report queue limit.
+		 * The three counters are read under the existing receive mutex.
+		 * All output pointers must be non-NULL. Outputs are unchanged on error.
+		 * @returns 0 on success, -1 for invalid parameters or an unsupported
+		 * backend. Only the libusb backend supplies these counters.
 		 */
+#define HID_API_HAS_QUEUE_STATS 1
 		int HID_API_EXPORT HID_API_CALL hid_get_queue_stats(
 			hid_device *dev, unsigned long long *received,
 			unsigned long long *dropped, unsigned int *max_queue);
