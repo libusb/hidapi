@@ -1616,3 +1616,15 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
+
+/* These receive queue counters belong to the libusb backend only. */
+int HID_API_EXPORT HID_API_CALL hid_get_queue_stats(
+	hid_device *dev, unsigned long long *received,
+	unsigned long long *dropped, unsigned int *max_queue)
+{
+	(void)dev;
+	(void)received;
+	(void)dropped;
+	(void)max_queue;
+	return -1;
+}

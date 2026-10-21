@@ -1213,3 +1213,15 @@ HID_API_EXPORT const char* HID_API_CALL hid_version_str(void)
 {
 	return HID_API_VERSION_STR;
 }
+
+/* These receive queue counters belong to the libusb backend only. */
+int HID_API_EXPORT HID_API_CALL hid_get_queue_stats(
+	hid_device *dev, unsigned long long *received,
+	unsigned long long *dropped, unsigned int *max_queue)
+{
+	(void)dev;
+	(void)received;
+	(void)dropped;
+	(void)max_queue;
+	return -1;
+}
