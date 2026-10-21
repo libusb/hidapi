@@ -547,6 +547,13 @@ extern "C" {
 		*/
 		void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev);
 
+		/** @brief Read libusb receive queue diagnostics for an open device.
+		 * @returns 0 on success, -1 for invalid parameters.
+		 */
+		int HID_API_EXPORT HID_API_CALL hid_get_queue_stats(
+			hid_device *dev, unsigned long long *received,
+			unsigned long long *dropped, unsigned int *max_queue);
+
 		/** @brief Get The Manufacturer String from a HID device.
 
 			@ingroup API
