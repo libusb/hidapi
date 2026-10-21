@@ -57,6 +57,16 @@ int main(void)
 	assert(hid_get_queue_stats(dev, &received, &dropped, &peak) == 0);
 	assert(received == 22658 && dropped == 1 && peak == 1025);
 	free_hid_device(dev);
+	dev = new_hid_device();
+	assert(dev);
+	transfer.user_data = dev;
+	for (unsigned int i = 0; i < 22658; ++i) {
+		read_callback(&transfer);
+		assert(return_data(dev, output, sizeof(output)) == 2);
+	}
+	assert(hid_get_queue_stats(dev, &received, &dropped, &peak) == 0);
+	assert(received == 22658 && dropped == 0 && peak == 1);
+	free_hid_device(dev);
 	assert(hid_exit() == 0);
 	return 0;
 }

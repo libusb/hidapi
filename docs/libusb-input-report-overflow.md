@@ -82,3 +82,15 @@ shutdown and transfer submission. It verifies invalid arguments, initial counter
 the 1024/1025 overflow boundary, FIFO retention of the newest 1024 reports,
 and cumulative counters after 22658 synthetic reports. It never discovers or
 opens a USB device.
+
+## Contribution build validation
+
+Linux x86_64, GCC 15.2, libusb 1.0.29: libusb and hidraw shared libraries
+compiled sequentially. The synthetic callback regression passed under AddressSanitizer
+and UndefinedBehaviorSanitizer, including a separate 22658-report zero-drop run.
+Leak detection was disabled (`ASAN_OPTIONS=detect_leaks=0`) because LeakSanitizer
+cannot operate under this environment's tracing restrictions. The hidraw unsupported
+API returned -1 with outputs unchanged. No devices were enumerated or opened.
+CMake and Autotools are unavailable here, so native libraries were compiled directly
+with `cc -shared -fPIC` and the appropriate pkg-config flags. Windows, macOS and
+NetBSD changes were inspected but require their platform CI for compilation.
