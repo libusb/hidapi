@@ -136,6 +136,11 @@ struct hid_device_ {
 	/* List of received input reports. */
 	struct input_report *input_reports;
 
+	/* Receive queue diagnostics (protected by thread_state mutex). */
+	unsigned long long reports_received;
+	unsigned long long reports_dropped;
+	unsigned int queue_max;
+
 	/* Was kernel driver detached by libusb */
 #ifdef DETACH_KERNEL_DRIVER
 	int is_driver_detached;
@@ -161,6 +166,21 @@ static hidapi_error_ctx last_global_error;
 
 uint16_t get_usb_code_for_current_locale(void);
 static int return_data(hid_device *dev, unsigned char *data, size_t length);
+
+/* Native receive queue counters. */
+int HID_API_EXPORT HID_API_CALL hid_get_queue_stats(
+    hid_device *dev, unsigned long long *received,
+    unsigned long long *dropped, unsigned int *max_queue)
+{
+    if (!dev || !received || !dropped || !max_queue)
+        return -1;
+    hidapi_thread_mutex_lock(&dev->thread_state);
+    *received = dev->reports_received;
+    *dropped = dev->reports_dropped;
+    *max_queue = dev->queue_max;
+    hidapi_thread_mutex_unlock(&dev->thread_state);
+    return 0;
+}
 
 static hid_device *new_hid_device(void)
 {
@@ -1120,6 +1140,9 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 		if (dev->input_reports == NULL) {
 			/* The list is empty. Put it at the root. */
 			dev->input_reports = rpt;
+			dev->reports_received++;
+			if (dev->queue_max < 1)
+				dev->queue_max = 1;
 			hidapi_thread_cond_signal(&dev->thread_state);
 		}
 		else {
@@ -1131,11 +1154,15 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 				num_queued++;
 			}
 			cur->next = rpt;
+			dev->reports_received++;
+			unsigned int queue_depth = (unsigned int)num_queued + 2;
+			if (queue_depth > dev->queue_max)
+				dev->queue_max = queue_depth;
 
-			/* Pop one off if we've reached 30 in the queue. This
-			   way we don't grow forever if the user never reads
-			   anything from the device. */
-			if (num_queued > 30) {
+			/* Preserve the validated 1,024-report queue limit; prevent
+			   unbounded memory growth if the application never reads. */
+			if (num_queued > 1022) {
+				dev->reports_dropped++;
 				return_data(dev, NULL, 0);
 			}
 		}
