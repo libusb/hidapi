@@ -45,14 +45,14 @@ Regardless of what build system you choose to use, there are specific dependenci
 ### Linux:
 
 Depending on which backend you're going to build, you'll need to install
-additional development packages. For `linux/hidraw` backend, you need a
-development package for `libudev`. For `libusb` backend, naturally, you need
-`libusb` development package.
+additional packages. The `linux/hidraw` backend loads `libudev` dynamically,
+so it only needs the runtime library. The `libusb` backend needs the `libusb`
+development package.
 
 On Debian/Ubuntu systems these can be installed by running:
 ```sh
-# required only by hidraw backend
-sudo apt install libudev-dev
+# required at runtime by the hidraw backend
+sudo apt install libudev1
 # required only by libusb backend
 sudo apt install libusb-1.0-0-dev
 ```
