@@ -1,21 +1,14 @@
 name: Windows Virtual HID Device Test (manual)
 
 # Builds and self-signs a modified vhidmini2 UMDF2 driver, installs it on a
-# hosted runner, then runs the backend-agnostic device-I/O test against that
+# hosted runner, then runs device-I/O and read-interrupt tests against that
 # real virtual HID device (winapi backend). It installs a driver, so it is not
 # part of the per-push CI matrix; run it on demand from the Actions tab, or by
 # adding the 'ci-virtual-device' label to a pull request.
 #
-# The work is split across two runners because no single hosted image can do
-# both today:
-#   - build-driver runs on windows-2022: the cached WDK (10.0.26100.6584)
-#     ships DriverKit build tasks only up to MSBuild 17 (VS2022), which the
-#     windows-2025* images no longer carry (VS2026 / MSBuild 18 -> MSB4062).
-#   - win-vhid runs on windows-latest (Server 2025): the driver package's INF
-#     depends on MsHidUmdf.inf semantics introduced in build 22000, so it does
-#     not install on Server 2022 (build 20348).
-# Revisit once a WDK with 18.0 build tasks is cached here - then both jobs can
-# run on windows-latest again (and could be merged back into one).
+# build-driver uses windows-2022 for the cached WDK's MSBuild 17 tasks.
+# win-vhid uses windows-latest for the driver INF's MsHidUmdf.inf requirements
+# (Windows build 22000 or later). The signed driver artifact connects the jobs.
 
 on:
   workflow_dispatch:
@@ -141,11 +134,23 @@ jobs:
         cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DHIDAPI_WITH_TESTS=ON
         cmake --build build --config Release
 
-    - name: Run device-I/O test against the virtual device
+    - name: Run device-I/O and read-interrupt tests against the virtual device
       shell: pwsh
       working-directory: build
       run: |
-        ctest -C Release -R DeviceIO_winapi --output-on-failure
+        ctest -C Release -R '^(DeviceIO|ReadInterrupt)_winapi$' --no-tests=error --output-on-failure --output-junit vdev-results.xml
+        if ($LASTEXITCODE -ne 0) { throw "Virtual-device tests failed." }
+        [xml]$results = Get-Content vdev-results.xml -Raw
+        $cases = @($results.SelectNodes('//testcase'))
+        if ($cases.Count -ne 2) { throw "Expected both Windows virtual-device suites." }
+        foreach ($name in @('DeviceIO_winapi', 'ReadInterrupt_winapi')) {
+          if ($name -notin $cases.name) { throw "Missing virtual-device suite: $name" }
+        }
+        foreach ($case in $cases) {
+          if ($null -ne $case.SelectSingleNode('skipped|failure|error')) {
+            throw "Virtual-device suite did not pass: $($case.name)"
+          }
+        }
 
     - name: Cleanup virtual device
       if: always()

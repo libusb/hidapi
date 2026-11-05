@@ -18,6 +18,7 @@ add_library(hidapi_winapi
     ${HIDAPI_PUBLIC_HEADERS}
     ${SOURCES}
 )
+hidapi_configure_sanitizers(hidapi_winapi)
 if(HIDAPI_BUILD_AS_CXX)
     set_source_files_properties(hid.c hidapi_descriptor_reconstruct.c PROPERTIES LANGUAGE CXX)
 endif()

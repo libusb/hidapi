@@ -1,6 +1,6 @@
 name: Linux libusb Virtual HID Device Test (manual)
 
-# Runs the device-I/O test against the HIDAPI *libusb* backend using a real
+# Runs device-I/O and read-interrupt tests against the HIDAPI libusb backend using a
 # virtual USB HID device (USB Raw Gadget on top of dummy_hcd).
 #
 # The hosted ubuntu-latest (azure) kernel is built without the USB gadget
@@ -32,7 +32,7 @@ jobs:
         set -eux
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential cmake libudev-dev libusb-1.0-0-dev \
+          build-essential cmake libudev-dev libusb-1.0-0-dev python3 \
           qemu-system-x86 virtme-ng linux-image-generic
         # raw_gadget ships in the generic kernel's modules-extra; install that
         # plus headers (needed to build dummy_hcd, which Ubuntu doesn't package).
@@ -64,7 +64,7 @@ jobs:
           -DHIDAPI_WITH_LIBUSB=ON -DHIDAPI_WITH_HIDRAW=OFF -DHIDAPI_WITH_TESTS=ON
         cmake --build build
 
-    - name: Run DeviceIO_libusb inside a VM (generic kernel + raw_gadget)
+    - name: Run libusb virtual-device tests inside a VM (generic kernel + raw_gadget)
       run: |
         set -eux
         # The generic kernel just installed (has dummy_hcd + raw_gadget modules).

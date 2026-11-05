@@ -1118,8 +1118,8 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 	else {
 		/* Unable to open a device. */
-		hid_close(dev);
 		register_global_error_format("Failed to open a device with path '%s': %s", path, strerror(errno));
+		hid_close(dev);
 		return NULL;
 	}
 }
@@ -1242,13 +1242,15 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	return 0; /* Success */
 }
 
-int HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 {
 	__atomic_store_n(&dev->interrupted, 1, __ATOMIC_RELEASE);
 	uint64_t one = 1;
-	ssize_t written = write(dev->interrupt_efd, &one, sizeof(one));
-	(void)written;
-	return 0;
+	ssize_t written;
+	do {
+		written = write(dev->interrupt_efd, &one, sizeof(one));
+	} while (written < 0 && errno == EINTR);
+	/* EAGAIN means the eventfd is already signalled. */
 }
 
 int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
@@ -1260,8 +1262,10 @@ int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
 	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 	uint64_t v;
-	ssize_t got = read(dev->interrupt_efd, &v, sizeof(v));
-	(void)got;
+	ssize_t got;
+	do {
+		got = read(dev->interrupt_efd, &v, sizeof(v));
+	} while (got < 0 && errno == EINTR);
 	return 0;
 }
 

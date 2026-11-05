@@ -993,13 +993,15 @@ int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonbloc
 	return 0;
 }
 
-int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
+void HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
 {
 	__atomic_store_n(&dev->interrupted, 1, __ATOMIC_RELEASE);
 	const char one = 1;
-	ssize_t written = write(dev->interrupt_pipe[1], &one, 1);
-	(void)written;
-	return 0;
+	ssize_t written;
+	do {
+		written = write(dev->interrupt_pipe[1], &one, 1);
+	} while (written < 0 && errno == EINTR);
+	/* EAGAIN means the pipe already contains an interrupt notification. */
 }
 
 int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
@@ -1017,8 +1019,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
 		   before calling hid_read_clear_interrupt -
 		   need to make sure to drain the pipe completely */
 		got = read(dev->interrupt_pipe[0], buf, sizeof(buf));
-	} while (got > 0);
-	(void)got;
+	} while (got > 0 || (got < 0 && errno == EINTR));
 	return 0;
 }
 
