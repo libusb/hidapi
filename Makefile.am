@@ -18,7 +18,7 @@ pkgconfig_DATA += pc/hidapi-darwin.pc
 endif
 
 if OS_FREEBSD
-pkgconfig_DATA += pc/hidapi-libusb.pc
+pkgconfig_DATA += pc/hidapi-hidraw.pc pc/hidapi-libusb.pc
 endif
 
 if OS_KFREEBSD
@@ -44,7 +44,7 @@ SUBDIRS += mac
 endif
 
 if OS_FREEBSD
-SUBDIRS += libusb
+SUBDIRS += freebsd libusb
 endif
 
 if OS_KFREEBSD
@@ -95,6 +95,7 @@ SCMCLEAN_TARGETS= \
  libusb/Makefile.in \
  Makefile.in \
  linux/Makefile.in \
+ freebsd/Makefile.in \
  windows/Makefile.in \
  m4/libtool.m4 \
  m4/lt~obsolete.m4 \

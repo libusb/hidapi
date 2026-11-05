@@ -9,4 +9,5 @@ URL: https://github.com/libusb/hidapi
 Version: @VERSION@
 Libs: -L${libdir} -l@HIDAPI_LIB_NAME@
 Libs.private: @HIDAPI_PRIVATE_LIBS@
+@HIDAPI_GENERIC_REQUIRES_PRIVATE@
 Cflags: -I${includedir}/hidapi

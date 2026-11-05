@@ -92,7 +92,7 @@ HIDAPI-specific CMake variables:
 currently this option is only available on Windows, since only Windows backend has tests;
 
 <details>
-  <summary>Linux-specific variables</summary>
+  <summary>Linux and FreeBSD-specific variables</summary>
 
   - `HIDAPI_WITH_HIDRAW` - when set to TRUE, build HIDRAW-based implementation of HIDAPI (`hidapi-hidraw`), otherwise don't build it; defaults to TRUE;
   - `HIDAPI_WITH_LIBUSB` - when set to TRUE, build LIBUSB-based implementation of HIDAPI (`hidapi-libusb`), otherwise don't build it; defaults to TRUE;
@@ -149,10 +149,10 @@ Available CMake targets after successful `find_package(hidapi)`:
 - `hidapi::winapi` - same as `hidapi::hidapi` on Windows; available only on Windows;
 - `hidapi::darwin` - same as `hidapi::hidapi` on macOS; available only on macOS;
 - `hidapi::libusb` - available when libusb backend is used/available;
-- `hidapi::hidraw` - available when hidraw backend is used/available on Linux;
+- `hidapi::hidraw` - available when hidraw backend is used/available on Linux or FreeBSD;
 
-**NOTE**: on Linux often both `hidapi::libusb` and `hidapi::hidraw` backends are available; in that case `hidapi::hidapi` is an alias for **`hidapi::hidraw`**. The motivation is that `hidraw` backend is a native Linux kernel implementation of HID protocol, and supports various HID devices (USB, Bluetooth, I2C, etc.). If `hidraw` backend isn't built at all (`hidapi::libusb` is the only target) - `hidapi::hidapi` is an alias for `hidapi::libusb`.
-If you're developing a cross-platform application and you are sure you need to use `libusb` backend on Linux, the simple way to achieve this is:
+**NOTE**: on Linux and FreeBSD often both `hidapi::libusb` and `hidapi::hidraw` backends are available; in that case `hidapi::hidapi` is an alias for **`hidapi::hidraw`**. The motivation is that `hidraw` is the native kernel HID implementation and supports various HID devices (USB, Bluetooth, I2C, etc.). If `hidraw` backend isn't built at all (`hidapi::libusb` is the only target) - `hidapi::hidapi` is an alias for `hidapi::libusb`.
+If you're developing a cross-platform application and you are sure you need to use `libusb` backend on Linux or FreeBSD, the simple way to achieve this is:
 ```cmake
 if(TARGET hidapi::libusb)
     target_link_libraries(my_project PRIVATE hidapi::libusb)
@@ -183,7 +183,7 @@ Lets call this "larger project" a "host project".
 
 All of the variables described in [standalone build](#standalone-package-build) section can be used to control HIDAPI build in case of a subdirectory, e.g.:
 ```cmake
-set(HIDAPI_WITH_LIBUSB FALSE) # surely will be used only on Linux
+set(HIDAPI_WITH_LIBUSB FALSE) # used only on Linux and FreeBSD
 set(BUILD_SHARED_LIBS FALSE) # HIDAPI as static library on all platforms
 add_subdirectory(hidapi)
 ```
