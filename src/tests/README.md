@@ -54,13 +54,13 @@ for the per-push CI matrix:
   is derived from Microsoft's
   vhidmini2 sample and is licensed separately under the **MS-PL** (not HIDAPI's
   license); see `windows/driver/README.md` and `windows/driver/LICENSE.txt`.
-* **Linux / libusb** — needs the `raw_gadget` and `dummy_hcd` kernel modules,
-  which the hosted `ubuntu-latest` kernel is built *without* (it has no USB
-  gadget subsystem). The `libusb-vhid-test` workflow therefore runs the test
-  inside a lightweight VM (`virtme-ng` + QEMU) booting a *generic* Ubuntu kernel
-  whose `linux-modules-extra` ships both modules; the VM shares the host
-  filesystem, so it runs the host-built binaries. The same approach works
-  locally and on WSL2 (whose default kernel also lacks these modules).
+* **Linux / libusb** — needs the `raw_gadget` and `dummy_hcd` kernel modules.
+  The `libusb-vhid-test` workflow uses an `ubuntu-24.04` runner and boots a
+  generic guest kernel in a lightweight VM (`virtme-ng` + QEMU). Its
+  `linux-modules-extra` package supplies `raw_gadget`; the workflow builds
+  `dummy_hcd` against the matching kernel headers. The VM shares the host
+  filesystem and runs the host-built binaries. The same approach supports
+  local hosts and WSL2 without USB gadget kernel support.
 * **macOS** — creating an `IOHIDUserDevice` is gated by the
   `com.apple.developer.hid.virtual.device` entitlement *and* an interactive
   Accessibility (TCC) consent prompt, neither available on a hosted runner, so
