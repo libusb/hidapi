@@ -80,7 +80,7 @@ case $host in
 	AC_MSG_RESULT([ (FreeBSD back-end)])
 	AC_DEFINE(OS_FREEBSD, 1, [FreeBSD implementation])
 	AC_SUBST(OS_FREEBSD)
-	backend="libusb"
+	backend="freebsd"
 	os="freebsd"
 	threads="pthreads"
 
@@ -88,6 +88,10 @@ case $host in
 	LDFLAGS="$LDFLAGS -L/usr/local/lib"
 	LIBS="${LIBS}"
 	PKG_CHECK_MODULES([libusb], [libusb-1.0 >= 1.0.9], true, [hidapi_lib_error libusb-1.0])
+	# HIDAPI/hidraw libs
+	LIBS_HIDRAW_PR="${LIBS_HIDRAW_PR} $libusb_LIBS"
+	CFLAGS_HIDRAW="${CFLAGS_HIDRAW} $libusb_CFLAGS"
+	# HIDAPI/libusb libs
 	LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} $libusb_LIBS"
 	CFLAGS_LIBUSB="${CFLAGS_LIBUSB} $libusb_CFLAGS"
 	AC_CHECK_LIB([iconv], [iconv_open], [LIBS_LIBUSB_PRIVATE="${LIBS_LIBUSB_PRIVATE} -liconv"], [hidapi_lib_error libiconv])
@@ -243,33 +247,44 @@ m4_define([HIDAPI_CONFIGURE_BACKEND_PC], [
 			-e "s|@HIDAPI_BACKEND_NAME@|$2|g" \
 			-e "s|@HIDAPI_BACKEND_DESCRIPTION@|$3|g" \
 			-e "s|@HIDAPI_BACKEND_LIBRARY_NAME@|$4|g" \
+			-e "s|@HIDAPI_BACKEND_REQUIRES_PRIVATE@|$5|g" \
 			"$1" > "$1.tmp" &&
 		mv "$1.tmp" "$1"
-	], [$5])
+	], [$6])
 ])
 
 HIDAPI_LIB_NAME=hidapi
 HIDAPI_LIBUSB_LIB_NAME=hidapi
-if test "x$os" = "xlinux"; then
+HIDAPI_GENERIC_REQUIRES_PRIVATE=
+HIDAPI_HIDRAW_REQUIRES_PRIVATE=
+if test "x$os" = "xlinux" || test "x$os" = "xfreebsd"; then
 	HIDAPI_LIB_NAME=hidapi-hidraw
 	HIDAPI_LIBUSB_LIB_NAME=hidapi-libusb
+	if test "x$os" = "xfreebsd"; then
+		HIDAPI_GENERIC_REQUIRES_PRIVATE="Requires.private: libusb-1.0 >= 1.0.9"
+		HIDAPI_HIDRAW_REQUIRES_PRIVATE="$HIDAPI_GENERIC_REQUIRES_PRIVATE"
+	fi
 	HIDAPI_CONFIGURE_BACKEND_PC(
 		[pc/hidapi-hidraw.pc],
 		[hidapi-hidraw],
 		[C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the hidraw implementation.],
-		[hidapi-hidraw])
+		[hidapi-hidraw],
+		[$hidapi_hidraw_requires_private],
+		[hidapi_hidraw_requires_private="$HIDAPI_HIDRAW_REQUIRES_PRIVATE"])
 elif test "x$os" = "xdarwin"; then
 	HIDAPI_CONFIGURE_BACKEND_PC(
 		[pc/hidapi-darwin.pc],
 		[hidapi-darwin],
 		[C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the Darwin implementation.],
-		[hidapi])
+		[hidapi],
+		[])
 elif test "x$os" = "xwindows"; then
 	HIDAPI_CONFIGURE_BACKEND_PC(
 		[pc/hidapi-winapi.pc],
 		[hidapi-winapi],
 		[C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the WinAPI implementation.],
-		[hidapi])
+		[hidapi],
+		[])
 fi
 if test "x$os" != "xdarwin" && test "x$os" != "xwindows"; then
 	HIDAPI_CONFIGURE_BACKEND_PC(
@@ -277,11 +292,13 @@ if test "x$os" != "xdarwin" && test "x$os" != "xwindows"; then
 		[hidapi-libusb],
 		[C Library for USB HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the libusb implementation.],
 		[$hidapi_libusb_lib_name],
+		[],
 		[hidapi_libusb_lib_name="$HIDAPI_LIBUSB_LIB_NAME"])
 fi
 m4_undefine([HIDAPI_CONFIGURE_BACKEND_PC])
 
 AC_SUBST([HIDAPI_LIB_NAME])
+AC_SUBST([HIDAPI_GENERIC_REQUIRES_PRIVATE])
 AC_CONFIG_FILES([pc/hidapi.pc])
 
 AC_SUBST(LTLDFLAGS)
@@ -290,6 +307,7 @@ AC_CONFIG_FILES([Makefile \
 	hidtest/Makefile \
 	libusb/Makefile \
 	linux/Makefile \
+	freebsd/Makefile \
 	mac/Makefile \
 	testgui/Makefile \
 	windows/Makefile])
