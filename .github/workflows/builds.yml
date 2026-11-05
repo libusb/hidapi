@@ -200,7 +200,8 @@ jobs:
         rm -rf build/cxx
         cmake -B build/cxx -S hidapisrc \
           -DCMAKE_BUILD_TYPE=Release \
-          -DHIDAPI_BUILD_AS_CXX=ON -DHIDAPI_BUILD_HID_READ_TEST=ON \
+          -DHIDAPI_BUILD_AS_CXX=ON \
+          -DHIDAPI_BUILD_HID_READ_TEST=ON \
           "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror -Wformat-signedness"
         cmake --build build/cxx
 
