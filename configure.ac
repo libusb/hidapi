@@ -253,8 +253,7 @@ m4_define([HIDAPI_CONFIGURE_BACKEND_PC], [
 			-e "s|@HIDAPI_BACKEND_NAME@|$2|g" \
 			-e "s|@HIDAPI_BACKEND_DESCRIPTION@|$3|g" \
 			-e "s|@HIDAPI_BACKEND_LIBRARY_NAME@|$4|g" \
-			-e "s|@HIDAPI_BACKEND_PRIVATE_LIBS@|$5|g" \
-			-e "s|@HIDAPI_BACKEND_REQUIRES_PRIVATE@|$7|g" \
+			-e "s|@HIDAPI_BACKEND_REQUIRES_PRIVATE@|$5|g" \
 			"$1" > "$1.tmp" &&
 		mv "$1.tmp" "$1"
 	], [$6])
@@ -262,12 +261,15 @@ m4_define([HIDAPI_CONFIGURE_BACKEND_PC], [
 
 HIDAPI_LIB_NAME=hidapi
 HIDAPI_LIBUSB_LIB_NAME=hidapi
-HIDAPI_PRIVATE_LIBS="$HIDAPI_HIDRAW_PRIVATE_LIBS"
 HIDAPI_GENERIC_REQUIRES_PRIVATE=
 HIDAPI_HIDRAW_REQUIRES_PRIVATE=
 if test "x$os" = "xlinux" || test "x$os" = "xfreebsd"; then
 	HIDAPI_LIB_NAME=hidapi-hidraw
 	HIDAPI_LIBUSB_LIB_NAME=hidapi-libusb
+	if test "x$os" = "xlinux" && test -n "$HIDAPI_HIDRAW_PRIVATE_LIBS"; then
+		HIDAPI_GENERIC_REQUIRES_PRIVATE="Libs.private: $HIDAPI_HIDRAW_PRIVATE_LIBS"
+		HIDAPI_HIDRAW_REQUIRES_PRIVATE="$HIDAPI_GENERIC_REQUIRES_PRIVATE"
+	fi
 	if test "x$os" = "xfreebsd"; then
 		HIDAPI_GENERIC_REQUIRES_PRIVATE="Requires.private: libusb-1.0 >= 1.0.9"
 		HIDAPI_HIDRAW_REQUIRES_PRIVATE="$HIDAPI_GENERIC_REQUIRES_PRIVATE"
@@ -277,10 +279,8 @@ if test "x$os" = "xlinux" || test "x$os" = "xfreebsd"; then
 		[hidapi-hidraw],
 		[C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the hidraw implementation.],
 		[hidapi-hidraw],
-		[$HIDAPI_HIDRAW_PRIVATE_LIBS],
-		[HIDAPI_HIDRAW_PRIVATE_LIBS="$HIDAPI_HIDRAW_PRIVATE_LIBS"
-		 hidapi_hidraw_requires_private="$HIDAPI_HIDRAW_REQUIRES_PRIVATE"],
-		[$hidapi_hidraw_requires_private])
+		[$hidapi_hidraw_requires_private],
+		[hidapi_hidraw_requires_private="$HIDAPI_HIDRAW_REQUIRES_PRIVATE"])
 elif test "x$os" = "xdarwin"; then
 	HIDAPI_CONFIGURE_BACKEND_PC(
 		[pc/hidapi-darwin.pc],
@@ -308,7 +308,6 @@ fi
 m4_undefine([HIDAPI_CONFIGURE_BACKEND_PC])
 
 AC_SUBST([HIDAPI_LIB_NAME])
-AC_SUBST([HIDAPI_PRIVATE_LIBS])
 AC_SUBST([HIDAPI_GENERIC_REQUIRES_PRIVATE])
 AC_CONFIG_FILES([pc/hidapi.pc])
 
