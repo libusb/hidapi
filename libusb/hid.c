@@ -1185,6 +1185,12 @@ static void *read_thread(void *param)
 	uint8_t *buf = NULL;
 	size_t length = (size_t)dev->input_ep_max_packet_size;
 
+	/* Control/feature reports can work without an interrupt IN endpoint. */
+	if (dev->input_endpoint == 0) {
+		dev->shutdown_thread = 1;
+		goto notify_main_thread;
+	}
+
 	/* Never shrink below the endpoint packet size: some devices pad short
 	   reports to a complete USB packet. */
 	if (dev->max_input_report_size > length)
@@ -1223,17 +1229,17 @@ static void *read_thread(void *param)
 	   from inside read_callback() */
 	res = libusb_submit_transfer(dev->transfer);
 	if(res < 0) {
-                LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
-                dev->read_thread_init_error = res;
-                dev->shutdown_thread = 1;
-                dev->transfer_loop_finished = 1;
+		LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
+		/* Restricted Windows HID handles can still use feature reports. */
+		dev->shutdown_thread = 1;
+		dev->transfer_loop_finished = 1;
 	}
 
 notify_main_thread:
 	/* Notify the main thread that the read thread is up and running. */
 	hidapi_thread_barrier_wait(&dev->thread_state);
 
-	if (dev->read_thread_init_error)
+	if (dev->read_thread_init_error || !dev->transfer)
 		return NULL;
 
 	/* Handle all the events. */
@@ -2051,15 +2057,18 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	/* Cause read_thread() to stop. */
 	dev->shutdown_thread = 1;
-	libusb_cancel_transfer(dev->transfer);
+	if (dev->transfer)
+		libusb_cancel_transfer(dev->transfer);
 
 	/* Wait for read_thread() to end. */
 	hidapi_thread_join(&dev->thread_state);
 
 	/* Clean up the Transfer objects allocated in read_thread(). */
-	free(dev->transfer->buffer);
-	dev->transfer->buffer = NULL;
-	libusb_free_transfer(dev->transfer);
+	if (dev->transfer) {
+		free(dev->transfer->buffer);
+		dev->transfer->buffer = NULL;
+		libusb_free_transfer(dev->transfer);
+	}
 
 	/* release the interface */
 	libusb_release_interface(dev->device_handle, dev->interface);
