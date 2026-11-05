@@ -1349,8 +1349,8 @@ Return Value:
     //
     // HIDAPI test: only deliver an input report when a scenario has been
     // triggered via SetFeature. Otherwise leave pended reads alone, so that a
-    // blocking hid_read() genuinely blocks until hid_read_interrupt() cancels
-    // it (the read-interrupt tests rely on the device being silent).
+    // blocking hid_read() waits until input arrives or hid_read_interrupt()
+    // wakes the caller. The underlying read request may remain pending.
     //
     command = InterlockedExchange(&queueContext->DeviceContext->ScenarioCommand, 0);
     if (command == 0) {

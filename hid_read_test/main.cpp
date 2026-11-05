@@ -13,26 +13,36 @@
 
 #include <hidapi.h>
 
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <poll.h>
 #include <signal.h>
+#include <unistd.h>
 #endif
 
 namespace {
 
-/* volatile sig_atomic_t is the type the C/C++ standards guarantee is safe to
-   write from a signal handler; std::atomic<bool> is only async-signal-safe when
-   it happens to be lock-free, which is not guaranteed. */
-volatile sig_atomic_t g_terminate = 0;
+/* Signal handlers may only use atomic operations that are lock-free. */
+static_assert(ATOMIC_INT_LOCK_FREE == 2, "Signal handling requires lock-free atomic<int>");
+std::atomic<int> g_terminate(0);
+std::mutex g_interrupt_mutex;
 
 std::string timestamp_now()
 {
@@ -56,9 +66,68 @@ std::string timestamp_now()
 
 extern "C" void on_signal(int)
 {
-    /* async-signal-safe: a single store to a volatile sig_atomic_t. The main
-       thread polls g_terminate and calls hid_read_interrupt() from there. */
-    g_terminate = 1;
+    g_terminate.store(1, std::memory_order_relaxed);
+}
+
+/* Keep input waits bounded so a signal can stop the reader without leaving
+   a helper thread blocked on stdin during process shutdown. */
+void wait_for_exit()
+{
+#ifdef _WIN32
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode;
+    bool console = GetConsoleMode(input, &mode) != 0;
+    DWORD type = GetFileType(input);
+#endif
+    while (!g_terminate.load(std::memory_order_relaxed)) {
+#ifdef _WIN32
+        if (console) {
+            DWORD ready = WaitForSingleObject(input, 50);
+            if (ready == WAIT_TIMEOUT)
+                continue;
+            if (ready != WAIT_OBJECT_0)
+                return;
+            INPUT_RECORD event;
+            DWORD count;
+            if (!ReadConsoleInputW(input, &event, 1, &count))
+                return;
+            if (count && event.EventType == KEY_EVENT && event.Event.KeyEvent.bKeyDown &&
+                (event.Event.KeyEvent.wVirtualKeyCode == VK_RETURN ||
+                 event.Event.KeyEvent.uChar.UnicodeChar == L'\x1a'))
+                return;
+            continue;
+        }
+        if (type == FILE_TYPE_PIPE) {
+            DWORD available;
+            if (!PeekNamedPipe(input, nullptr, 0, nullptr, &available, nullptr))
+                return;  /* EOF or invalid input. */
+            if (!available) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                continue;
+            }
+        }
+        char ch;
+        DWORD count;
+        if (!ReadFile(input, &ch, 1, &count, nullptr) || !count || ch == '\n')
+            return;
+#else
+        struct pollfd input = {STDIN_FILENO, POLLIN, 0};
+        int ready = poll(&input, 1, 50);
+        if (ready < 0) {
+            if (errno == EINTR)
+                continue;
+            return;
+        }
+        if (!ready)
+            continue;
+        char ch;
+        ssize_t count = read(STDIN_FILENO, &ch, 1);
+        if (count < 0 && errno == EINTR)
+            continue;
+        if (count <= 0 || ch == '\n')
+            return;
+#endif
+    }
 }
 
 void read_thread_fn(hid_device *dev)
@@ -75,8 +144,11 @@ void read_thread_fn(hid_device *dev)
             if (err) std::wcout << L": " << err;
             std::cout << std::endl;
 
-            if (hid_is_read_interrupted(dev))
-                break;
+            {
+                std::lock_guard<std::mutex> lock(g_interrupt_mutex);
+                if (hid_is_read_interrupted(dev))
+                    break;
+            }
 
             if (++errors > max_retries) {
                 std::cout << '[' << timestamp_now() << "] giving up after "
@@ -96,6 +168,7 @@ void read_thread_fn(hid_device *dev)
             std::cout << std::setw(2) << static_cast<unsigned>(buf[i]) << ' ';
         std::cout << std::dec << std::endl;
     }
+    g_terminate.store(1, std::memory_order_relaxed);
 }
 
 unsigned short parse_hex_u16(const char *s)
@@ -109,7 +182,7 @@ int main(int argc, char **argv)
 {
     if (argc < 3) {
         std::cerr << "Usage: " << argv[0] << " <vid> <pid>\n"
-                  << "  vid, pid: hex (e.g. 04d8 003f)\n";
+                  << "  vid, pid: your device's vendor and product IDs in hexadecimal\n";
         return 1;
     }
 
@@ -135,7 +208,6 @@ int main(int argc, char **argv)
     std::signal(SIGTERM, on_signal);
 #endif
 #else
-    /* Use sigaction without SA_RESTART so cin.get() returns on signal. */
     struct sigaction sa;
     sa.sa_handler = on_signal;
     sigemptyset(&sa.sa_mask);
@@ -150,20 +222,11 @@ int main(int argc, char **argv)
 
     std::thread reader(read_thread_fn, dev);
 
-    /* Wait for Enter/EOF on a detached helper thread, so the main thread can
-       also observe g_terminate being set asynchronously by the signal handler.
-       This keeps Ctrl+C working on platforms (e.g. Windows) where a console
-       read is not interrupted by the signal. */
-    std::thread input_waiter([]() {
-        std::cin.get();  /* Enter or EOF */
-        g_terminate = 1;
-    });
-    input_waiter.detach();
-
-    while (!g_terminate)
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-    hid_read_interrupt(dev);  /* idempotent — also safe if signal handler ran first */
+    wait_for_exit();
+    {
+        std::lock_guard<std::mutex> lock(g_interrupt_mutex);
+        hid_read_interrupt(dev);
+    }
     reader.join();
 
     hid_close(dev);

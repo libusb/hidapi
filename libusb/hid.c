@@ -1941,13 +1941,12 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 }
 
 
-int HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 {
 	hidapi_thread_mutex_lock(&dev->thread_state);
 	dev->read_interrupted = 1;
 	hidapi_thread_cond_broadcast(&dev->thread_state);
 	hidapi_thread_mutex_unlock(&dev->thread_state);
-	return 0;
 }
 
 

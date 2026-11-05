@@ -1377,13 +1377,12 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	return 0;
 }
 
-int HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 {
 	pthread_mutex_lock(&dev->mutex);
 	dev->read_interrupted = 1;
 	pthread_cond_broadcast(&dev->condition);
 	pthread_mutex_unlock(&dev->mutex);
-	return 0;
 }
 
 int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)

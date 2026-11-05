@@ -427,10 +427,9 @@ extern "C" {
 
 			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
 
-			Thread-safely interrupts a blocking hid_read()/hid_read_timeout() call
-			currently in progress (or about to start) on @p dev. The interrupted
-			call returns -1 immediately; hid_read_error(dev) returns a string
-			indicating the read was interrupted.
+			Wakes a blocked hid_read()/hid_read_timeout() call on @p dev.
+			An interrupted read returns -1; hid_read_error(dev) returns a
+			string indicating the read was interrupted.
 
 			Once interrupted, subsequent calls to hid_read()/
 			hid_read_timeout() also return -1 immediately, until @ref
@@ -447,9 +446,20 @@ extern "C" {
 			feature/output report functions, and all other operations on @p dev
 			continue to work normally.
 
-			This function may be called concurrently with another function
-			operating on the same device. The call is idempotent and is safe
-			to invoke when no read is in flight.
+			This function may run concurrently with device I/O, including a
+			blocked read, but not with hid_close() or hid_exit(). The device
+			handle must remain valid until all calls using it have returned.
+			The call is idempotent and is safe when no read is in flight.
+
+			Calls to hid_read_interrupt(), hid_is_read_interrupted(), and
+			hid_read_clear_interrupt() on the same device must be serialized
+			against one another, including calls to the same function.
+			Otherwise, behavior is undefined.
+
+			After this function returns, hid_is_read_interrupted() returns 1
+			and subsequent reads return -1 until the interrupt is cleared.
+			This function has no recoverable failure result; it relies on the
+			operating system and device driver to support read interruption.
 
 			Recommended usage to cleanly shut down a dedicated read thread:
 			@code
@@ -460,20 +470,22 @@ extern "C" {
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
-
-			@returns
-				This function returns 0 on success and -1 on error.
-				Call hid_error(dev) to get the failure reason.
 		*/
-		int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev);
+		void HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev);
 
 		/** @brief Query whether the read pipeline is currently interrupted.
 
 			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
 
 			Returns the current interrupt state set by @ref hid_read_interrupt
-			and @ref hid_read_clear_interrupt. Suitable for cross-thread
-			observation (read with acquire semantics).
+			and @ref hid_read_clear_interrupt. This function may run alongside
+			device I/O, but not hid_close() or hid_exit(). The device handle
+			must remain valid until the call returns.
+
+			Calls to hid_read_interrupt(), hid_is_read_interrupted(), and
+			hid_read_clear_interrupt() on the same device must be serialized
+			against one another, including calls to the same function.
+			Otherwise, behavior is undefined.
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
@@ -498,13 +510,19 @@ extern "C" {
 			Recommended use: call only when no hid_read*() call is in flight
 			on @p dev. The timing of an in-flight read returning -1 versus
 			a concurrent clear-interrupt taking effect is undefined.
+			Do not overlap this function with hid_close() or hid_exit(); the
+			device handle must remain valid until the call returns.
+
+			Calls to hid_read_interrupt(), hid_is_read_interrupted(), and
+			hid_read_clear_interrupt() on the same device must be serialized
+			against one another, including calls to the same function.
+			Otherwise, behavior is undefined.
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
 
 			@returns
-				This function returns 0 on success and -1 on error.
-				Call hid_error(dev) to get the failure reason.
+				This function returns 0.
 		*/
 		int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev);
 

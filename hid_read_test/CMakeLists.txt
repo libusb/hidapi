@@ -1,5 +1,6 @@
-cmake_minimum_required(VERSION 3.1.3...3.25 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.6.3...4.3 FATAL_ERROR)
 project(hid_read_test CXX)
+include("${CMAKE_CURRENT_LIST_DIR}/../src/cmake/hidapi-sanitizers.cmake")
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # built as a standalone project
@@ -19,6 +20,7 @@ set(HIDAPI_HID_READ_TEST_TARGETS)
 if(NOT WIN32 AND NOT APPLE AND CMAKE_SYSTEM_NAME MATCHES "Linux")
     if(TARGET hidapi::hidraw)
         add_executable(hid_read_test_hidraw main.cpp)
+        hidapi_configure_sanitizers(hid_read_test_hidraw)
         set_target_properties(hid_read_test_hidraw PROPERTIES
             CXX_STANDARD 11
             CXX_STANDARD_REQUIRED ON
@@ -29,6 +31,7 @@ if(NOT WIN32 AND NOT APPLE AND CMAKE_SYSTEM_NAME MATCHES "Linux")
     endif()
     if(TARGET hidapi::libusb)
         add_executable(hid_read_test_libusb main.cpp)
+        hidapi_configure_sanitizers(hid_read_test_libusb)
         set_target_properties(hid_read_test_libusb PROPERTIES
             CXX_STANDARD 11
             CXX_STANDARD_REQUIRED ON
@@ -40,6 +43,7 @@ if(NOT WIN32 AND NOT APPLE AND CMAKE_SYSTEM_NAME MATCHES "Linux")
     endif()
 else()
     add_executable(hid_read_test main.cpp)
+    hidapi_configure_sanitizers(hid_read_test)
     set_target_properties(hid_read_test PROPERTIES
         CXX_STANDARD 11
         CXX_STANDARD_REQUIRED ON
@@ -47,6 +51,12 @@ else()
     )
     target_link_libraries(hid_read_test PRIVATE hidapi::hidapi Threads::Threads)
     list(APPEND HIDAPI_HID_READ_TEST_TARGETS hid_read_test)
+endif()
+
+if(MSVC)
+    foreach(target ${HIDAPI_HID_READ_TEST_TARGETS})
+        target_compile_options(${target} PRIVATE /EHsc)
+    endforeach()
 endif()
 
 install(TARGETS ${HIDAPI_HID_READ_TEST_TARGETS}

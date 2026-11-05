@@ -1222,9 +1222,9 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 		HANDLE waits[2] = { ev, dev->interrupt_event };
 		DWORD wr = WaitForMultipleObjects(2, waits, FALSE, milliseconds >= 0 ? (DWORD)milliseconds : INFINITE);
 		if (wr == WAIT_OBJECT_0 + 1) {
-			/* Interrupt fired and no data is ready. The pending ReadFile is
-			   left in flight; it will resume on the next hid_read_timeout()
-			   call after hid_read_clear_interrupt(). */
+			/* Leave ReadFile in flight. After a clear, the next read waits
+			   for it or retrieves its completed result. hid_close() cancels
+			   and waits for any request still pending. */
 			register_string_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout: operation interrupted");
 			return -1;
 		}
@@ -1283,18 +1283,15 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 	return dev->last_read_error_str;
 }
 
-int HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
+void HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
 {
 	InterlockedExchange(&dev->interrupted, 1);
 	SetEvent(dev->interrupt_event);
-	return 0;
 }
 
 int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
 {
-	// TODO: common but not the most efficient way to check this;
-	// move to C11 atomics when the time comes.
-	// For now this is portable and efficient enough.
+	/* Use the same atomic access as the read path. */
 	return InterlockedCompareExchange(&dev->interrupted, 0, 0) ? 1 : 0;
 }
 
@@ -1469,6 +1466,13 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
+	if (dev->read_pending) {
+		DWORD bytes_read;
+		/* A timed-out or interrupted read may belong to another thread.
+		   Keep its buffer, OVERLAPPED and event alive until it completes. */
+		CancelIoEx(dev->device_handle, &dev->ol);
+		GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE);
+	}
 	CancelIo(dev->device_handle);
 	free_hid_device(dev);
 }

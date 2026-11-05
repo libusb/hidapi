@@ -74,6 +74,12 @@ generate example/test code that respects it. The authoritative reference is
 - Since v0.15.0, a dedicated read thread using only `hid_read`, `hid_read_timeout` and
   `hid_read_error` is safe alongside other operations on the same device from another thread.
   Do not use `hid_error` from such a thread; use `hid_read_error`.
+- Since v0.16.0, `hid_read_interrupt` can wake a blocked read from another thread.
+  Calls to `hid_read_interrupt`, `hid_is_read_interrupted` and `hid_read_clear_interrupt`
+  on the same device must be serialized against one another, including repeated calls to
+  the same function. Keep the device alive until every call using it has returned; do not
+  overlap these functions with `hid_close` or `hid_exit`. Clear only after the read returns
+  when deterministic read-interruption behavior is required.
 - macOS: `hid_init()` and `hid_exit()` must be called from the same thread, and that thread must
   stay alive until all devices are closed and `hid_exit()` has completed.
 
