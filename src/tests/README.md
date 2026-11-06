@@ -67,25 +67,26 @@ for the per-push CI matrix:
   the provider self-skips there. It is meant to actually run on a developer
   machine or a self-hosted runner where consent has been granted.
 
-## Platforms without a provider (documented, not implemented)
+## Platforms without a virtual-device provider
 
-Some platforms have no practical way to *create* a virtual HID device — not even
-in CI — so there is intentionally no provider for them (the backend simply has
-no virtual-device tests):
+The harness has no virtual-device provider for these platforms:
 
-* **FreeBSD** — HIDAPI uses the libusb backend, but FreeBSD has no userspace
-  USB/HID *creation* facility: `cuse(3)` can't produce a libusb-visible USB
-  device, `usb_template(4)` ("USB device mode") needs a hardware USB Device
-  Controller (there is no `dummy_hcd` analogue), and the planned `usrhid(4)` (a
-  `/dev/uhid` equivalent) is not yet in-tree. A real test would need physical
-  device-mode hardware or `usrhid`.
+* **FreeBSD** — the native hidraw and libusb backends have no virtual-device
+  provider in this harness. The separate `ReadInterrupt_freebsd` test exercises
+  the native hidraw backend's read interruption using sockets and pipes.
+  It covers blocking and timed wake-ups, sticky state, queued input, a full wake
+  pipe, unaffected writes and descriptor cleanup. It does not qualify HID
+  ioctls or device enumeration.
 * **NetBSD / OpenBSD** — `uhid(4)` is consumer-only (no create/emulate ioctl),
   there is no `cuse`, and `rump` has no virtual USB host controller; on OpenBSD
   the libusb backend additionally needs `uhid`/`uhidev` disabled in a custom
   kernel. No userspace virtual-device path exists.
 
-CI can build HIDAPI on these systems, but cannot exercise a virtual device, so
-the virtual-device tests are not wired up there.
+CI builds HIDAPI on these systems without running the virtual-device scenarios.
+
+The FreeBSD test includes the production backend implementation and needs no
+HID hardware, virtual-device setup or elevated privileges. It has no skip path
+and runs in the shared, static and C++ CMake configurations in `.builds/freebsd.yml`.
 
 ## Running locally
 
@@ -100,6 +101,9 @@ sudo ctest --test-dir build -R '^(DeviceIO|ReadInterrupt)_hidraw$' --output-on-f
 On Windows/macOS configure with `-DHIDAPI_WITH_TESTS=ON` and run `ctest`; the
 device-backed tests self-skip unless the corresponding virtual device has been
 set up (see the dedicated workflows under `.github/workflows/`).
+
+On FreeBSD, configure with `-DHIDAPI_WITH_TESTS=ON`, build, and run
+`ctest --test-dir build -R '^ReadInterrupt_freebsd$' --output-on-failure`.
 
 ### Running the macOS (`darwin`) provider on a real Mac
 

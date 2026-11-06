@@ -45,3 +45,7 @@ hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
     DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the hidraw implementation."
     REQUIRES_PRIVATE "libusb-1.0 >= 1.0.9"
 )
+
+if(HIDAPI_WITH_TESTS)
+    add_subdirectory(test)
+endif()
