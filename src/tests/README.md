@@ -1,10 +1,10 @@
 # HIDAPI virtual-device tests
 
 Backend-generic HIDAPI tests that run against a **virtual HID device** so they
-need no physical hardware. Every test is written purely against the public
+need no physical hardware. Shared scenarios use the public
 HIDAPI API plus the small backend-agnostic `test_virtual_device` interface
-(`test_virtual_device.h`), so the *same* test runs against every backend that
-provides a virtual-device implementation.
+(`test_virtual_device.h`) across every backend with a provider.
+Backend-specific scenarios also check platform lifecycle behavior.
 
 ## Scenario protocol
 
@@ -12,9 +12,8 @@ Rather than injecting arbitrary input from the test (which would need
 platform-specific plumbing), the virtual device has a few **pre-recorded
 scenarios** baked in. The test triggers one using the ordinary public API — it
 sends a *Feature report* whose first payload byte is a `TEST_VDEV_CMD_*` command
-— and the device replays the matching canned *input report*. This keeps the test
-code 100% platform-neutral; all device behaviour lives in the per-backend
-provider. See `test_virtual_device.h` for the shared contract (report size,
+— and the device replays the matching canned *input report*. Device behavior
+lives in the per-backend provider. See `test_virtual_device.h` for the shared contract (report size,
 command bytes, expected payloads).
 
 ## Tests
@@ -22,6 +21,12 @@ command bytes, expected payloads).
 | Test | What it exercises |
 |------|-------------------|
 | `test_device_io.c` | open → write an output report → trigger+read input reports (Feature-report write, then input-report read-back) → close |
+| `test_read_interrupt.c` | interrupt a blocking or timed read, retain queued input while interrupted, clear and resume, repeat interrupt/clear, and close from a Windows controller while the reader thread stays alive |
+
+Each provider builds `DeviceIO_<backend>` and `ReadInterrupt_<backend>`.
+Read-interrupt scenarios serialize interrupt, query and clear calls; only the
+interrupt overlaps a read. A reader that misses its join deadline terminates
+the test immediately, preserving its context until process exit.
 
 ## Providers
 
@@ -62,25 +67,26 @@ for the per-push CI matrix:
   the provider self-skips there. It is meant to actually run on a developer
   machine or a self-hosted runner where consent has been granted.
 
-## Platforms without a provider (documented, not implemented)
+## Platforms without a virtual-device provider
 
-Some platforms have no practical way to *create* a virtual HID device — not even
-in CI — so there is intentionally no provider for them (the backend simply has
-no `DeviceIO_*` test):
+The harness has no virtual-device provider for these platforms:
 
-* **FreeBSD** — HIDAPI uses the libusb backend, but FreeBSD has no userspace
-  USB/HID *creation* facility: `cuse(3)` can't produce a libusb-visible USB
-  device, `usb_template(4)` ("USB device mode") needs a hardware USB Device
-  Controller (there is no `dummy_hcd` analogue), and the planned `usrhid(4)` (a
-  `/dev/uhid` equivalent) is not yet in-tree. A real test would need physical
-  device-mode hardware or `usrhid`.
+* **FreeBSD** — the native hidraw and libusb backends have no virtual-device
+  provider in this harness. The separate `ReadInterrupt_freebsd` test exercises
+  the native hidraw backend's read interruption using sockets and pipes.
+  It covers blocking and timed wake-ups, sticky state, queued input, a full wake
+  pipe, unaffected writes and descriptor cleanup. It does not qualify HID
+  ioctls or device enumeration.
 * **NetBSD / OpenBSD** — `uhid(4)` is consumer-only (no create/emulate ioctl),
   there is no `cuse`, and `rump` has no virtual USB host controller; on OpenBSD
   the libusb backend additionally needs `uhid`/`uhidev` disabled in a custom
   kernel. No userspace virtual-device path exists.
 
-CI can build HIDAPI on these systems, but cannot exercise a virtual device, so
-the device-I/O test is not wired up there.
+CI builds HIDAPI on these systems without running the virtual-device scenarios.
+
+The FreeBSD test includes the production backend implementation and needs no
+HID hardware, virtual-device setup or elevated privileges. It has no skip path
+and runs in the shared, static and C++ CMake configurations in `.builds/freebsd.yml`.
 
 ## Running locally
 
@@ -89,16 +95,19 @@ the device-I/O test is not wired up there.
 cmake -B build -S . -DHIDAPI_WITH_TESTS=ON
 cmake --build build
 sudo modprobe uhid
-sudo ctest --test-dir build -R DeviceIO_hidraw --output-on-failure
+sudo ctest --test-dir build -R '^(DeviceIO|ReadInterrupt)_hidraw$' --output-on-failure
 ```
 
 On Windows/macOS configure with `-DHIDAPI_WITH_TESTS=ON` and run `ctest`; the
 device-backed tests self-skip unless the corresponding virtual device has been
 set up (see the dedicated workflows under `.github/workflows/`).
 
+On FreeBSD, configure with `-DHIDAPI_WITH_TESTS=ON`, build, and run
+`ctest --test-dir build -R '^ReadInterrupt_freebsd$' --output-on-failure`.
+
 ### Running the macOS (`darwin`) provider on a real Mac
 
-`DeviceIO_darwin` is the one virtual device that cannot run on hosted CI: macOS
+The `DeviceIO_darwin` and `ReadInterrupt_darwin` tests cannot run on hosted CI: macOS
 gates `IOHIDUserDevice` creation behind the private
 `com.apple.developer.hid.virtual.device` entitlement *and* an interactive
 Accessibility (TCC) consent prompt. To run it on a physical Mac you currently
@@ -107,7 +116,7 @@ need to:
 1. have a paid **Apple Developer account** (US$99/year) and use it to generate a
    signing certificate plus a provisioning profile that carries the
    `com.apple.developer.hid.virtual.device` entitlement;
-2. code-sign the built `DeviceIO_darwin` binary with that entitlement; and
+2. code-sign both test binaries with that entitlement; and
 3. on first run, grant it **Accessibility** access under *System Settings →
    Privacy & Security → Accessibility* (answer the TCC prompt).
 

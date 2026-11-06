@@ -40,6 +40,8 @@ struct hid_device_ {
 	wchar_t *read_error_str;
 	const char *device_path;
 	struct hid_device_info* device_info;
+	int interrupt_pipe[2];
+	int interrupted;
 };
 
 static hid_device *new_hid_device(void)
@@ -54,6 +56,14 @@ static hid_device *new_hid_device(void)
 	dev->error_str = NULL;
 	dev->read_error_str = NULL;
 	dev->device_info = NULL;
+	dev->interrupt_pipe[0] = -1;
+	dev->interrupt_pipe[1] = -1;
+	if (pipe2(dev->interrupt_pipe, O_CLOEXEC | O_NONBLOCK) < 0) {
+		int saved_errno = errno;
+		free(dev);
+		errno = saved_errno;
+		return NULL;
+	}
 
 	return dev;
 }
@@ -878,15 +888,14 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	dev = new_hid_device();
 	if (!dev) {
-		errno = ENOMEM;
-		register_global_error("Couldn't allocate memory");
+		register_global_error_format("Failed to create hid_device: %s", strerror(errno));
 		return NULL;
 	}
 
 	dev->device_path = strdup(path);
 	if (!dev->device_path) {
-		free(dev);
 		register_global_error("Couldn't allocate memory");
+		hid_close(dev);
 		return NULL;
 	}
 	dev->device_handle = open(path, O_RDWR | O_CLOEXEC);
@@ -907,8 +916,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	else {
 		/* Unable to open a device. */
 		register_global_error_format("Failed to open a device with path '%s': %s", path, strerror(errno));
-		free((void *)dev->device_path);
-		free(dev);
+		hid_close(dev);
 		return NULL;
 	}
 }
@@ -943,22 +951,26 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Set device error to none */
 	register_error_str(&dev->read_error_str, NULL);
 
+	if (__atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE)) {
+		register_error_str(&dev->read_error_str, "hid_read_timeout: operation interrupted");
+		return -1;
+	}
+
 	int bytes_read;
 
-	if (milliseconds >= 0) {
-		/* Milliseconds is either 0 (non-blocking) or > 0 (contains
-		   a valid timeout). In both cases we want to call poll()
-		   and wait for data to arrive.  Don't rely on non-blocking
-		   operation (O_NONBLOCK) since some kernels don't seem to
-		   properly report device disconnection through read() when
-		   in non-blocking mode.  */
+	{
+		/* Poll both descriptors even for an indefinite read, so an
+		   interrupt can wake the caller without device input. */
 		int ret;
-		struct pollfd fds;
+		struct pollfd fds[2];
 
-		fds.fd = dev->device_handle;
-		fds.events = POLLIN;
-		fds.revents = 0;
-		ret = poll(&fds, 1, milliseconds);
+		fds[0].fd = dev->device_handle;
+		fds[0].events = POLLIN;
+		fds[0].revents = 0;
+		fds[1].fd = dev->interrupt_pipe[0];
+		fds[1].events = POLLIN;
+		fds[1].revents = 0;
+		ret = poll(fds, 2, milliseconds);
 		if (ret == 0) {
 			/* Timeout */
 			return ret;
@@ -968,15 +980,15 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			register_error_str(&dev->read_error_str, strerror(errno));
 			return ret;
 		}
-		else {
-			/* Check for errors on the file descriptor. This will
-			   indicate a device disconnection. */
-			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				// We cannot use strerror() here as no -1 was returned from poll().
-				errno = EIO;
-				register_error_str(&dev->read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
-				return -1;
-			}
+		/* Device disconnection takes priority over an interrupt. */
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			errno = EIO;
+			register_error_str(&dev->read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
+			return -1;
+		}
+		if (fds[1].revents & POLLIN) {
+			register_error_str(&dev->read_error_str, "hid_read_timeout: operation interrupted");
+			return -1;
 		}
 	}
 
@@ -1011,6 +1023,33 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 
 	dev->blocking = !nonblock;
 	return 0; /* Success */
+}
+
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+{
+	__atomic_store_n(&dev->interrupted, 1, __ATOMIC_RELEASE);
+	const char one = 1;
+	ssize_t written;
+	do {
+		written = write(dev->interrupt_pipe[1], &one, sizeof(one));
+	} while (written < 0 && errno == EINTR);
+	/* EAGAIN means an interrupt notification is already queued. */
+}
+
+int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
+{
+	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
+}
+
+int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+{
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
+	char buf[64];
+	ssize_t got;
+	do {
+		got = read(dev->interrupt_pipe[0], buf, sizeof(buf));
+	} while (got > 0 || (got < 0 && errno == EINTR));
+	return 0;
 }
 
 
@@ -1166,7 +1205,12 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	close(dev->device_handle);
+	if (dev->device_handle >= 0)
+		close(dev->device_handle);
+	if (dev->interrupt_pipe[0] >= 0)
+		close(dev->interrupt_pipe[0]);
+	if (dev->interrupt_pipe[1] >= 0)
+		close(dev->interrupt_pipe[1]);
 
 	free((void *)dev->device_path);
 	free(dev->error_str);

@@ -63,19 +63,10 @@ endif()
 
 option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentation" OFF)
 
-if(HIDAPI_ENABLE_ASAN)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
-    if(MSVC)
-        # the default is to have "/INCREMENTAL" which causes a warning when "-fsanitize=address" is present
-        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /INCREMENTAL:NO")
-        set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "${CMAKE_SHARED_LINKER_FLAGS_DEBUG} /INCREMENTAL:NO")
-        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /INCREMENTAL:NO")
-        set(CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} /INCREMENTAL:NO")
-    endif()
-endif()
-
 if(WIN32)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+elseif(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
     # Linux and macOS have virtual-device based tests (uhid / raw-gadget /
     # IOHIDUserDevice). Off by default: they need a virtual device at runtime
@@ -100,21 +91,11 @@ if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
 endif()
 
-if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
-    add_subdirectory(src/tests)
+option(HIDAPI_BUILD_HID_READ_TEST "Build hid_read_test cmd-line tool" OFF)
+if(HIDAPI_BUILD_HID_READ_TEST)
+    add_subdirectory(hid_read_test)
 endif()
 
-if(HIDAPI_ENABLE_ASAN)
-    if(NOT MSVC)
-        # MSVC doesn't recognize those options, other compilers - requiring it
-        foreach(HIDAPI_TARGET hidapi_winapi hidapi_darwin hidapi_hidraw hidapi_libusb hidtest_hidraw hidtest_libusb hidtest)
-            if(TARGET ${HIDAPI_TARGET})
-                if(BUILD_SHARED_LIBS)
-                    target_link_options(${HIDAPI_TARGET} PRIVATE -fsanitize=address)
-                else()
-                    target_link_options(${HIDAPI_TARGET} PUBLIC -fsanitize=address)
-                endif()
-            endif()
-        endforeach()
-    endif()
+if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
+    add_subdirectory(src/tests)
 endif()

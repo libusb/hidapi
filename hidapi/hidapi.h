@@ -423,6 +423,109 @@ extern "C" {
 		*/
 		int  HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock);
 
+		/** @brief Asynchronously interrupt blocking hid_read/hid_read_timeout call.
+
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+
+			Wakes a blocked hid_read()/hid_read_timeout() call on @p dev.
+			An interrupted read returns -1; hid_read_error(dev) returns a
+			string indicating the read was interrupted.
+
+			Once interrupted, subsequent calls to hid_read()/
+			hid_read_timeout() also return -1 immediately, until @ref
+			hid_read_clear_interrupt is called.
+
+			A hid_read*() call already in progress when the interrupt arrives
+			may still return data that was already buffered or queued; any
+			call entered after the interrupt returns -1 immediately, without
+			draining queued data (it remains readable after
+			@ref hid_read_clear_interrupt). In either case, within at most
+			one further call hid_read*() returns -1.
+
+			Only the read pipeline is affected: hid_write(), hid_get_input_report(),
+			feature/output report functions, and all other operations on @p dev
+			continue to work normally.
+
+			This function may run concurrently with device I/O, including a
+			blocked read, but not with hid_close() or hid_exit(). The device
+			handle must remain valid until all calls using it have returned.
+			The call is idempotent and is safe when no read is in flight.
+
+			Calls to hid_read_interrupt(), hid_is_read_interrupted(), and
+			hid_read_clear_interrupt() on the same device must be serialized
+			against one another, including calls to the same function.
+			Otherwise, behavior is undefined.
+
+			After this function returns, hid_is_read_interrupted() returns 1
+			and subsequent reads return -1 until the interrupt is cleared.
+			This function has no recoverable failure result; it relies on the
+			operating system and device driver to support read interruption.
+
+			Recommended usage to cleanly shut down a dedicated read thread:
+			@code
+				hid_read_interrupt(dev);
+				// join the read thread
+				hid_close(dev);
+			@endcode
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+		*/
+		void HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev);
+
+		/** @brief Query whether the read pipeline is currently interrupted.
+
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+
+			Returns the current interrupt state set by @ref hid_read_interrupt
+			and @ref hid_read_clear_interrupt. This function may run alongside
+			device I/O, but not hid_close() or hid_exit(). The device handle
+			must remain valid until the call returns.
+
+			Calls to hid_read_interrupt(), hid_is_read_interrupted(), and
+			hid_read_clear_interrupt() on the same device must be serialized
+			against one another, including calls to the same function.
+			Otherwise, behavior is undefined.
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				1 if the read pipeline is interrupted, 0 if not.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev);
+
+		/** @brief Clear the read-interrupt state, allowing reads to resume.
+
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
+
+			After this call, subsequent hid_read()/hid_read_timeout() calls
+			operate normally. Any data that the device buffered during the
+			interrupted period may be returned by subsequent reads, subject
+			to a (backend-specific) buffer capacity. For a fresh-start
+			behavior, the caller may drain the buffered data with a loop of
+			hid_read_timeout(dev, ..., 0) calls before resuming the normal
+			read loop.
+
+			Recommended use: call only when no hid_read*() call is in flight
+			on @p dev. The timing of an in-flight read returning -1 versus
+			a concurrent clear-interrupt taking effect is undefined.
+			Do not overlap this function with hid_close() or hid_exit(); the
+			device handle must remain valid until the call returns.
+
+			Calls to hid_read_interrupt(), hid_is_read_interrupted(), and
+			hid_read_clear_interrupt() on the same device must be serialized
+			against one another, including calls to the same function.
+			Otherwise, behavior is undefined.
+
+			@ingroup API
+			@param dev A device handle returned from hid_open().
+
+			@returns
+				This function returns 0.
+		*/
+		int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev);
+
 		/** @brief Send a Feature report to the device.
 
 			Feature reports are sent over the Control endpoint as a

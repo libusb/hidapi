@@ -4,6 +4,7 @@ add_library(hidapi_darwin
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+hidapi_configure_sanitizers(hidapi_darwin)
 if(HIDAPI_BUILD_AS_CXX)
     set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
 endif()

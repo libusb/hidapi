@@ -44,7 +44,7 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_BUILD_HID_READ_TEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}" "-DCMAKE_CXX_FLAGS=${NIX_COMPILE_FLAGS}"
         cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
         cmake -B build/framework -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/framework -DCMAKE_FRAMEWORK=ON -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${NIX_COMPILE_FLAGS}"
     - name: Build CMake Shared
@@ -61,8 +61,8 @@ jobs:
       run: |
         # The macOS virtual device needs the com.apple.developer.hid.virtual.device
         # entitlement and interactive user consent, neither available on a hosted
-        # runner, so DeviceIO_darwin self-skips (CTest code 77). This still
-        # verifies the provider builds and the test runs/links.
+        # runner, so both darwin suites self-skip (CTest code 77). This still
+        # verifies the provider builds and the tests run/link.
         ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
@@ -104,6 +104,7 @@ jobs:
         cmake -B build/cxx -S hidapisrc \
           -DCMAKE_BUILD_TYPE=Release \
           -DHIDAPI_BUILD_AS_CXX=ON \
+          -DHIDAPI_BUILD_HID_READ_TEST=ON \
           "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror"
         cmake --build build/cxx
 
@@ -130,7 +131,7 @@ jobs:
     - name: Configure CMake
       run: |
         rm -rf build install
-        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
+        cmake -B build/shared -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/shared -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_BUILD_HID_READ_TEST=ON -DHIDAPI_WITH_TESTS=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}" "-DCMAKE_CXX_FLAGS=${GNU_COMPILE_FLAGS}"
         cmake -B build/static -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install/static -DBUILD_SHARED_LIBS=FALSE -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=${GNU_COMPILE_FLAGS}"
     - name: Build CMake Shared
       working-directory: build/shared
@@ -200,6 +201,7 @@ jobs:
         cmake -B build/cxx -S hidapisrc \
           -DCMAKE_BUILD_TYPE=Release \
           -DHIDAPI_BUILD_AS_CXX=ON \
+          -DHIDAPI_BUILD_HID_READ_TEST=ON \
           "-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror -Wformat-signedness"
         cmake --build build/cxx
 
@@ -231,7 +233,7 @@ jobs:
     - name: Configure CMake MSVC
       shell: cmd
       run: |
-        cmake -B build\msvc -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cmake -B build\msvc -S hidapisrc -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHIDAPI_WITH_TESTS=ON -DHIDAPI_BUILD_PP_DATA_DUMP=ON -DHIDAPI_ENABLE_ASAN=ON -DCMAKE_INSTALL_PREFIX=install\msvc -DHIDAPI_BUILD_HIDTEST=ON -DHIDAPI_BUILD_HID_READ_TEST=ON "-DCMAKE_C_FLAGS=%MSVC_COMPILE_FLAGS%" "-DCMAKE_CXX_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake MSVC
       working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
@@ -262,7 +264,7 @@ jobs:
     - name: Configure CMake MSVC C++
       shell: cmd
       run: |
-        cmake -B build\msvc_cxx -S hidapisrc -DCMAKE_BUILD_TYPE=Release -DHIDAPI_BUILD_AS_CXX=ON -DCMAKE_CXX_STANDARD=20 "-DCMAKE_CXX_FLAGS=%MSVC_COMPILE_FLAGS%"
+        cmake -B build\msvc_cxx -S hidapisrc -DCMAKE_BUILD_TYPE=Release -DHIDAPI_BUILD_AS_CXX=ON -DHIDAPI_BUILD_HID_READ_TEST=ON -DCMAKE_CXX_STANDARD=20 "-DCMAKE_CXX_FLAGS=%MSVC_COMPILE_FLAGS%"
     - name: Build CMake MSVC C++
       working-directory: build/msvc_cxx
       run: cmake --build . --config Release
