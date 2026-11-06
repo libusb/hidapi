@@ -65,6 +65,8 @@ option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentat
 
 if(WIN32)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
+elseif(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
+    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
     # Linux and macOS have virtual-device based tests (uhid / raw-gadget /
     # IOHIDUserDevice). Off by default: they need a virtual device at runtime
