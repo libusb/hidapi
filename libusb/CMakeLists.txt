@@ -5,6 +5,7 @@ add_library(hidapi_libusb
     hidapi_libusb_report_descriptor.h
     hid.c
 )
+hidapi_configure_sanitizers(hidapi_libusb)
 if(HIDAPI_BUILD_AS_CXX)
     set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
 endif()

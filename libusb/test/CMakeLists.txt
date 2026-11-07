@@ -1,4 +1,5 @@
 add_executable(max_input_report_size_test max_input_report_size_test.c)
+hidapi_configure_sanitizers(max_input_report_size_test)
 set_target_properties(max_input_report_size_test
     PROPERTIES
         C_STANDARD 11

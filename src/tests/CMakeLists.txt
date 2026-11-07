@@ -33,14 +33,12 @@ find_package(Threads REQUIRED)
 # via return code 77 when no virtual device is present).
 function(hidapi_add_vdev_test name provider backend)
     add_executable(${name} test_device_io.c ${provider})
+    hidapi_configure_sanitizers(${name})
     set_target_properties(${name} PROPERTIES
         C_STANDARD 11
         C_STANDARD_REQUIRED TRUE
     )
     target_link_libraries(${name} PRIVATE ${backend} Threads::Threads)
-    if(HIDAPI_ENABLE_ASAN AND NOT MSVC)
-        target_link_options(${name} PRIVATE -fsanitize=address)
-    endif()
     add_test(NAME ${name} COMMAND ${name})
     set_tests_properties(${name} PROPERTIES
         SKIP_RETURN_CODE 77
