@@ -15,7 +15,6 @@ modprobe raw_gadget || true
 ls -l /dev/raw-gadget || true
 
 timeout --kill-after=3s 130s ctest --test-dir build \
-    -R '^(DeviceIO|ReadInterrupt)_libusb$' --no-tests=error \
     --output-on-failure --output-junit "$PWD/build/libusb-tests.xml"
 rc=$?
 if [ "$rc" -eq 0 ]; then
@@ -27,7 +26,7 @@ cases = ET.parse("build/libusb-tests.xml").getroot().findall(".//testcase")
 expected = {"DeviceIO_libusb", "ReadInterrupt_libusb"}
 passed = {case.attrib["name"] for case in cases
           if not any(case.find(tag) is not None for tag in ("skipped", "failure", "error"))}
-if len(cases) != len(expected) or passed != expected:
+if not expected <= passed:
     sys.exit("Both libusb virtual-device suites must run and pass without skips.")
 PY
     rc=$?

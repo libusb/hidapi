@@ -1154,11 +1154,6 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Set device error to none */
 	register_error_str(&dev->last_read_error_str, NULL);
 
-	if (__atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE)) {
-		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
-		return -1;
-	}
-
 	int bytes_read;
 
 	{
@@ -1166,6 +1161,9 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		   so that hid_read_interrupt() can wake a read that is waiting for
 		   data via the interrupt eventfd. A negative timeout makes poll()
 		   block indefinitely, matching blocking-read semantics.
+		   The eventfd stays readable until hid_read_clear_interrupt(), and
+		   it is checked before reading device data, so an interrupted read
+		   fails even when input is queued.
 		   Don't rely on non-blocking operation (O_NONBLOCK) since some
 		   kernels don't seem to properly report device disconnection
 		   through read() when in non-blocking mode.  */
@@ -1258,15 +1256,15 @@ int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
 }
 
-int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
-	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 	uint64_t v;
 	ssize_t got;
 	do {
 		got = read(dev->interrupt_efd, &v, sizeof(v));
 	} while (got < 0 && errno == EINTR);
-	return 0;
+	/* Publish the cleared state only after the eventfd is drained. */
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 }
 
 

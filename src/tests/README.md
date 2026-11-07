@@ -67,26 +67,18 @@ for the per-push CI matrix:
   the provider self-skips there. It is meant to actually run on a developer
   machine or a self-hosted runner where consent has been granted.
 
-## Platforms without a virtual-device provider
+## Platforms without a provider
 
-The harness has no virtual-device provider for these platforms:
+This harness implements no virtual-device provider for these platforms, so
+they have no `DeviceIO_*` or `ReadInterrupt_*` test:
 
-* **FreeBSD** — the native hidraw and libusb backends have no virtual-device
-  provider in this harness. The separate `ReadInterrupt_freebsd` test exercises
-  the native hidraw backend's read interruption using sockets and pipes.
-  It covers blocking and timed wake-ups, sticky state, queued input, a full wake
-  pipe, unaffected writes and descriptor cleanup. It does not qualify HID
-  ioctls or device enumeration.
-* **NetBSD / OpenBSD** — `uhid(4)` is consumer-only (no create/emulate ioctl),
-  there is no `cuse`, and `rump` has no virtual USB host controller; on OpenBSD
-  the libusb backend additionally needs `uhid`/`uhidev` disabled in a custom
-  kernel. No userspace virtual-device path exists.
+* **FreeBSD** — neither the native hidraw backend nor the libusb backend has a
+  provider.
+* **NetBSD / OpenBSD** — neither the NetBSD uhid backend nor the libusb backend
+  has a provider.
 
-CI builds HIDAPI on these systems without running the virtual-device scenarios.
-
-The FreeBSD test includes the production backend implementation and needs no
-HID hardware, virtual-device setup or elevated privileges. It has no skip path
-and runs in the shared, static and C++ CMake configurations in `.builds/freebsd.yml`.
+Native CI on these systems builds HIDAPI. That is build coverage only; these
+tests do not qualify those backends at runtime.
 
 ## Running locally
 
@@ -101,9 +93,6 @@ sudo ctest --test-dir build -R '^(DeviceIO|ReadInterrupt)_hidraw$' --output-on-f
 On Windows/macOS configure with `-DHIDAPI_WITH_TESTS=ON` and run `ctest`; the
 device-backed tests self-skip unless the corresponding virtual device has been
 set up (see the dedicated workflows under `.github/workflows/`).
-
-On FreeBSD, configure with `-DHIDAPI_WITH_TESTS=ON`, build, and run
-`ctest --test-dir build -R '^ReadInterrupt_freebsd$' --output-on-failure`.
 
 ### Running the macOS (`darwin`) provider on a real Mac
 

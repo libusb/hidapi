@@ -170,11 +170,15 @@ static int test_timed_read_interrupted_from_thread(test_virtual_device *vdev, hi
 	return 0;
 }
 
-/* Interrupted reads leave queued reports available after a clear. Feature
-   reports still work while the read pipeline is interrupted. */
+/* Interrupted reads leave queued reports available after a clear, with
+   blocking, nonblocking and timed reads. Feature reports still work while the
+   read pipeline is interrupted. */
 static int test_interrupt_preserves_queued_input(test_virtual_device *vdev, hid_device *h)
 {
 	const unsigned char payload[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_A;
+	/* Blocking first: if the queued report were consumed, the read returns
+	   it instead of blocking. */
+	const int timeouts[] = { -1, 0, 1000, -1 };
 	unsigned char buf[64];
 	int n;
 
@@ -183,15 +187,15 @@ static int test_interrupt_preserves_queued_input(test_virtual_device *vdev, hid_
 	/* Allow the backend's input queue to receive the report. */
 	test_sleep_ms(200);
 
-	for (int i = 0; i < 3; i++) {
+	for (size_t i = 0; i < sizeof(timeouts) / sizeof(timeouts[0]); i++) {
 		long long t0 = test_now_ms();
-		n = hid_read_timeout(h, buf, sizeof(buf), 1000);
+		n = hid_read_timeout(h, buf, sizeof(buf), timeouts[i]);
 		long long elapsed = test_now_ms() - t0;
 		CHECK(n == -1);
 		CHECK(elapsed < 500);
 	}
 	CHECK(hid_is_read_interrupted(h) == 1);
-	CHECK(hid_read_clear_interrupt(h) == 0);
+	hid_read_clear_interrupt(h);
 	CHECK(hid_is_read_interrupted(h) == 0);
 	n = hid_read_timeout(h, buf, sizeof(buf), 2000);
 	CHECK(n == (int)sizeof(payload));
@@ -205,7 +209,7 @@ static int test_clear_resumes_reads(test_virtual_device *vdev, hid_device *h)
 {
 	hid_read_interrupt(h);
 	CHECK(hid_is_read_interrupted(h) == 1);
-	CHECK(hid_read_clear_interrupt(h) == 0);
+	hid_read_clear_interrupt(h);
 	CHECK(hid_is_read_interrupted(h) == 0);
 
 	unsigned char buf[64];
@@ -229,8 +233,8 @@ static int test_idempotent(test_virtual_device *vdev, hid_device *h)
 	hid_read_interrupt(h);
 	hid_read_interrupt(h);   /* twice */
 	CHECK(hid_is_read_interrupted(h) == 1);
-	CHECK(hid_read_clear_interrupt(h) == 0);
-	CHECK(hid_read_clear_interrupt(h) == 0);
+	hid_read_clear_interrupt(h);
+	hid_read_clear_interrupt(h);   /* clearing a cleared state is harmless */
 	CHECK(hid_is_read_interrupted(h) == 0);
 
 	/* Reads work again afterwards. */

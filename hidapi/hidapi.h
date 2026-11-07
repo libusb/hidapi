@@ -427,20 +427,17 @@ extern "C" {
 
 			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
 
-			Wakes a blocked hid_read()/hid_read_timeout() call on @p dev.
-			An interrupted read returns -1; hid_read_error(dev) returns a
-			string indicating the read was interrupted.
+			Puts the read pipeline of @p dev into a sticky interrupted state
+			and wakes a hid_read()/hid_read_timeout() call that is waiting
+			for input. An interrupted read returns -1; hid_read_error(dev)
+			returns a string indicating the read was interrupted.
 
-			Once interrupted, subsequent calls to hid_read()/
-			hid_read_timeout() also return -1 immediately, until @ref
-			hid_read_clear_interrupt is called.
-
-			A hid_read*() call already in progress when the interrupt arrives
-			may still return data that was already buffered or queued; any
-			call entered after the interrupt returns -1 immediately, without
-			draining queued data (it remains readable after
-			@ref hid_read_clear_interrupt). In either case, within at most
-			one further call hid_read*() returns -1.
+			A read already in progress when this function is called may
+			still return data that was already buffered or queued. Every
+			read entered after this function returns fails immediately with
+			-1, until @ref hid_read_clear_interrupt is called. Queued input
+			is not discarded; it remains readable after the interrupt is
+			cleared.
 
 			Only the read pipeline is affected: hid_write(), hid_get_input_report(),
 			feature/output report functions, and all other operations on @p dev
@@ -457,9 +454,9 @@ extern "C" {
 			Otherwise, behavior is undefined.
 
 			After this function returns, hid_is_read_interrupted() returns 1
-			and subsequent reads return -1 until the interrupt is cleared.
-			This function has no recoverable failure result; it relies on the
-			operating system and device driver to support read interruption.
+			until the interrupt is cleared. This function has no failure
+			result; it relies on the operating system and device driver to
+			support read interruption.
 
 			Recommended usage to cleanly shut down a dedicated read thread:
 			@code
@@ -499,17 +496,22 @@ extern "C" {
 
 			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
 
-			After this call, subsequent hid_read()/hid_read_timeout() calls
-			operate normally. Any data that the device buffered during the
-			interrupted period may be returned by subsequent reads, subject
-			to a (backend-specific) buffer capacity. For a fresh-start
-			behavior, the caller may drain the buffered data with a loop of
+			Clears the sticky state set by @ref hid_read_interrupt. After
+			this function returns, hid_is_read_interrupted() returns 0 and
+			reads entered afterwards operate normally. Calling it when the
+			read pipeline is not interrupted has no effect.
+
+			Any data that the device buffered during the interrupted period
+			may be returned by subsequent reads, subject to a
+			(backend-specific) buffer capacity. For a fresh-start behavior,
+			the caller may drain the buffered data with a loop of
 			hid_read_timeout(dev, ..., 0) calls before resuming the normal
 			read loop.
 
 			Recommended use: call only when no hid_read*() call is in flight
-			on @p dev. The timing of an in-flight read returning -1 versus
-			a concurrent clear-interrupt taking effect is undefined.
+			on @p dev. A read that is in flight while this function runs may
+			either fail as interrupted or continue normally; which of the two
+			happens is indeterminate.
 			Do not overlap this function with hid_close() or hid_exit(); the
 			device handle must remain valid until the call returns.
 
@@ -520,11 +522,8 @@ extern "C" {
 
 			@ingroup API
 			@param dev A device handle returned from hid_open().
-
-			@returns
-				This function returns 0.
 		*/
-		int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev);
+		void HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev);
 
 		/** @brief Send a Feature report to the device.
 

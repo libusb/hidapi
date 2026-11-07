@@ -1187,6 +1187,9 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 
 	register_string_error_to_buffer(&dev->last_read_error_str, NULL);
 
+	/* ReadFile() may complete synchronously, and WaitForMultipleObjects()
+	   reports a completed read before the interrupt event, so check the
+	   sticky state before consuming any input. */
 	if (InterlockedCompareExchange(&dev->interrupted, 0, 0)) {
 		register_string_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout: operation interrupted");
 		return -1;
@@ -1295,11 +1298,11 @@ int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
 	return InterlockedCompareExchange(&dev->interrupted, 0, 0) ? 1 : 0;
 }
 
-int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
+void HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
 {
-	InterlockedExchange(&dev->interrupted, 0);
+	/* Publish the cleared state only after the event is reset. */
 	ResetEvent(dev->interrupt_event);
-	return 0;
+	InterlockedExchange(&dev->interrupted, 0);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)

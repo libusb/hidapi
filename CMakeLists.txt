@@ -65,8 +65,6 @@ option(HIDAPI_ENABLE_ASAN "Build HIDAPI with ASAN address sanitizer instrumentat
 
 if(WIN32)
     option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" ${IS_DEBUG_BUILD})
-elseif(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
-    option(HIDAPI_WITH_TESTS "Build HIDAPI (unit-)tests" OFF)
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE)
     # Linux and macOS include virtual-device based tests (uhid / raw-gadget /
     # IOHIDUserDevice). Keep the full test suite opt-in because those tests need
@@ -91,11 +89,6 @@ add_subdirectory(src)
 option(HIDAPI_BUILD_HIDTEST "Build small console test application hidtest" ${IS_DEBUG_BUILD})
 if(HIDAPI_BUILD_HIDTEST)
     add_subdirectory(hidtest)
-endif()
-
-option(HIDAPI_BUILD_HID_READ_TEST "Build hid_read_test cmd-line tool" OFF)
-if(HIDAPI_BUILD_HID_READ_TEST)
-    add_subdirectory(hid_read_test)
 endif()
 
 if(HIDAPI_WITH_TESTS AND (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))

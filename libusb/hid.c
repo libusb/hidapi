@@ -1825,10 +1825,9 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	bytes_read = -1;
 
-	/* Once interrupted, fail immediately - even if input reports are queued -
-	   so a reader loop observes the interrupt no matter how busy the device
-	   is (this is what the hid_read_interrupt() contract promises, and what
-	   the other backends do). Queued reports remain readable after
+	/* Queued reports are returned without waiting, so check the sticky
+	   interrupt state first: an interrupted read fails even when input is
+	   queued. Queued reports remain readable after
 	   hid_read_clear_interrupt(). */
 	if (dev->read_interrupted) {
 		bytes_read = -1;
@@ -1959,12 +1958,11 @@ int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 }
 
 
-int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
 	hidapi_thread_mutex_lock(&dev->thread_state);
 	dev->read_interrupted = 0;
 	hidapi_thread_mutex_unlock(&dev->thread_state);
-	return 0;
 }
 
 

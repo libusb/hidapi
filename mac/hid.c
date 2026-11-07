@@ -1268,10 +1268,9 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Lock the access to the report list. */
 	pthread_mutex_lock(&dev->mutex);
 
-	/* Once interrupted, fail immediately - even if input reports are queued -
-	   so a reader loop observes the interrupt no matter how busy the device
-	   is (this is what the hid_read_interrupt() contract promises, and what
-	   the other backends do). Queued reports remain readable after
+	/* Queued reports are returned without waiting, so check the sticky
+	   interrupt state first: an interrupted read fails even when input is
+	   queued. Queued reports remain readable after
 	   hid_read_clear_interrupt(). */
 	if (dev->read_interrupted) {
 		bytes_read = -1;
@@ -1393,12 +1392,11 @@ int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 	return v;
 }
 
-int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
 	pthread_mutex_lock(&dev->mutex);
 	dev->read_interrupted = 0;
 	pthread_mutex_unlock(&dev->mutex);
-	return 0;
 }
 
 int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char *data, size_t length)

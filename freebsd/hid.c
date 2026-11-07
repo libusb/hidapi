@@ -951,16 +951,14 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	/* Set device error to none */
 	register_error_str(&dev->read_error_str, NULL);
 
-	if (__atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE)) {
-		register_error_str(&dev->read_error_str, "hid_read_timeout: operation interrupted");
-		return -1;
-	}
-
 	int bytes_read;
 
 	{
 		/* Poll both descriptors even for an indefinite read, so an
-		   interrupt can wake the caller without device input. */
+		   interrupt can wake the caller without device input. The wake
+		   pipe stays readable until hid_read_clear_interrupt(), and it is
+		   checked before reading the device, so an interrupted read fails
+		   even when input is queued. */
 		int ret;
 		struct pollfd fds[2];
 
@@ -1041,15 +1039,15 @@ int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
 }
 
-int HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
-	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 	char buf[64];
 	ssize_t got;
 	do {
 		got = read(dev->interrupt_pipe[0], buf, sizeof(buf));
 	} while (got > 0 || (got < 0 && errno == EINTR));
-	return 0;
+	/* Publish the cleared state only after the wake pipe is drained. */
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 }
 
 

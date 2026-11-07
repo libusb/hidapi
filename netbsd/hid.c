@@ -932,11 +932,9 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 
 	register_device_read_error(dev, NULL);
 
-	if (__atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE)) {
-		register_device_read_error(dev, "hid_read_timeout: operation interrupted");
-		return -1;
-	}
-
+	/* The wake pipe stays readable until hid_read_clear_interrupt(), and it
+	   is checked before the device descriptors, so an interrupted read fails
+	   even when input is queued. */
 	res = poll(dev->poll_handles, dev->poll_handles_length + 1, milliseconds);
 	if (res == -1) {
 		register_device_read_error_format(dev, "error while polling: %s", strerror(errno));
@@ -1009,9 +1007,8 @@ int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
 	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
 }
 
-int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
+void HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
 {
-	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 	char buf[64];
 	ssize_t got;
 	do {
@@ -1020,7 +1017,8 @@ int HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
 		   need to make sure to drain the pipe completely */
 		got = read(dev->interrupt_pipe[0], buf, sizeof(buf));
 	} while (got > 0 || (got < 0 && errno == EINTR));
-	return 0;
+	/* Publish the cleared state only after the wake pipe is drained. */
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const unsigned char *data, size_t length)

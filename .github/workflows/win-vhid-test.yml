@@ -6,9 +6,16 @@ name: Windows Virtual HID Device Test (manual)
 # part of the per-push CI matrix; run it on demand from the Actions tab, or by
 # adding the 'ci-virtual-device' label to a pull request.
 #
-# build-driver uses windows-2022 for the cached WDK's MSBuild 17 tasks.
-# win-vhid uses windows-latest for the driver INF's MsHidUmdf.inf requirements
-# (Windows build 22000 or later). The signed driver artifact connects the jobs.
+# The work is split across two runners because no single hosted image can do
+# both today:
+#   - build-driver runs on windows-2022: the cached WDK (10.0.26100.6584)
+#     ships DriverKit build tasks only up to MSBuild 17 (VS2022), which the
+#     windows-2025* images no longer carry (VS2026 / MSBuild 18 -> MSB4062).
+#   - win-vhid runs on windows-latest (Server 2025): the driver package's INF
+#     depends on MsHidUmdf.inf semantics introduced in build 22000, so it does
+#     not install on Server 2022 (build 20348).
+# Revisit once a WDK with 18.0 build tasks is cached here - then both jobs can
+# run on windows-latest again (and could be merged back into one).
 
 on:
   workflow_dispatch:
