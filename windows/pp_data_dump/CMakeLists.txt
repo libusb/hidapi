@@ -1,6 +1,7 @@
 project(pp_data_dump C)
 
 add_executable(pp_data_dump pp_data_dump.c)    
+hidapi_configure_sanitizers(pp_data_dump)
 set_target_properties(pp_data_dump
     PROPERTIES
         C_STANDARD 11

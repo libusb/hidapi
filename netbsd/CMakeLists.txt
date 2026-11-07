@@ -2,6 +2,7 @@ add_library(hidapi_netbsd
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+hidapi_configure_sanitizers(hidapi_netbsd)
 if(HIDAPI_BUILD_AS_CXX)
     set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
 endif()

@@ -1,4 +1,5 @@
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/hidapi-sanitizers.cmake")
 
 # Read version from file
 file(READ "${PROJECT_ROOT}/VERSION" RAW_VERSION_STR)
