@@ -624,7 +624,9 @@ static int parse_uevent_info(const char *uevent, unsigned *bus_type,
 			*serial_number_utf8 = strdup(value);
 			found_serial = 1;
 		} else if (strcmp(key, "HID_FIRMWARE_VERSION") == 0) {
-			/* Device version from kernel */
+			/* Device version from kernel, introduced in Linux v7.1:
+			  https://github.com/torvalds/linux/commit/6ca9029c823b7853e980585e757343e0e84227cd
+			*/
 			*version = (unsigned short)strtol(value, NULL, 16);
 		}
 
