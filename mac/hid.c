@@ -140,7 +140,7 @@ struct hid_device_ {
 	pthread_barrier_t barrier; /* Ensures correct startup sequence */
 	pthread_barrier_t shutdown_barrier; /* Ensures correct shutdown sequence */
 	int shutdown_thread;
-	int read_interrupted;
+	int mac_read_interrupted;
 	wchar_t *last_error_str;
 	wchar_t *last_read_error_str;
 };
@@ -163,7 +163,7 @@ static hid_device *new_hid_device(void)
 	dev->input_report_buf = NULL;
 	dev->device_info = NULL;
 	dev->shutdown_thread = 0;
-	dev->read_interrupted = 0;
+	dev->mac_read_interrupted = 0;
 	dev->last_error_str = NULL;
 	dev->last_read_error_str = NULL;
 
@@ -1192,7 +1192,7 @@ static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mut
 		   to sleep. See the pthread_cond_timedwait() man page for
 		   details. */
 
-		if (dev->shutdown_thread || dev->disconnected || dev->read_interrupted) {
+		if (dev->shutdown_thread || dev->disconnected || dev->mac_read_interrupted) {
 			return -1;
 		}
 	}
@@ -1213,7 +1213,7 @@ static int cond_timedwait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t
 		   to sleep. See the pthread_cond_timedwait() man page for
 		   details. */
 
-		if (dev->shutdown_thread || dev->disconnected || dev->read_interrupted) {
+		if (dev->shutdown_thread || dev->disconnected || dev->mac_read_interrupted) {
 			return -1;
 		}
 	}
@@ -1239,7 +1239,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	   interrupt state first: an interrupted read fails even when input is
 	   queued. Queued reports remain readable after
 	   hid_read_clear_interrupt(). */
-	if (dev->read_interrupted) {
+	if (dev->mac_read_interrupted) {
 		bytes_read = -1;
 		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
 		goto ret;
@@ -1275,7 +1275,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		res = cond_wait(dev, &dev->condition, &dev->mutex);
 		if (res == 0)
 			bytes_read = ring_pop_into(dev, data, length);
-		else if (dev->read_interrupted) {
+		else if (dev->mac_read_interrupted) {
 			register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
 			bytes_read = -1;
 		} else {
@@ -1303,7 +1303,7 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			bytes_read = ring_pop_into(dev, data, length);
 		} else if (res == ETIMEDOUT) {
 			bytes_read = 0;
-		} else if (dev->read_interrupted) {
+		} else if (dev->mac_read_interrupted) {
 			register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
 			bytes_read = -1;
 		} else {
@@ -1364,7 +1364,7 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 {
 	pthread_mutex_lock(&dev->mutex);
-	dev->read_interrupted = 1;
+	dev->mac_read_interrupted = 1;
 	pthread_cond_broadcast(&dev->condition);
 	pthread_mutex_unlock(&dev->mutex);
 }
@@ -1372,7 +1372,7 @@ void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
 int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 {
 	pthread_mutex_lock(&dev->mutex);
-	int v = dev->read_interrupted;
+	int v = dev->mac_read_interrupted;
 	pthread_mutex_unlock(&dev->mutex);
 	return v;
 }
@@ -1380,7 +1380,7 @@ int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
 void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
 {
 	pthread_mutex_lock(&dev->mutex);
-	dev->read_interrupted = 0;
+	dev->mac_read_interrupted = 0;
 	pthread_mutex_unlock(&dev->mutex);
 }
 
