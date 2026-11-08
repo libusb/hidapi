@@ -13,6 +13,10 @@
  *   - the few libusb calls hid_open_path() makes against a device, to present
  *     a single fake HID interface without any hardware.
  * Everything else is the unmodified library code.
+ *
+ * It always tests the bundled pthread thread model, even if the library is
+ * configured with a custom HIDAPI_THREAD_MODEL_INCLUDE, and needs a native
+ * pthread_barrier_wait() (see CMakeLists.txt).
  */
 
 #ifndef _GNU_SOURCE
@@ -28,6 +32,10 @@
 #include <wchar.h>
 
 #include <libusb.h>
+
+#if defined(__ANDROID__) && __ANDROID_API__ < __ANDROID_API_N__
+#error "needs a native pthread_barrier_wait(); hidapi_thread_pthread.h provides its own here"
+#endif
 
 /* ---- Interposed pthread functions ----------------------------------------- */
 
@@ -306,6 +314,9 @@ static int test_libusb_control_transfer(libusb_device_handle *dev_handle, uint8_
 #define libusb_claim_interface test_libusb_claim_interface
 #define libusb_release_interface test_libusb_release_interface
 #define libusb_control_transfer test_libusb_control_transfer
+
+/* The interposition above targets the bundled pthread thread model. */
+#undef HIDAPI_THREAD_MODEL_INCLUDE
 
 #include "../hid.c"
 

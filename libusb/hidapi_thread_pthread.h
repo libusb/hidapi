@@ -149,8 +149,8 @@ static void hidapi_thread_barrier_wait(hidapi_thread_state *state)
 }
 
 /* Starts `func` on a new thread. Returns 0 on success, or a non-zero value when
-   the thread could not be started (in which case `state->thread` is left unset
-   and must not be joined). */
+   the thread could not be started (in which case no thread was started and
+   `state->thread` must not be joined). */
 static int hidapi_thread_create(hidapi_thread_state *state, void *(*func)(void*), void *func_arg)
 {
 	return pthread_create(&state->thread, NULL, func, func_arg);
