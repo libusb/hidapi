@@ -1,0 +1,95 @@
+name: Set up Coverity Scan capture tools
+description: Download or restore an unconfigured native Scan tool installation.
+inputs:
+  platform:
+    description: Scan download platform (win64, Darwin, or linux64)
+    required: true
+  token:
+    description: Coverity Scan project token
+    required: true
+runs:
+  using: composite
+  steps:
+  - name: Look up package hash
+    id: package
+    shell: bash
+    env:
+      COVERITY_PLATFORM: ${{ inputs.platform }}
+      COVERITY_SCAN_TOKEN: ${{ inputs.token }}
+    run: |
+      case "$COVERITY_PLATFORM" in win64|Darwin|linux64) ;; *) exit 1 ;; esac
+      hash=$(curl --fail --silent --show-error --connect-timeout 30 --max-time 120 \
+        --data-urlencode "token=$COVERITY_SCAN_TOKEN" --data project=hidapi --data md5=1 \
+        "https://scan.coverity.com/download/cxx/$COVERITY_PLATFORM")
+      [[ "$hash" =~ ^[[:xdigit:]]{32}$ ]] || { echo 'Invalid package hash'; exit 1; }
+      echo "hash=$hash" >> "$GITHUB_OUTPUT"
+  - uses: actions/cache/restore@v4
+    id: cache
+    with:
+      path: cov-root
+      key: coverity-native-${{ inputs.platform }}-${{ steps.package.outputs.hash }}
+  - name: Download tools
+    if: steps.cache.outputs.cache-hit != 'true'
+    shell: bash
+    env:
+      COVERITY_PLATFORM: ${{ inputs.platform }}
+      COVERITY_SCAN_TOKEN: ${{ inputs.token }}
+      COVERITY_PACKAGE_HASH: ${{ steps.package.outputs.hash }}
+    run: |
+      curl --fail --silent --show-error --location --connect-timeout 30 --max-time 540 \
+        --data-urlencode "token=$COVERITY_SCAN_TOKEN" --data project=hidapi \
+        --output coverity-package "https://scan.coverity.com/download/cxx/$COVERITY_PLATFORM"
+      if [[ "$COVERITY_PLATFORM" == Darwin ]]; then
+        actual_hash=$(md5 -q coverity-package)
+      else
+        actual_hash=$(md5sum coverity-package | cut -d ' ' -f 1)
+      fi
+      [[ "$actual_hash" == "$COVERITY_PACKAGE_HASH" ]] || { echo 'Package checksum mismatch'; exit 1; }
+  - name: Extract Windows tools
+    if: steps.cache.outputs.cache-hit != 'true' && inputs.platform == 'win64'
+    shell: pwsh
+    run: |
+      Move-Item -LiteralPath coverity-package -Destination coverity-package.zip
+      Expand-Archive -LiteralPath coverity-package.zip -DestinationPath cov-root
+  - name: Extract Linux tools
+    if: steps.cache.outputs.cache-hit != 'true' && inputs.platform == 'linux64'
+    shell: bash
+    run: |
+      mkdir cov-root
+      timeout --kill-after=3s 300s tar -xzf coverity-package --strip-components=1 -C cov-root
+  - name: Extract macOS tools
+    if: steps.cache.outputs.cache-hit != 'true' && inputs.platform == 'Darwin'
+    shell: bash
+    run: |
+      mv coverity-package coverity-package.dmg
+      mkdir coverity
+      hdiutil attach coverity-package.dmg -mountroot coverity
+      package_dirs=(coverity/*)
+      package_dir="${package_dirs[0]}"
+      installer="$package_dir/$(basename "$package_dir").sh"
+      mkdir cov-root
+      installer_name=$(basename "$installer")
+      cp "$installer" "cov-root/$installer_name"
+      chmod +x "cov-root/$installer_name"
+      (cd cov-root && "./$installer_name")
+      rm "cov-root/$installer_name"
+      hdiutil detach "$package_dir"
+  - name: Add tools to PATH
+    shell: bash
+    env:
+      COVERITY_PLATFORM: ${{ inputs.platform }}
+    run: |
+      if [[ "$COVERITY_PLATFORM" == win64 ]]; then
+        tool_dirs=("$PWD"/cov-root/*/bin)
+        cygpath -w "${tool_dirs[0]}" >> "$GITHUB_PATH"
+      else
+        echo "$PWD/cov-root/bin" >> "$GITHUB_PATH"
+      fi
+  - name: Verify tool installation
+    shell: bash
+    run: cov-manage-emit --ident
+  - uses: actions/cache/save@v4
+    if: steps.cache.outputs.cache-hit != 'true'
+    with:
+      path: cov-root
+      key: ${{ steps.cache.outputs.cache-primary-key }}
