@@ -38,7 +38,8 @@ Upload the single C file in **Analysis Settings -> Modeling File**. Committing i
 does not activate it, and it must never be added to a build target. User models
 override built-in and source-derived summaries, so inspect changes in findings
 after each update. Check the service's model compilation result and analyze the
-same captured revision when comparing behavior.
+same captured revision when comparing behavior. A successful model upload
+automatically queues the last uploaded build for reanalysis.
 
 With a full Coverity installation, compile it locally with:
 
