@@ -16,7 +16,9 @@
  * Primitives: https://scan.coverity.com/models
  */
 
-#include <stddef.h>
+/* Scan compiles this file without system headers. The serial is never read,
+ * so its platform-specific character width does not affect this C model. */
+typedef int wchar_t;
 
 typedef struct hid_device_ hid_device;
 
@@ -33,7 +35,7 @@ hid_device *hid_open(unsigned short vendor_id, unsigned short product_id,
 	(void)serial_number;
 
 	if (!succeeds)
-		return NULL;
+		return 0;
 	dev = (hid_device *)__coverity_alloc_nosize__();
 	__coverity_writeall__(dev);
 	return dev;
@@ -46,7 +48,7 @@ hid_device *hid_open_path(const char *path)
 	(void)path;
 
 	if (!succeeds)
-		return NULL;
+		return 0;
 	dev = (hid_device *)__coverity_alloc_nosize__();
 	__coverity_writeall__(dev);
 	return dev;

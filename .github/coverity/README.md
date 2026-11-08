@@ -30,6 +30,9 @@ The model deliberately leaves enumeration, borrowed strings/device information,
 partial I/O and threading to source analysis. It does not override libusb or
 standard-library functions, claim thread safety, or suppress particular defects.
 Uninitialized local choices are intentional Coverity modeling constructs.
+The file is self-contained because Scan's model compiler has no system-header
+search path. Its local `wchar_t` declaration is only a placeholder for the unused
+serial-number pointer; the model does not read characters or depend on their size.
 
 Upload the single C file in **Analysis Settings -> Modeling File**. Committing it
 does not activate it, and it must never be added to a build target. User models
