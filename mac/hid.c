@@ -1349,6 +1349,7 @@ int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 	}
 	dev->num_input_buffers = num_buffers;
 	pthread_mutex_unlock(&dev->mutex);
+	register_device_error(dev, NULL);
 	return 0;
 }
 

@@ -161,11 +161,8 @@ static int test_pop_into_truncation(void) {
 }
 
 static int test_pop_into_null_zero(void) {
-    /* pop_into(r, NULL, 0) is valid: consumes head slot without copying,
-     * returns 0. Mirrors pre-PR ring_pop_into() helper semantics at
-     * length=0. Reachable via hid_read_timeout only on libusb; mac's
-     * hid_read_timeout has an early length==0 guard that returns before
-     * touching the ring. */
+    /* The internal helper can discard a report without copying it.
+     * Both backends reject zero-length public reads before this point. */
     struct hidapi_input_ring r = {0};
     CHECK(hidapi_input_ring_init(&r, 4, SLOT_SZ) == 0);
 

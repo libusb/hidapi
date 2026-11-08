@@ -431,6 +431,10 @@ extern "C" {
 
 		    May be overridden at build time via
 		    -DHID_API_MAX_NUM_INPUT_BUFFERS=<value>.
+		    The library enforces the value used when it was built;
+		    redefining this macro only in an application does not change
+		    that limit. Build the library and application with the same
+		    value to keep the declaration and enforced limit consistent.
 		*/
 		#ifndef HID_API_MAX_NUM_INPUT_BUFFERS
 		#define HID_API_MAX_NUM_INPUT_BUFFERS 1024

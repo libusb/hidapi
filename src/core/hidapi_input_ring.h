@@ -171,10 +171,8 @@ static int hidapi_input_ring_push(struct hidapi_input_ring *r,
  *
  * Edge case: pop_into(r, NULL, 0) is valid and consumes the head
  * slot without copying (to_copy == 0, no memcpy, head++, count--).
- * This mirrors the pre-PR ring_pop_into() helper's own behavior at
- * length=0. Note: hid_read_timeout() only reaches this code path on
- * libusb (mac's hid_read_timeout has an early length==0 guard that
- * fails with "Zero buffer/length" before the ring is touched).
+ * This is an internal helper operation. Both backends reject
+ * zero-length hid_read_timeout() calls before touching the ring.
  *
  * Returns: bytes copied (0 <= rc <= dst_len) on success;
  *          -1 if empty ring or invalid args (including dst_len>0 with dst=NULL). */

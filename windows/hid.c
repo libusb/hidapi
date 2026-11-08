@@ -1297,6 +1297,7 @@ int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int n
 		register_winapi_error(dev, L"HidD_SetNumInputBuffers");
 		return -1;
 	}
+	register_string_error(dev, NULL);
 	return 0;
 }
 

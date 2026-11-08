@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #include <hidapi.h>
 
@@ -87,11 +88,13 @@ static int run_device_io(test_virtual_device *vdev, hid_device *h)
 
 	step("validate input queue capacity");
 	CHECK(hid_set_num_input_buffers(h, 0) == -1);
+	CHECK(wcscmp(hid_error(h), L"Success") != 0);
 	CHECK(hid_set_num_input_buffers(h, -1) == -1);
 #if HID_API_MAX_NUM_INPUT_BUFFERS < INT_MAX
 	CHECK(hid_set_num_input_buffers(h, HID_API_MAX_NUM_INPUT_BUFFERS + 1) == -1);
 #endif
 	CHECK(hid_set_num_input_buffers(h, queue_size) == 0);
+	CHECK(wcscmp(hid_error(h), L"Success") == 0);
 	CHECK(hid_set_num_input_buffers(h, queue_size < 2 ? queue_size : 2) == 0);
 
 	/* write: send one output report (report id 0 + payload). Output-report
