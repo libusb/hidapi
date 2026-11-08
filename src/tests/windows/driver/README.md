@@ -2,9 +2,9 @@
 
 This directory contains a small **virtual HID minidriver** used only by the
 HIDAPI virtual-device tests on Windows (the `winapi` backend's
-`DeviceIO_winapi` test). It is **not** part of the HIDAPI library: it is a
+`DeviceIO_winapi` and `ReadInterrupt_winapi` tests). It is **not** part of the HIDAPI library: it is a
 standalone UMDF 2 driver that the `win-vhid-test` CI job builds, self-signs and
-installs out-of-band, runs the test against, then removes.
+installs out-of-band, runs the tests against, then removes.
 
 ## Provenance
 

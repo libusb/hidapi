@@ -136,6 +136,7 @@ struct hid_device_ {
 	/* Read thread objects */
 	hidapi_thread_state thread_state;
 	int shutdown_thread;
+	int read_interrupted;
 	int transfer_loop_finished;
 	int read_thread_init_error;
 	struct libusb_transfer *transfer;
@@ -1824,6 +1825,16 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	bytes_read = -1;
 
+	/* Queued reports are returned without waiting, so check the sticky
+	   interrupt state first: an interrupted read fails even when input is
+	   queued. Queued reports remain readable after
+	   hid_read_clear_interrupt(). */
+	if (dev->read_interrupted) {
+		bytes_read = -1;
+		register_read_error(dev, "hid_read(_timeout): operation interrupted");
+		goto ret;
+	}
+
 	/* There's an input report queued up. Return it. */
 	if (dev->input_reports) {
 		/* Return the first one */
@@ -1842,11 +1853,14 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	if (milliseconds == -1) {
 		/* Blocking */
-		while (!dev->input_reports && !dev->shutdown_thread) {
+		while (!dev->input_reports && !dev->shutdown_thread && !dev->read_interrupted) {
 			hidapi_thread_cond_wait(&dev->thread_state);
 		}
 		if (dev->input_reports) {
 			bytes_read = return_data(dev, data, length);
+		}
+		else if (dev->read_interrupted) {
+			register_read_error(dev, "hid_read(_timeout): operation interrupted");
 		}
 		else {
 			/* Woken up by shutdown_thread without data. */
@@ -1860,11 +1874,15 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		hidapi_thread_gettime(&ts);
 		hidapi_thread_addtime(&ts, milliseconds);
 
-		while (!dev->input_reports && !dev->shutdown_thread) {
+		while (!dev->input_reports && !dev->shutdown_thread && !dev->read_interrupted) {
 			res = hidapi_thread_cond_timedwait(&dev->thread_state, &ts);
 			if (res == 0) {
 				if (dev->input_reports) {
 					bytes_read = return_data(dev, data, length);
+					break;
+				}
+				if (dev->read_interrupted) {
+					register_read_error(dev, "hid_read(_timeout): operation interrupted");
 					break;
 				}
 				if (dev->shutdown_thread) {
@@ -1919,6 +1937,32 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	dev->blocking = !nonblock;
 
 	return 0;
+}
+
+
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+{
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	dev->read_interrupted = 1;
+	hidapi_thread_cond_broadcast(&dev->thread_state);
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+}
+
+
+int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
+{
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	int v = dev->read_interrupted;
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+	return v;
+}
+
+
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+{
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	dev->read_interrupted = 0;
+	hidapi_thread_mutex_unlock(&dev->thread_state);
 }
 
 

@@ -61,8 +61,8 @@ jobs:
       run: |
         # The macOS virtual device needs the com.apple.developer.hid.virtual.device
         # entitlement and interactive user consent, neither available on a hosted
-        # runner, so DeviceIO_darwin self-skips (CTest code 77). This still
-        # verifies the provider builds and the test runs/links.
+        # runner, so both darwin suites self-skip (CTest code 77). This still
+        # verifies the provider builds and the tests run/link.
         ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
     - name: Check artifacts
       uses: andstor/file-existence-action@v2

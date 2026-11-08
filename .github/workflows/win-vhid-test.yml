@@ -1,7 +1,7 @@
 name: Windows Virtual HID Device Test (manual)
 
 # Builds and self-signs a modified vhidmini2 UMDF2 driver, installs it on a
-# hosted runner, then runs the backend-agnostic device-I/O test against that
+# hosted runner, then runs device-I/O and read-interrupt tests against that
 # real virtual HID device (winapi backend). It installs a driver, so it is not
 # part of the per-push CI matrix; run it on demand from the Actions tab, or by
 # adding the 'ci-virtual-device' label to a pull request.
@@ -141,11 +141,23 @@ jobs:
         cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DHIDAPI_WITH_TESTS=ON
         cmake --build build --config Release
 
-    - name: Run device-I/O test against the virtual device
+    - name: Run device-I/O and read-interrupt tests against the virtual device
       shell: pwsh
       working-directory: build
       run: |
-        ctest -C Release -R DeviceIO_winapi --output-on-failure
+        ctest -C Release -R '^(DeviceIO|ReadInterrupt)_winapi$' --no-tests=error --output-on-failure --output-junit vdev-results.xml
+        if ($LASTEXITCODE -ne 0) { throw "Virtual-device tests failed." }
+        [xml]$results = Get-Content vdev-results.xml -Raw
+        $cases = @($results.SelectNodes('//testcase'))
+        if ($cases.Count -ne 2) { throw "Expected both Windows virtual-device suites." }
+        foreach ($name in @('DeviceIO_winapi', 'ReadInterrupt_winapi')) {
+          if ($name -notin $cases.name) { throw "Missing virtual-device suite: $name" }
+        }
+        foreach ($case in $cases) {
+          if ($null -ne $case.SelectSingleNode('skipped|failure|error')) {
+            throw "Virtual-device suite did not pass: $($case.name)"
+          }
+        }
 
     - name: Cleanup virtual device
       if: always()
