@@ -1,3 +1,16 @@
+# The shared ring buffer needs no virtual device or backend library.
+if(APPLE OR HIDAPI_WITH_LIBUSB)
+    add_executable(test_hidapi_input_ring test_hidapi_input_ring.c)
+    target_include_directories(test_hidapi_input_ring PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../core")
+    hidapi_configure_sanitizers(test_hidapi_input_ring)
+    add_test(NAME hidapi_input_ring COMMAND test_hidapi_input_ring)
+    set_tests_properties(hidapi_input_ring PROPERTIES TIMEOUT 30)
+endif()
+
+if(NOT (WIN32 OR CMAKE_SYSTEM_NAME MATCHES "Linux" OR APPLE))
+    return()
+endif()
+
 # Backend-generic HIDAPI (unit-)tests, run against a virtual HID device.
 #
 # The tests are written against the public HIDAPI API and the backend-agnostic

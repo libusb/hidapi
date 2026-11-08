@@ -21,9 +21,11 @@
  starting point for your own applications which use HIDAPI.
 ********************************************************/
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #include <hidapi.h>
 
@@ -82,6 +84,18 @@ static int run_device_io(test_virtual_device *vdev, hid_device *h)
 	unsigned char in_report[TEST_VDEV_REPORT_SIZE];
 	const unsigned char expect_a[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_A;
 	const unsigned char expect_b[TEST_VDEV_REPORT_SIZE] = TEST_VDEV_INPUT_B;
+	const int queue_size = HID_API_MAX_NUM_INPUT_BUFFERS < 64 ? HID_API_MAX_NUM_INPUT_BUFFERS : 64;
+
+	step("validate input queue capacity");
+	CHECK(hid_set_num_input_buffers(h, 0) == -1);
+	CHECK(wcscmp(hid_error(h), L"Success") != 0);
+	CHECK(hid_set_num_input_buffers(h, -1) == -1);
+#if HID_API_MAX_NUM_INPUT_BUFFERS < INT_MAX
+	CHECK(hid_set_num_input_buffers(h, HID_API_MAX_NUM_INPUT_BUFFERS + 1) == -1);
+#endif
+	CHECK(hid_set_num_input_buffers(h, queue_size) == 0);
+	CHECK(wcscmp(hid_error(h), L"Success") == 0);
+	CHECK(hid_set_num_input_buffers(h, queue_size < 2 ? queue_size : 2) == 0);
 
 	/* write: send one output report (report id 0 + payload). Output-report
 	   support depends on how each virtual device is built, so this is
@@ -105,6 +119,8 @@ static int run_device_io(test_virtual_device *vdev, hid_device *h)
 	CHECK(memcmp(in_report, expect_a, TEST_VDEV_REPORT_SIZE) == 0);
 
 	/* exchange B. */
+	step("grow input queue after reading");
+	CHECK(hid_set_num_input_buffers(h, queue_size) == 0);
 	step("trigger B (hid_send_feature_report)");
 	CHECK(test_virtual_device_trigger(vdev, h, TEST_VDEV_CMD_EMIT_B) >= 0);
 	step("read B (hid_read_timeout)");

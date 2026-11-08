@@ -1,4 +1,12 @@
-# HIDAPI virtual-device tests
+# HIDAPI tests
+
+`test_hidapi_input_ring.c` tests the shared queue in
+[`src/core/hidapi_input_ring.h`](../core/hidapi_input_ring.h), including FIFO
+ordering, overflow, resizing and allocation bounds. The `hidapi_input_ring`
+CTest runs without a device when macOS or libusb is enabled. The standalone
+Autotools consumer in `pkg-config/` checks installed pkg-config metadata.
+
+## Virtual-device tests
 
 Backend-generic HIDAPI tests that run against a **virtual HID device** so they
 need no physical hardware. Shared scenarios use the public
@@ -20,7 +28,7 @@ command bytes, expected payloads).
 
 | Test | What it exercises |
 |------|-------------------|
-| `test_device_io.c` | open → write an output report → trigger+read input reports (Feature-report write, then input-report read-back) → close |
+| `test_device_io.c` | open → validate and resize the input queue → write an output report → trigger+read input reports → grow the queue and read again → close |
 | `test_read_interrupt.c` | interrupt a blocking or timed read, retain queued input while interrupted, clear and resume, repeat interrupt/clear, and close from a Windows controller while the reader thread stays alive |
 
 Each provider builds `DeviceIO_<backend>` and `ReadInterrupt_<backend>`.

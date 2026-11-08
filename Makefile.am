@@ -68,9 +68,10 @@ endif
 EXTRA_DIST = \
  udev \
  doxygen \
- tests/pkg-config/configure.ac \
- tests/pkg-config/Makefile.am \
- tests/pkg-config/test.c
+ src/core/hidapi_input_ring.h \
+ src/tests/pkg-config/configure.ac \
+ src/tests/pkg-config/Makefile.am \
+ src/tests/pkg-config/test.c
 
 dist_doc_DATA = \
  README.md \

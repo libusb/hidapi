@@ -140,12 +140,12 @@ jobs:
       run: make install
     - name: Check pkg-config package
       run: |
-        autoreconf --install --force hidapisrc/tests/pkg-config
+        autoreconf --install --force hidapisrc/src/tests/pkg-config
         mkdir -p build/pkg-config-test
         cd build/pkg-config-test
         CFLAGS="${GNU_COMPILE_FLAGS}" \
           PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/install/shared/lib/pkgconfig" \
-          "${GITHUB_WORKSPACE}/hidapisrc/tests/pkg-config/configure"
+          "${GITHUB_WORKSPACE}/hidapisrc/src/tests/pkg-config/configure"
         make V=1
     - name: Run virtual-device tests (uhid -> hidraw; raw-gadget self-skips)
       working-directory: build/shared

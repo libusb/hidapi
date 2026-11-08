@@ -50,6 +50,7 @@
 #endif
 
 #include "hidapi_libusb.h"
+#include "../src/core/hidapi_input_ring.h"
 #include "hidapi_libusb_report_descriptor.h"
 
 #ifndef HIDAPI_THREAD_MODEL_INCLUDE
@@ -78,13 +79,6 @@ and re-attach of the kernel driver. See comments inside hid_enumerate().
 libusb HIDAPI programs are encouraged to use the interface number
 instead to differentiate between interfaces on a composite HID device. */
 /*#define INVASIVE_GET_USAGE*/
-
-/* Linked List of input reports received from the device. */
-struct input_report {
-	uint8_t *data;
-	size_t len;
-	struct input_report *next;
-};
 
 
 typedef struct hidapi_error_ctx_ {
@@ -133,6 +127,9 @@ struct hid_device_ {
 	/* Whether blocking reads are used */
 	int blocking; /* boolean */
 
+	/* Maximum number of input reports to queue before dropping oldest. */
+	int num_input_buffers;
+
 	/* Read thread objects */
 	hidapi_thread_state thread_state;
 	int shutdown_thread;
@@ -141,8 +138,9 @@ struct hid_device_ {
 	int read_thread_init_error;
 	struct libusb_transfer *transfer;
 
-	/* List of received input reports. */
-	struct input_report *input_reports;
+	/* Input report queue, allocated after the report and endpoint sizes
+	   are known. Resized under thread_state's mutex. */
+	struct hidapi_input_ring input_ring;
 
 	/* Was kernel driver detached by libusb */
 #ifdef DETACH_KERNEL_DRIVER
@@ -168,7 +166,6 @@ static libusb_context *usb_context = NULL;
 static hidapi_error_ctx last_global_error;
 
 uint16_t get_usb_code_for_current_locale(void);
-static int return_data(hid_device *dev, unsigned char *data, size_t length);
 static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size, unsigned char *buf, size_t buf_size);
 
 static hid_device *new_hid_device(void)
@@ -178,6 +175,7 @@ static hid_device *new_hid_device(void)
 		return NULL;
 
 	dev->blocking = 1;
+	dev->num_input_buffers = 30;
 	dev->write_timeout_ms = 1000;
 	dev->send_output_report_timeout_ms = 1000;
 	dev->send_feature_report_timeout_ms = 1000;
@@ -201,6 +199,9 @@ static void free_hid_device(hid_device *dev)
 	free_hidapi_error(&dev->error);
 	free(dev->last_read_error_str);
 	free(dev->report_descriptor);
+
+	/* Free any queued input reports and the ring backing array. */
+	hidapi_input_ring_destroy(&dev->input_ring);
 
 	/* Free the device itself */
 	free(dev);
@@ -1118,37 +1119,17 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 
 	if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
 
-		struct input_report *rpt = (struct input_report*) malloc(sizeof(*rpt));
-		rpt->data = (uint8_t*) malloc(transfer->actual_length);
-		memcpy(rpt->data, transfer->buffer, transfer->actual_length);
-		rpt->len = transfer->actual_length;
-		rpt->next = NULL;
-
 		hidapi_thread_mutex_lock(&dev->thread_state);
 
-		/* Attach the new report object to the end of the list. */
-		if (dev->input_reports == NULL) {
-			/* The list is empty. Put it at the root. */
-			dev->input_reports = rpt;
+		int push_rc = hidapi_input_ring_push(&dev->input_ring,
+		                                     transfer->buffer,
+		                                     (size_t)transfer->actual_length);
+		if (push_rc == 0) {
 			hidapi_thread_cond_signal(&dev->thread_state);
 		}
-		else {
-			/* Find the end of the list and attach. */
-			struct input_report *cur = dev->input_reports;
-			int num_queued = 0;
-			while (cur->next != NULL) {
-				cur = cur->next;
-				num_queued++;
-			}
-			cur->next = rpt;
+		/* The transfer buffer uses the ring's slot size, so a completed
+		   transfer fits without truncation or allocation in this callback. */
 
-			/* Pop one off if we've reached 30 in the queue. This
-			   way we don't grow forever if the user never reads
-			   anything from the device. */
-			if (num_queued > 30) {
-				return_data(dev, NULL, 0);
-			}
-		}
 		hidapi_thread_mutex_unlock(&dev->thread_state);
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
@@ -1184,18 +1165,13 @@ static void *read_thread(void *param)
 	int res;
 	hid_device *dev = (hid_device *) param;
 	uint8_t *buf = NULL;
-	size_t length = (size_t)dev->input_ep_max_packet_size;
+	size_t length = dev->input_ring.slot_size;
 
 	/* Control/feature reports can work without an interrupt IN endpoint. */
 	if (dev->input_endpoint == 0) {
 		dev->shutdown_thread = 1;
 		goto notify_main_thread;
 	}
-
-	/* Never shrink below the endpoint packet size: some devices pad short
-	   reports to a complete USB packet. */
-	if (dev->max_input_report_size > length)
-		length = dev->max_input_report_size;
 
 	if (length == 0 || length > INT_MAX) {
 		LOG("Invalid input report buffer length: %zu\n", length);
@@ -1476,6 +1452,19 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 		}
 	}
 
+	{
+		/* Match the transfer size to the largest input report, retaining
+		   the endpoint packet size for devices that pad short reports. */
+		size_t slot_size = (size_t)dev->input_ep_max_packet_size;
+		if (dev->max_input_report_size > slot_size)
+			slot_size = dev->max_input_report_size;
+		/* Devices without interrupt input still support the setter. */
+		if (slot_size == 0)
+			slot_size = 64;
+		if (hidapi_input_ring_init(&dev->input_ring, dev->num_input_buffers, slot_size) != 0)
+			goto err_release_interface;
+	}
+
 	hidapi_thread_create(&dev->thread_state, read_thread, dev);
 
 	/* Wait here for the read thread to be initialized. */
@@ -1489,18 +1478,22 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 			dev->transfer = NULL;
 		}
 
-		libusb_release_interface(dev->device_handle, dev->interface);
-#ifdef DETACH_KERNEL_DRIVER
-		if (dev->is_driver_detached) {
-			res = libusb_attach_kernel_driver(dev->device_handle, dev->interface);
-			if (res < 0)
-				LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
-			dev->is_driver_detached = 0;
-		}
-#endif
-		return 0;
+		goto err_release_interface;
 	}
 	return 1;
+
+err_release_interface:
+	hidapi_input_ring_destroy(&dev->input_ring);
+	libusb_release_interface(dev->device_handle, dev->interface);
+#ifdef DETACH_KERNEL_DRIVER
+	if (dev->is_driver_detached) {
+		res = libusb_attach_kernel_driver(dev->device_handle, dev->interface);
+		if (res < 0)
+			LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
+		dev->is_driver_detached = 0;
+	}
+#endif
+	return 0;
 }
 
 
@@ -1778,20 +1771,11 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 	return actual_length;
 }
 
-/* Helper function, to simplify hid_read().
-   This should be called with dev->mutex locked. */
-static int return_data(hid_device *dev, unsigned char *data, size_t length)
+/* Pop one report from the ring into (data, length). Caller must
+   hold dev->thread_state. Returns bytes copied, or -1 if empty. */
+static int ring_pop_into(hid_device *dev, unsigned char *data, size_t length)
 {
-	/* Copy the data out of the linked list item (rpt) into the
-	   return buffer (data), and delete the liked list item. */
-	struct input_report *rpt = dev->input_reports;
-	size_t len = (length < rpt->len)? length: rpt->len;
-	if (len > 0)
-		memcpy(data, rpt->data, len);
-	dev->input_reports = rpt->next;
-	free(rpt->data);
-	free(rpt);
-	return (int)len;
+	return hidapi_input_ring_pop_into(&dev->input_ring, data, length);
 }
 
 static void cleanup_mutex(void *param)
@@ -1836,9 +1820,8 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 	}
 
 	/* There's an input report queued up. Return it. */
-	if (dev->input_reports) {
-		/* Return the first one */
-		bytes_read = return_data(dev, data, length);
+	if (dev->input_ring.count > 0) {
+		bytes_read = ring_pop_into(dev, data, length);
 		goto ret;
 	}
 
@@ -1853,11 +1836,11 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	if (milliseconds == -1) {
 		/* Blocking */
-		while (!dev->input_reports && !dev->shutdown_thread && !dev->read_interrupted) {
+		while (dev->input_ring.count == 0 && !dev->shutdown_thread && !dev->read_interrupted) {
 			hidapi_thread_cond_wait(&dev->thread_state);
 		}
-		if (dev->input_reports) {
-			bytes_read = return_data(dev, data, length);
+		if (dev->input_ring.count > 0) {
+			bytes_read = ring_pop_into(dev, data, length);
 		}
 		else if (dev->read_interrupted) {
 			register_read_error(dev, "hid_read(_timeout): operation interrupted");
@@ -1874,11 +1857,11 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		hidapi_thread_gettime(&ts);
 		hidapi_thread_addtime(&ts, milliseconds);
 
-		while (!dev->input_reports && !dev->shutdown_thread && !dev->read_interrupted) {
+		while (dev->input_ring.count == 0 && !dev->shutdown_thread && !dev->read_interrupted) {
 			res = hidapi_thread_cond_timedwait(&dev->thread_state, &ts);
 			if (res == 0) {
-				if (dev->input_reports) {
-					bytes_read = return_data(dev, data, length);
+				if (dev->input_ring.count > 0) {
+					bytes_read = ring_pop_into(dev, data, length);
 					break;
 				}
 				if (dev->read_interrupted) {
@@ -1931,6 +1914,25 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 	return dev->last_read_error_str;
 }
 
+
+
+int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
+{
+	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS) {
+		register_string_error(&dev->error, "num_buffers out of range");
+		return -1;
+	}
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	if (hidapi_input_ring_resize(&dev->input_ring, num_buffers) != 0) {
+		hidapi_thread_mutex_unlock(&dev->thread_state);
+		register_string_error(&dev->error, "Failed to resize input report queue");
+		return -1;
+	}
+	dev->num_input_buffers = num_buffers;
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+	return 0;
+}
 
 int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 {
@@ -2129,12 +2131,8 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	/* Close the handle */
 	libusb_close(dev->device_handle);
 
-	/* Clear out the queue of received reports. */
-	hidapi_thread_mutex_lock(&dev->thread_state);
-	while (dev->input_reports) {
-		return_data(dev, NULL, 0);
-	}
-	hidapi_thread_mutex_unlock(&dev->thread_state);
+	/* Queued reports are freed inside free_hid_device via
+	   hidapi_input_ring_destroy. */
 
 	free_hid_device(dev);
 }

@@ -40,14 +40,14 @@ tasks:
     for package in hidapi hidapi-hidraw; do
       cc -Wall -Wextra -Werror \
         $(pkg-config --cflags "$package") \
-        tests/pkg-config/test.c \
+        src/tests/pkg-config/test.c \
         -o "build/$package-pkg-config-test" \
         $(pkg-config --static --libs "$package")
       "./build/$package-pkg-config-test"
     done
     cc -Wall -Wextra -Werror \
       $(pkg-config --cflags hidapi-libusb) \
-      tests/pkg-config/test.c \
+      src/tests/pkg-config/test.c \
       -o build/hidapi-libusb-pkg-config-test \
       $(pkg-config --libs hidapi-libusb)
     ./build/hidapi-libusb-pkg-config-test
