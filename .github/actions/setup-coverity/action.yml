@@ -72,7 +72,8 @@ runs:
       cp "$installer" "cov-root/$installer_name"
       chmod +x "cov-root/$installer_name"
       (cd cov-root && "./$installer_name")
-      rm "cov-root/$installer_name"
+      # Some packages remove their installer after extraction.
+      rm -f "cov-root/$installer_name"
       hdiutil detach "$package_dir"
   - name: Add tools to PATH
     shell: bash
