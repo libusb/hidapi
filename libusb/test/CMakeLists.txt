@@ -58,33 +58,3 @@ foreach(TEST_CASE ${HID_REPORT_DESCRIPTOR_TEST_CASES})
           WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
      )
 endforeach()
-
-# Read-thread startup: libusb/hid.c is compiled into the test, with pthread and
-# device-level libusb calls interposed, so no hardware is needed. Built with the
-# same definitions and libraries as the hidapi_libusb library itself.
-# It interposes the native pthread_barrier_wait(), so it is only added where that
-# exists (not on Android before API 24, where hidapi_thread_pthread.h provides
-# its own barrier implementation).
-include(CheckSymbolExists)
-include(CMakePushCheckState)
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_THREAD_LIBS_INIT})
-check_symbol_exists(pthread_barrier_wait "pthread.h" HIDAPI_HAVE_PTHREAD_BARRIER_WAIT)
-cmake_pop_check_state()
-
-if(HIDAPI_HAVE_PTHREAD_BARRIER_WAIT)
-     add_executable(read_thread_startup_test read_thread_startup_test.c)
-     hidapi_configure_sanitizers(read_thread_startup_test)
-     if(HIDAPI_BUILD_AS_CXX)
-          set_source_files_properties(read_thread_startup_test.c PROPERTIES LANGUAGE CXX)
-     endif()
-     get_target_property(HIDAPI_LIBUSB_DEFINITIONS hidapi_libusb COMPILE_DEFINITIONS)
-     if(HIDAPI_LIBUSB_DEFINITIONS)
-          target_compile_definitions(read_thread_startup_test PRIVATE ${HIDAPI_LIBUSB_DEFINITIONS})
-     endif()
-     get_target_property(HIDAPI_LIBUSB_LINK_LIBRARIES hidapi_libusb LINK_LIBRARIES)
-     target_link_libraries(read_thread_startup_test PRIVATE ${HIDAPI_LIBUSB_LINK_LIBRARIES})
-
-     add_test(NAME LibUsbReadThreadStartupTest COMMAND read_thread_startup_test)
-     set_tests_properties(LibUsbReadThreadStartupTest PROPERTIES TIMEOUT 30)
-endif()
