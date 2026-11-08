@@ -6,9 +6,9 @@
 # 2010-06-01
 ###########################################
 
-all: hidtest libs
+all: hidtest-libusb libs
 
-libs: libhidapi.so
+libs: libhidapi-libusb.so
 
 CC       ?= cc
 CFLAGS   ?= -Wall -g -fPIC
@@ -21,11 +21,11 @@ LIBS      = -lusb -liconv -pthread
 
 
 # Console Test Program
-hidtest: $(OBJS)
+hidtest-libusb: $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LIBS)
 
 # Shared Libs
-libhidapi.so: $(COBJS)
+libhidapi-libusb.so: $(COBJS)
 	$(CC) $(LDFLAGS) -shared -Wl,-soname,$@.0 $^ -o $@ $(LIBS)
 
 # Objects
@@ -34,6 +34,6 @@ $(COBJS): %.o: %.c
 
 
 clean:
-	rm -f $(OBJS) hidtest libhidapi.so ../hidtest/hidtest.o
+	rm -f $(OBJS) hidtest-libusb libhidapi-libusb.so ../hidtest/hidtest.o
 
 .PHONY: clean libs

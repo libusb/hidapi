@@ -1,4 +1,5 @@
 add_executable(hid_report_reconstructor_test hid_report_reconstructor_test.c)
+hidapi_configure_sanitizers(hid_report_reconstructor_test)
 set_target_properties(hid_report_reconstructor_test
     PROPERTIES
         C_STANDARD 11

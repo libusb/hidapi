@@ -29,15 +29,18 @@
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_error.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <wchar.h>
 #include <locale.h>
 #include <pthread.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <errno.h>
 
 #include "hidapi_darwin.h"
-#include "../core/hidapi_input_ring.h"
+#include "../src/core/hidapi_input_ring.h"
 
 /* Barrier implementation because Mac OSX doesn't have pthread_barrier.
    It also doesn't have clock_gettime(). So much for POSIX and SUSv2.
@@ -137,6 +140,7 @@ struct hid_device_ {
 	pthread_barrier_t barrier; /* Ensures correct startup sequence */
 	pthread_barrier_t shutdown_barrier; /* Ensures correct shutdown sequence */
 	int shutdown_thread;
+	int read_interrupted;
 	wchar_t *last_error_str;
 	wchar_t *last_read_error_str;
 };
@@ -159,6 +163,7 @@ static hid_device *new_hid_device(void)
 	dev->input_report_buf = NULL;
 	dev->device_info = NULL;
 	dev->shutdown_thread = 0;
+	dev->read_interrupted = 0;
 	dev->last_error_str = NULL;
 	dev->last_read_error_str = NULL;
 
@@ -329,7 +334,7 @@ static bool try_get_ioregistry_int_property(io_service_t service, CFStringRef pr
 
 	if (ref) {
 		if (CFGetTypeID(ref) == CFNumberGetTypeID()) {
-			result = CFNumberGetValue(ref, kCFNumberSInt32Type, out_val);
+			result = CFNumberGetValue((CFNumberRef) ref, kCFNumberSInt32Type, out_val);
 		}
 
 		CFRelease(ref);
@@ -534,8 +539,8 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 {
 	unsigned short dev_vid;
 	unsigned short dev_pid;
-	int BUF_LEN = 256;
-	wchar_t buf[BUF_LEN];
+	enum { BufLen = 256 };
+	wchar_t buf[BufLen];
 	CFTypeRef transport_prop;
 
 	struct hid_device_info *cur_dev;
@@ -576,7 +581,7 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 		   so for (max) "path" string 'DevSrvsID:18446744073709551615' we would need
 		   9+1+20+1=31 bytes buffer, but allocate 32 for simple alignment */
 		const size_t path_len = 32;
-		cur_dev->path = calloc(1, path_len);
+		cur_dev->path = (char *) calloc(1, path_len);
 		if (cur_dev->path != NULL) {
 			snprintf(cur_dev->path, path_len, "DevSrvsID:%llu", entry_id);
 		}
@@ -588,13 +593,13 @@ static struct hid_device_info *create_device_info_with_usage(IOHIDDeviceRef dev,
 	}
 
 	/* Serial Number */
-	get_serial_number(dev, buf, BUF_LEN);
+	get_serial_number(dev, buf, BufLen);
 	cur_dev->serial_number = dup_wcs(buf);
 
 	/* Manufacturer and Product strings */
-	get_manufacturer_string(dev, buf, BUF_LEN);
+	get_manufacturer_string(dev, buf, BufLen);
 	cur_dev->manufacturer_string = dup_wcs(buf);
-	get_product_string(dev, buf, BUF_LEN);
+	get_product_string(dev, buf, BufLen);
 	cur_dev->product_string = dup_wcs(buf);
 
 	/* VID/PID */
@@ -1187,7 +1192,7 @@ static int cond_wait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t *mut
 		   to sleep. See the pthread_cond_timedwait() man page for
 		   details. */
 
-		if (dev->shutdown_thread || dev->disconnected) {
+		if (dev->shutdown_thread || dev->disconnected || dev->read_interrupted) {
 			return -1;
 		}
 	}
@@ -1208,7 +1213,7 @@ static int cond_timedwait(hid_device *dev, pthread_cond_t *cond, pthread_mutex_t
 		   to sleep. See the pthread_cond_timedwait() man page for
 		   details. */
 
-		if (dev->shutdown_thread || dev->disconnected) {
+		if (dev->shutdown_thread || dev->disconnected || dev->read_interrupted) {
 			return -1;
 		}
 	}
@@ -1229,6 +1234,16 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	/* Lock the access to the input report ring. */
 	pthread_mutex_lock(&dev->mutex);
+
+	/* Queued reports are returned without waiting, so check the sticky
+	   interrupt state first: an interrupted read fails even when input is
+	   queued. Queued reports remain readable after
+	   hid_read_clear_interrupt(). */
+	if (dev->read_interrupted) {
+		bytes_read = -1;
+		register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+		goto ret;
+	}
 
 	/* There's an input report queued up. Return it. */
 	if (dev->input_ring.count > 0) {
@@ -1260,7 +1275,10 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		res = cond_wait(dev, &dev->condition, &dev->mutex);
 		if (res == 0)
 			bytes_read = ring_pop_into(dev, data, length);
-		else {
+		else if (dev->read_interrupted) {
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+			bytes_read = -1;
+		} else {
 			/* There was an error, or a device disconnection. */
 			register_error_str(&dev->last_read_error_str, "hid_read_timeout: error waiting for more data");
 			bytes_read = -1;
@@ -1285,6 +1303,9 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			bytes_read = ring_pop_into(dev, data, length);
 		} else if (res == ETIMEDOUT) {
 			bytes_read = 0;
+		} else if (dev->read_interrupted) {
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+			bytes_read = -1;
 		} else {
 			register_error_str(&dev->last_read_error_str, "hid_read_timeout: error waiting for more data");
 			bytes_read = -1;
@@ -1337,6 +1358,29 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	dev->blocking = !nonblock;
 
 	return 0;
+}
+
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+{
+	pthread_mutex_lock(&dev->mutex);
+	dev->read_interrupted = 1;
+	pthread_cond_broadcast(&dev->condition);
+	pthread_mutex_unlock(&dev->mutex);
+}
+
+int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
+{
+	pthread_mutex_lock(&dev->mutex);
+	int v = dev->read_interrupted;
+	pthread_mutex_unlock(&dev->mutex);
+	return v;
+}
+
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+{
+	pthread_mutex_lock(&dev->mutex);
+	dev->read_interrupted = 0;
+	pthread_mutex_unlock(&dev->mutex);
 }
 
 int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char *data, size_t length)

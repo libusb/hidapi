@@ -26,23 +26,27 @@
 #include <stdlib.h>
 #include <locale.h>
 #include <errno.h>
-
 /* Unix */
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <sys/utsname.h>
+#include <sys/eventfd.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <linux/types.h>
+#include <linux/hid.h>
+#include <stdarg.h>
+#include <wchar.h>
 
 /* Linux */
 #include <linux/hidraw.h>
-#include <linux/version.h>
 #include <linux/input.h>
 #include <libudev.h>
 
 #include "hidapi.h"
+
+struct udev_device;
 
 #ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
 /* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.
@@ -77,6 +81,8 @@ struct hid_device_ {
 	wchar_t *last_error_str;
 	wchar_t *last_read_error_str;
 	struct hid_device_info* device_info;
+	int interrupt_efd;
+	int interrupted;
 };
 
 static struct hid_api_version api_version = {
@@ -100,6 +106,14 @@ static hid_device *new_hid_device(void)
 	dev->last_error_str = NULL;
 	dev->last_read_error_str = NULL;
 	dev->device_info = NULL;
+	dev->interrupted = 0;
+	dev->interrupt_efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	if (dev->interrupt_efd < 0) {
+		int saved_errno = errno;
+		free(dev);
+		errno = saved_errno;
+		return NULL;
+	}
 
 	return dev;
 }
@@ -616,10 +630,12 @@ static int parse_uevent_info(const char *uevent, unsigned *bus_type,
 			}
 		} else if (strcmp(key, "HID_NAME") == 0) {
 			/* The caller has to free the product name */
+			free(*product_name_utf8);
 			*product_name_utf8 = strdup(value);
 			found_name = 1;
 		} else if (strcmp(key, "HID_UNIQ") == 0) {
 			/* The caller has to free the serial number */
+			free(*serial_number_utf8);
 			*serial_number_utf8 = strdup(value);
 			found_serial = 1;
 		}
@@ -1081,8 +1097,7 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 
 	dev = new_hid_device();
 	if (!dev) {
-		errno = ENOMEM;
-		register_global_error("Couldn't allocate memory");
+		register_global_error_format("Failed to create hid_device: %s", strerror(errno));
 		return NULL;
 	}
 
@@ -1103,8 +1118,8 @@ hid_device * HID_API_EXPORT hid_open_path(const char *path)
 	}
 	else {
 		/* Unable to open a device. */
-		free(dev);
 		register_global_error_format("Failed to open a device with path '%s': %s", path, strerror(errno));
+		hid_close(dev);
 		return NULL;
 	}
 }
@@ -1141,22 +1156,29 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	int bytes_read;
 
-	if (milliseconds >= 0) {
-		/* Milliseconds is either 0 (non-blocking) or > 0 (contains
-		   a valid timeout). In both cases we want to call poll()
-		   and wait for data to arrive.  Don't rely on non-blocking
-		   operation (O_NONBLOCK) since some kernels don't seem to
-		   properly report device disconnection through read() when
-		   in non-blocking mode.  */
+	{
+		/* Always poll() - even for a blocking read (milliseconds < 0) -
+		   so that hid_read_interrupt() can wake a read that is waiting for
+		   data via the interrupt eventfd. A negative timeout makes poll()
+		   block indefinitely, matching blocking-read semantics.
+		   The eventfd stays readable until hid_read_clear_interrupt(), and
+		   it is checked before reading device data, so an interrupted read
+		   fails even when input is queued.
+		   Don't rely on non-blocking operation (O_NONBLOCK) since some
+		   kernels don't seem to properly report device disconnection
+		   through read() when in non-blocking mode.  */
 		int ret;
-		struct pollfd fds;
+		struct pollfd fds[2];
 
-		fds.fd = dev->device_handle;
-		fds.events = POLLIN;
-		fds.revents = 0;
-		ret = poll(&fds, 1, milliseconds);
+		fds[0].fd = dev->device_handle;
+		fds[0].events = POLLIN;
+		fds[0].revents = 0;
+		fds[1].fd = dev->interrupt_efd;
+		fds[1].events = POLLIN;
+		fds[1].revents = 0;
+		ret = poll(fds, 2, milliseconds);
 		if (ret == 0) {
-			/* Timeout */
+			/* Timeout (only reachable when milliseconds >= 0) */
 			return ret;
 		}
 		if (ret == -1) {
@@ -1164,15 +1186,24 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 			register_error_str(&dev->last_read_error_str, strerror(errno));
 			return ret;
 		}
-		else {
-			/* Check for errors on the file descriptor. This will
-			   indicate a device disconnection. */
-			if (fds.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-				// We cannot use strerror() here as no -1 was returned from poll().
-				errno = EIO;
-				register_error_str(&dev->last_read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
-				return -1;
-			}
+
+		/* Device disconnection takes priority over the interrupt. */
+		if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+			// We cannot use strerror() here as no -1 was returned from poll().
+			errno = EIO;
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: unexpected poll error (device disconnected)");
+			return -1;
+		}
+
+		if (fds[1].revents & POLLIN) {
+			register_error_str(&dev->last_read_error_str, "hid_read_timeout: operation interrupted");
+			return -1;
+		}
+
+		if (!(fds[0].revents & POLLIN)) {
+			/* Neither fd is readable yet still poll() returned > 0;
+			   treat as no data available. */
+			return 0;
 		}
 	}
 
@@ -1218,6 +1249,33 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 
 	dev->blocking = !nonblock;
 	return 0; /* Success */
+}
+
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+{
+	__atomic_store_n(&dev->interrupted, 1, __ATOMIC_RELEASE);
+	uint64_t one = 1;
+	ssize_t written;
+	do {
+		written = write(dev->interrupt_efd, &one, sizeof(one));
+	} while (written < 0 && errno == EINTR);
+	/* EAGAIN means the eventfd is already signalled. */
+}
+
+int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
+{
+	return __atomic_load_n(&dev->interrupted, __ATOMIC_ACQUIRE);
+}
+
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+{
+	uint64_t v;
+	ssize_t got;
+	do {
+		got = read(dev->interrupt_efd, &v, sizeof(v));
+	} while (got < 0 && errno == EINTR);
+	/* Publish the cleared state only after the eventfd is drained. */
+	__atomic_store_n(&dev->interrupted, 0, __ATOMIC_RELEASE);
 }
 
 
@@ -1302,7 +1360,10 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
-	close(dev->device_handle);
+	if (dev->device_handle >= 0)
+		close(dev->device_handle);
+	if (dev->interrupt_efd >= 0)
+		close(dev->interrupt_efd);
 
 	free(dev->last_error_str);
 	free(dev->last_read_error_str);

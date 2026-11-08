@@ -7,10 +7,30 @@ else
 pkgconfigdir=$(libdir)/pkgconfig
 endif
 
-if OS_LINUX
-pkgconfig_DATA=pc/hidapi-hidraw.pc pc/hidapi-libusb.pc
-else
 pkgconfig_DATA=pc/hidapi.pc
+
+if OS_LINUX
+pkgconfig_DATA += pc/hidapi-hidraw.pc pc/hidapi-libusb.pc
+endif
+
+if OS_DARWIN
+pkgconfig_DATA += pc/hidapi-darwin.pc
+endif
+
+if OS_FREEBSD
+pkgconfig_DATA += pc/hidapi-hidraw.pc pc/hidapi-libusb.pc
+endif
+
+if OS_KFREEBSD
+pkgconfig_DATA += pc/hidapi-libusb.pc
+endif
+
+if OS_HAIKU
+pkgconfig_DATA += pc/hidapi-libusb.pc
+endif
+
+if OS_WINDOWS
+pkgconfig_DATA += pc/hidapi-winapi.pc
 endif
 
 SUBDIRS=
@@ -24,7 +44,7 @@ SUBDIRS += mac
 endif
 
 if OS_FREEBSD
-SUBDIRS += libusb
+SUBDIRS += freebsd libusb
 endif
 
 if OS_KFREEBSD
@@ -45,7 +65,13 @@ if BUILD_TESTGUI
 SUBDIRS += testgui
 endif
 
-EXTRA_DIST = udev doxygen
+EXTRA_DIST = \
+ udev \
+ doxygen \
+ src/core/hidapi_input_ring.h \
+ src/tests/pkg-config/configure.ac \
+ src/tests/pkg-config/Makefile.am \
+ src/tests/pkg-config/test.c
 
 dist_doc_DATA = \
  README.md \
@@ -70,6 +96,7 @@ SCMCLEAN_TARGETS= \
  libusb/Makefile.in \
  Makefile.in \
  linux/Makefile.in \
+ freebsd/Makefile.in \
  windows/Makefile.in \
  m4/libtool.m4 \
  m4/lt~obsolete.m4 \

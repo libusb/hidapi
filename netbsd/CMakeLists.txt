@@ -2,6 +2,10 @@ add_library(hidapi_netbsd
     ${HIDAPI_PUBLIC_HEADERS}
     hid.c
 )
+hidapi_configure_sanitizers(hidapi_netbsd)
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_netbsd PUBLIC hidapi_include)
 
 find_package(Threads REQUIRED)
@@ -40,4 +44,8 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-netbsd.pc.in")
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
+    OUTPUT_NAME "hidapi-netbsd"
+    LIBRARY_NAME "hidapi-netbsd"
+    DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the netbsd implementation."
+)

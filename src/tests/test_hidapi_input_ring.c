@@ -1,4 +1,4 @@
-/* Unit tests for core/hidapi_input_ring.h (flat pre-alloc design).
+/* Unit tests for src/core/hidapi_input_ring.h (flat pre-alloc design).
  * Backend-agnostic — includes the header directly.
  */
 
@@ -433,6 +433,20 @@ static int test_stress(void) {
     return 0;
 }
 
+static int test_large_reports(void) {
+    struct hidapi_input_ring r = {0};
+    uint8_t report[2048], buf[2048];
+    for (size_t i = 0; i < sizeof(report); i++)
+        report[i] = (uint8_t)i;
+    CHECK(hidapi_input_ring_init(&r, 2, sizeof(report)) == 0);
+    CHECK(hidapi_input_ring_push(&r, report, sizeof(report)) == 0);
+    CHECK(hidapi_input_ring_resize(&r, 4) == 0);
+    CHECK(hidapi_input_ring_pop_into(&r, buf, sizeof(buf)) == (int)sizeof(report));
+    CHECK(memcmp(buf, report, sizeof(report)) == 0);
+    hidapi_input_ring_destroy(&r);
+    return 0;
+}
+
 int main(void) {
     int fails = 0;
     struct { const char *name; int (*fn)(void); } tests[] = {
@@ -457,6 +471,7 @@ int main(void) {
         {"resize_after_wrap",          test_resize_after_wrap},
         {"resize_shrink_after_wrap",   test_resize_shrink_after_wrap},
         {"stress",                     test_stress},
+        {"large_reports",              test_large_reports},
     };
     for (size_t i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
         int rc = tests[i].fn();

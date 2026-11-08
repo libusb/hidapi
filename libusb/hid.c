@@ -28,16 +28,15 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <ctype.h>
 #include <locale.h>
 #include <errno.h>
+#include <limits.h>
 
 /* Unix */
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <sys/utsname.h>
 #include <fcntl.h>
 #include <wchar.h>
 
@@ -51,7 +50,8 @@
 #endif
 
 #include "hidapi_libusb.h"
-#include "../core/hidapi_input_ring.h"
+#include "../src/core/hidapi_input_ring.h"
+#include "hidapi_libusb_report_descriptor.h"
 
 #ifndef HIDAPI_THREAD_MODEL_INCLUDE
 #define HIDAPI_THREAD_MODEL_INCLUDE "hidapi_thread_pthread.h"
@@ -108,6 +108,10 @@ struct hid_device_ {
 	int interface;
 
 	uint16_t report_descriptor_size;
+	uint8_t *report_descriptor;
+	size_t report_descriptor_length;
+	/* Includes report number. */
+	size_t max_input_report_size;
 
 	/* Endpoint information */
 	int input_endpoint;
@@ -129,16 +133,13 @@ struct hid_device_ {
 	/* Read thread objects */
 	hidapi_thread_state thread_state;
 	int shutdown_thread;
+	int read_interrupted;
 	int transfer_loop_finished;
+	int read_thread_init_error;
 	struct libusb_transfer *transfer;
 
-	/* Input report ring buffer. Single allocation owned by
-	   input_ring.storage, holding the lengths region followed by
-	   (dev->num_input_buffers × max(wMaxPacketSize, 64)) bytes of slot
-	   data, made in hidapi_initialize_device() once the interrupt-IN
-	   endpoint is known. The max(., 64) clamp is a defensive fallback
-	   for devices with no interrupt-IN endpoint. Resized under the
-	   device mutex by hid_set_num_input_buffers(). */
+	/* Input report queue, allocated after the report and endpoint sizes
+	   are known. Resized under thread_state's mutex. */
 	struct hidapi_input_ring input_ring;
 
 	/* Was kernel driver detached by libusb */
@@ -148,6 +149,10 @@ struct hid_device_ {
 
 	hidapi_error_ctx error;
 	wchar_t *last_read_error_str;
+
+	unsigned int write_timeout_ms;
+	unsigned int send_output_report_timeout_ms;
+	unsigned int send_feature_report_timeout_ms;
 };
 
 static struct hid_api_version api_version = {
@@ -161,6 +166,7 @@ static libusb_context *usb_context = NULL;
 static hidapi_error_ctx last_global_error;
 
 uint16_t get_usb_code_for_current_locale(void);
+static int hid_get_report_descriptor_libusb(libusb_device_handle *handle, int interface_num, uint16_t expected_report_descriptor_size, unsigned char *buf, size_t buf_size);
 
 static hid_device *new_hid_device(void)
 {
@@ -170,6 +176,9 @@ static hid_device *new_hid_device(void)
 
 	dev->blocking = 1;
 	dev->num_input_buffers = 30;
+	dev->write_timeout_ms = 1000;
+	dev->send_output_report_timeout_ms = 1000;
+	dev->send_feature_report_timeout_ms = 1000;
 
 	hidapi_thread_state_init(&dev->thread_state);
 
@@ -189,6 +198,7 @@ static void free_hid_device(hid_device *dev)
 	hid_free_enumeration(dev->device_info);
 	free_hidapi_error(&dev->error);
 	free(dev->last_read_error_str);
+	free(dev->report_descriptor);
 
 	/* Free any queued input reports and the ring backing array. */
 	hidapi_input_ring_destroy(&dev->input_ring);
@@ -1116,13 +1126,9 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 		                                     (size_t)transfer->actual_length);
 		if (push_rc == 0) {
 			hidapi_thread_cond_signal(&dev->thread_state);
-		} else {
-			/* Push rejected. len > slot_size is not expected here
-			 * because the current libusb backend sizes both the
-			 * transfer buffer and ring slot_size from
-			 * input_ep_max_packet_size. libusb has no active error
-			 * channel, so drop silently. */
 		}
+		/* The transfer buffer uses the ring's slot size, so a completed
+		   transfer fits without truncation or allocation in this callback. */
 
 		hidapi_thread_mutex_unlock(&dev->thread_state);
 	}
@@ -1158,12 +1164,35 @@ static void *read_thread(void *param)
 {
 	int res;
 	hid_device *dev = (hid_device *) param;
-	uint8_t *buf;
-	const size_t length = dev->input_ep_max_packet_size;
+	uint8_t *buf = NULL;
+	size_t length = dev->input_ring.slot_size;
+
+	/* Control/feature reports can work without an interrupt IN endpoint. */
+	if (dev->input_endpoint == 0) {
+		dev->shutdown_thread = 1;
+		goto notify_main_thread;
+	}
+
+	if (length == 0 || length > INT_MAX) {
+		LOG("Invalid input report buffer length: %zu\n", length);
+		dev->read_thread_init_error = LIBUSB_ERROR_INVALID_PARAM;
+		goto notify_main_thread;
+	}
 
 	/* Set up the transfer object. */
 	buf = (uint8_t*) malloc(length);
+	if (!buf) {
+		dev->read_thread_init_error = LIBUSB_ERROR_NO_MEM;
+		goto notify_main_thread;
+	}
+
 	dev->transfer = libusb_alloc_transfer(0);
+	if (!dev->transfer) {
+		free(buf);
+		dev->read_thread_init_error = LIBUSB_ERROR_NO_MEM;
+		goto notify_main_thread;
+	}
+
 	libusb_fill_interrupt_transfer(dev->transfer,
 		dev->device_handle,
 		dev->input_endpoint,
@@ -1177,13 +1206,18 @@ static void *read_thread(void *param)
 	   from inside read_callback() */
 	res = libusb_submit_transfer(dev->transfer);
 	if(res < 0) {
-                LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
-                dev->shutdown_thread = 1;
-                dev->transfer_loop_finished = 1;
+		LOG("libusb_submit_transfer failed: %d %s. Stopping read_thread from running\n", res, libusb_error_name(res));
+		/* Restricted Windows HID handles can still use feature reports. */
+		dev->shutdown_thread = 1;
+		dev->transfer_loop_finished = 1;
 	}
 
+notify_main_thread:
 	/* Notify the main thread that the read thread is up and running. */
 	hidapi_thread_barrier_wait(&dev->thread_state);
+
+	if (dev->read_thread_init_error || !dev->transfer)
+		return NULL;
 
 	/* Handle all the events. */
 	while (!dev->shutdown_thread) {
@@ -1299,6 +1333,17 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	int i =0;
 	int res = 0;
 	struct libusb_device_descriptor desc;
+
+	/* hid_open_path() can retry another alternate setting after initialization
+	   fails. Clear all state owned by the previous attempt before doing so. */
+	free(dev->report_descriptor);
+	dev->report_descriptor = NULL;
+	dev->report_descriptor_length = 0;
+	dev->max_input_report_size = 0;
+	dev->shutdown_thread = 0;
+	dev->transfer_loop_finished = 0;
+	dev->read_thread_init_error = 0;
+
 	libusb_get_device_descriptor(libusb_get_device(dev->device_handle), &desc);
 
 #ifdef DETACH_KERNEL_DRIVER
@@ -1352,6 +1397,25 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 
 	dev->report_descriptor_size = get_report_descriptor_size_from_interface_descriptors(intf_desc);
 
+	if (intf_desc->bInterfaceClass == LIBUSB_CLASS_HID) {
+		unsigned char report_descriptor[HID_API_MAX_REPORT_DESCRIPTOR_SIZE];
+		int desc_size = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, report_descriptor, sizeof(report_descriptor));
+
+		if (desc_size > 0) {
+			ssize_t max_input_report_size;
+
+			dev->report_descriptor = (uint8_t *)malloc((size_t)desc_size);
+			if (dev->report_descriptor) {
+				memcpy(dev->report_descriptor, report_descriptor, (size_t)desc_size);
+				dev->report_descriptor_length = (size_t)desc_size;
+			}
+
+			max_input_report_size = get_max_report_size(report_descriptor, (size_t)desc_size, REPORT_DESCR_INPUT);
+			if (max_input_report_size > 0)
+				dev->max_input_report_size = (size_t)max_input_report_size;
+		}
+	}
+
 	dev->input_endpoint = 0;
 	dev->input_ep_max_packet_size = 0;
 	dev->output_endpoint = 0;
@@ -1389,22 +1453,47 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 	}
 
 	{
-		/* Clamp slot_size to at least 64 B if endpoint reports none
-		 * (defensive fallback for non-compliant devices).
-		 * Enhancement: prefer max input report size by going through
-		 * report descriptor once parser is available. */
-		size_t slot_size = (dev->input_ep_max_packet_size > 0)
-		                   ? (size_t)dev->input_ep_max_packet_size : 64;
-		if (hidapi_input_ring_init(&dev->input_ring, dev->num_input_buffers, slot_size) != 0) {
-			return 0;
-		}
+		/* Match the transfer size to the largest input report, retaining
+		   the endpoint packet size for devices that pad short reports. */
+		size_t slot_size = (size_t)dev->input_ep_max_packet_size;
+		if (dev->max_input_report_size > slot_size)
+			slot_size = dev->max_input_report_size;
+		/* Devices without interrupt input still support the setter. */
+		if (slot_size == 0)
+			slot_size = 64;
+		if (hidapi_input_ring_init(&dev->input_ring, dev->num_input_buffers, slot_size) != 0)
+			goto err_release_interface;
 	}
 
 	hidapi_thread_create(&dev->thread_state, read_thread, dev);
 
 	/* Wait here for the read thread to be initialized. */
 	hidapi_thread_barrier_wait(&dev->thread_state);
+	if (dev->read_thread_init_error) {
+		hidapi_thread_join(&dev->thread_state);
+		if (dev->transfer) {
+			free(dev->transfer->buffer);
+			dev->transfer->buffer = NULL;
+			libusb_free_transfer(dev->transfer);
+			dev->transfer = NULL;
+		}
+
+		goto err_release_interface;
+	}
 	return 1;
+
+err_release_interface:
+	hidapi_input_ring_destroy(&dev->input_ring);
+	libusb_release_interface(dev->device_handle, dev->interface);
+#ifdef DETACH_KERNEL_DRIVER
+	if (dev->is_driver_detached) {
+		res = libusb_attach_kernel_driver(dev->device_handle, dev->interface);
+		if (res < 0)
+			LOG("Failed to reattach the driver to kernel: (%d) %s\n", res, libusb_error_name(res));
+		dev->is_driver_detached = 0;
+	}
+#endif
+	return 0;
 }
 
 
@@ -1581,6 +1670,61 @@ err:
 	return NULL;
 }
 
+void HID_API_EXPORT hid_libusb_set_write_timeout(hid_device *dev, unsigned int timeout)
+{
+	dev->write_timeout_ms = timeout;
+}
+
+void HID_API_EXPORT hid_libusb_set_send_output_report_timeout(hid_device *dev, unsigned int timeout)
+{
+	dev->send_output_report_timeout_ms = timeout;
+}
+
+void HID_API_EXPORT hid_libusb_set_send_feature_report_timeout(hid_device *dev, unsigned int timeout)
+{
+	dev->send_feature_report_timeout_ms = timeout;
+}
+
+static int hidapi_internal_send_output_report(hid_device *dev, const unsigned char *data, size_t length, unsigned int timeout_ms)
+{
+	int res = -1;
+	int skipped_report_id = 0;
+	int report_number;
+
+	if (!data || !length) {
+		register_string_error(&dev->error, "Zero buffer/length");
+		return -1;
+	}
+
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
+
+	report_number = data[0];
+
+	if (report_number == 0x0) {
+		data++;
+		length--;
+		skipped_report_id = 1;
+	}
+
+	res = libusb_control_transfer(dev->device_handle,
+		LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_OUT,
+		0x09/*HID set_report*/,
+		(2/*HID output*/ << 8) | report_number,
+		dev->interface,
+		(unsigned char *)data, length,
+		timeout_ms);
+
+	if (res < 0) {
+		register_libusb_error(&dev->error, res, "hidapi_internal_send_output_report");
+		return -1;
+	}
+
+	/* Account for the report ID */
+	if (skipped_report_id)
+		length++;
+
+	return (int)length;
+}
 
 int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t length)
 {
@@ -1590,7 +1734,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 
 	if (dev->output_endpoint <= 0) {
 		/* No interrupt out endpoint. Use the Control Endpoint */
-		return hid_send_output_report(dev, data, length);
+		return hidapi_internal_send_output_report(dev, data, length, dev->write_timeout_ms);
 	}
 
 	if (!data || !length) {
@@ -1614,7 +1758,7 @@ int HID_API_EXPORT hid_write(hid_device *dev, const unsigned char *data, size_t 
 		dev->output_endpoint,
 		(unsigned char*)data,
 		(int)length,
-		&actual_length, 1000);
+		&actual_length, dev->write_timeout_ms);
 
 	if (res < 0) {
 		register_libusb_error(&dev->error, res, "hid_write");
@@ -1665,6 +1809,16 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	bytes_read = -1;
 
+	/* Queued reports are returned without waiting, so check the sticky
+	   interrupt state first: an interrupted read fails even when input is
+	   queued. Queued reports remain readable after
+	   hid_read_clear_interrupt(). */
+	if (dev->read_interrupted) {
+		bytes_read = -1;
+		register_read_error(dev, "hid_read(_timeout): operation interrupted");
+		goto ret;
+	}
+
 	/* There's an input report queued up. Return it. */
 	if (dev->input_ring.count > 0) {
 		bytes_read = ring_pop_into(dev, data, length);
@@ -1682,11 +1836,14 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 
 	if (milliseconds == -1) {
 		/* Blocking */
-		while (dev->input_ring.count == 0 && !dev->shutdown_thread) {
+		while (dev->input_ring.count == 0 && !dev->shutdown_thread && !dev->read_interrupted) {
 			hidapi_thread_cond_wait(&dev->thread_state);
 		}
 		if (dev->input_ring.count > 0) {
 			bytes_read = ring_pop_into(dev, data, length);
+		}
+		else if (dev->read_interrupted) {
+			register_read_error(dev, "hid_read(_timeout): operation interrupted");
 		}
 		else {
 			/* Woken up by shutdown_thread without data. */
@@ -1700,11 +1857,15 @@ int HID_API_EXPORT hid_read_timeout(hid_device *dev, unsigned char *data, size_t
 		hidapi_thread_gettime(&ts);
 		hidapi_thread_addtime(&ts, milliseconds);
 
-		while (dev->input_ring.count == 0 && !dev->shutdown_thread) {
+		while (dev->input_ring.count == 0 && !dev->shutdown_thread && !dev->read_interrupted) {
 			res = hidapi_thread_cond_timedwait(&dev->thread_state, &ts);
 			if (res == 0) {
 				if (dev->input_ring.count > 0) {
 					bytes_read = ring_pop_into(dev, data, length);
+					break;
+				}
+				if (dev->read_interrupted) {
+					register_read_error(dev, "hid_read(_timeout): operation interrupted");
 					break;
 				}
 				if (dev->shutdown_thread) {
@@ -1757,11 +1918,15 @@ HID_API_EXPORT const wchar_t * HID_API_CALL hid_read_error(hid_device *dev)
 
 int HID_API_EXPORT hid_set_num_input_buffers(hid_device *dev, int num_buffers)
 {
-	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS)
+	if (num_buffers <= 0 || num_buffers > HID_API_MAX_NUM_INPUT_BUFFERS) {
+		register_string_error(&dev->error, "num_buffers out of range");
 		return -1;
+	}
+	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 	hidapi_thread_mutex_lock(&dev->thread_state);
 	if (hidapi_input_ring_resize(&dev->input_ring, num_buffers) != 0) {
 		hidapi_thread_mutex_unlock(&dev->thread_state);
+		register_string_error(&dev->error, "Failed to resize input report queue");
 		return -1;
 	}
 	dev->num_input_buffers = num_buffers;
@@ -1774,6 +1939,32 @@ int HID_API_EXPORT hid_set_nonblocking(hid_device *dev, int nonblock)
 	dev->blocking = !nonblock;
 
 	return 0;
+}
+
+
+void HID_API_EXPORT hid_read_interrupt(hid_device *dev)
+{
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	dev->read_interrupted = 1;
+	hidapi_thread_cond_broadcast(&dev->thread_state);
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+}
+
+
+int HID_API_EXPORT hid_is_read_interrupted(hid_device *dev)
+{
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	int v = dev->read_interrupted;
+	hidapi_thread_mutex_unlock(&dev->thread_state);
+	return v;
+}
+
+
+void HID_API_EXPORT hid_read_clear_interrupt(hid_device *dev)
+{
+	hidapi_thread_mutex_lock(&dev->thread_state);
+	dev->read_interrupted = 0;
+	hidapi_thread_mutex_unlock(&dev->thread_state);
 }
 
 
@@ -1804,7 +1995,7 @@ int HID_API_EXPORT hid_send_feature_report(hid_device *dev, const unsigned char 
 		(3/*HID feature*/ << 8) | report_number,
 		dev->interface,
 		(unsigned char *)data, length,
-		1000/*timeout millis*/);
+		dev->send_feature_report_timeout_ms);
 
 	if (res < 0) {
 		register_libusb_error(&dev->error, res, "hid_send_feature_report");
@@ -1861,43 +2052,7 @@ int HID_API_EXPORT hid_get_feature_report(hid_device *dev, unsigned char *data, 
 
 int HID_API_EXPORT hid_send_output_report(hid_device *dev, const unsigned char *data, size_t length)
 {
-	int res = -1;
-	int skipped_report_id = 0;
-	int report_number;
-
-	if (!data || !length) {
-		register_string_error(&dev->error, "Zero buffer/length");
-		return -1;
-	}
-
-	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
-
-	report_number = data[0];
-
-	if (report_number == 0x0) {
-		data++;
-		length--;
-		skipped_report_id = 1;
-	}
-
-	res = libusb_control_transfer(dev->device_handle,
-		LIBUSB_REQUEST_TYPE_CLASS|LIBUSB_RECIPIENT_INTERFACE|LIBUSB_ENDPOINT_OUT,
-		0x09/*HID set_report*/,
-		(2/*HID output*/ << 8) | report_number,
-		dev->interface,
-		(unsigned char *)data, length,
-		1000/*timeout millis*/);
-
-	if (res < 0) {
-		register_libusb_error(&dev->error, res, "hid_send_output_report");
-		return -1;
-	}
-
-	/* Account for the report ID */
-	if (skipped_report_id)
-		length++;
-
-	return (int)length;
+	return hidapi_internal_send_output_report(dev, data, length, dev->send_output_report_timeout_ms);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_get_input_report(hid_device *dev, unsigned char *data, size_t length)
@@ -1948,15 +2103,18 @@ void HID_API_EXPORT hid_close(hid_device *dev)
 
 	/* Cause read_thread() to stop. */
 	dev->shutdown_thread = 1;
-	libusb_cancel_transfer(dev->transfer);
+	if (dev->transfer)
+		libusb_cancel_transfer(dev->transfer);
 
 	/* Wait for read_thread() to end. */
 	hidapi_thread_join(&dev->thread_state);
 
 	/* Clean up the Transfer objects allocated in read_thread(). */
-	free(dev->transfer->buffer);
-	dev->transfer->buffer = NULL;
-	libusb_free_transfer(dev->transfer);
+	if (dev->transfer) {
+		free(dev->transfer->buffer);
+		dev->transfer->buffer = NULL;
+		libusb_free_transfer(dev->transfer);
+	}
 
 	/* release the interface */
 	libusb_release_interface(dev->device_handle, dev->interface);
@@ -2058,7 +2216,12 @@ int HID_API_EXPORT_CALL hid_get_report_descriptor(hid_device *dev, unsigned char
 
 	register_libusb_error(&dev->error, LIBUSB_SUCCESS, NULL);
 
-	res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
+	if (dev->report_descriptor) {
+		res = dev->report_descriptor_length < buf_size ? (int)dev->report_descriptor_length : (int)buf_size;
+		memcpy(buf, dev->report_descriptor, (size_t)res);
+	} else {
+		res = hid_get_report_descriptor_libusb(dev->device_handle, dev->interface, dev->report_descriptor_size, buf, buf_size);
+	}
 
 	if (res < 0) {
 		register_libusb_error(&dev->error, res, "hid_get_report_descriptor");

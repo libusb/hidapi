@@ -7,5 +7,6 @@ Name: hidapi
 Description: C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows.
 URL: https://github.com/libusb/hidapi
 Version: @VERSION@
-Libs: -L${libdir} -lhidapi
+Libs: -L${libdir} -l@HIDAPI_LIB_NAME@
+@HIDAPI_GENERIC_REQUIRES_PRIVATE@
 Cflags: -I${includedir}/hidapi

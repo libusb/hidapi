@@ -19,9 +19,9 @@
  backend once its runtime upper bound on input report size is known:
    - macOS: kIOHIDMaxInputReportSizeKey, an authoritative value
             derived from the HID report descriptor by IOKit
-   - libusb: wMaxPacketSize of the interrupt-IN endpoint — an upper
-             bound consistent with hidapi's libusb backend, which
-             only transfers single packets
+   - libusb: maximum input report size from the report descriptor,
+             at least the interrupt-IN endpoint's wMaxPacketSize;
+             the transfer buffer uses the same size as the ring slots
  capacity comes from dev->num_input_buffers (default 30).
  The slot array is sized exactly, never to MAX.
 

@@ -18,6 +18,10 @@ add_library(hidapi_winapi
     ${HIDAPI_PUBLIC_HEADERS}
     ${SOURCES}
 )
+hidapi_configure_sanitizers(hidapi_winapi)
+if(HIDAPI_BUILD_AS_CXX)
+    set_source_files_properties(hid.c hidapi_descriptor_reconstruct.c PROPERTIES LANGUAGE CXX)
+endif()
 target_link_libraries(hidapi_winapi
     PUBLIC hidapi_include
 )
@@ -58,7 +62,11 @@ if(HIDAPI_INSTALL_TARGETS)
     )
 endif()
 
-hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi.pc.in")
+hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
+    OUTPUT_NAME "hidapi-winapi"
+    LIBRARY_NAME "hidapi"
+    DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the WinAPI implementation."
+)
 
 if(HIDAPI_WITH_TESTS)
      add_subdirectory(test)

@@ -203,9 +203,13 @@ struct hid_device_ {
 		char *read_buf;
 		OVERLAPPED ol;
 		OVERLAPPED write_ol;
+		HANDLE interrupt_event;
+		volatile LONG interrupted;
 		struct hid_device_info* device_info;
 		DWORD write_timeout_ms;
 };
+
+static void free_hid_device(hid_device *dev);
 
 static hid_device *new_hid_device()
 {
@@ -230,6 +234,15 @@ static hid_device *new_hid_device()
 	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
+	dev->interrupt_event = CreateEvent(NULL, TRUE /*manual reset*/, FALSE /*initial state nonsignaled*/, NULL);
+	if (dev->interrupt_event == NULL) {
+		/* A NULL handle would make WaitForMultipleObjects() in
+		   hid_read_timeout() fail instantly (busy-spinning a blocking read)
+		   instead of blocking, so fail the open instead. */
+		free_hid_device(dev);
+		return NULL;
+	}
+	dev->interrupted = 0;
 	dev->device_info = NULL;
 	dev->write_timeout_ms = 1000;
 
@@ -240,6 +253,7 @@ static void free_hid_device(hid_device *dev)
 {
 	CloseHandle(dev->ol.hEvent);
 	CloseHandle(dev->write_ol.hEvent);
+	CloseHandle(dev->interrupt_event);
 	CloseHandle(dev->device_handle);
 	free(dev->last_error_str);
 	free(dev->last_read_error_str);
@@ -1173,6 +1187,14 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 
 	register_string_error_to_buffer(&dev->last_read_error_str, NULL);
 
+	/* ReadFile() may complete synchronously, and WaitForMultipleObjects()
+	   reports a completed read before the interrupt event, so check the
+	   sticky state before consuming any input. */
+	if (InterlockedCompareExchange(&dev->interrupted, 0, 0)) {
+		register_string_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout: operation interrupted");
+		return -1;
+	}
+
 	/* Copy the handle for convenience. */
 	HANDLE ev = dev->ol.hEvent;
 
@@ -1200,9 +1222,16 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	}
 
 	if (overlapped) {
-		/* See if there is any data yet. */
-		res = WaitForSingleObject(ev, milliseconds >= 0 ? (DWORD)milliseconds : INFINITE);
-		if (res != WAIT_OBJECT_0) {
+		HANDLE waits[2] = { ev, dev->interrupt_event };
+		DWORD wr = WaitForMultipleObjects(2, waits, FALSE, milliseconds >= 0 ? (DWORD)milliseconds : INFINITE);
+		if (wr == WAIT_OBJECT_0 + 1) {
+			/* Leave ReadFile in flight. After a clear, the next read waits
+			   for it or retrieves its completed result. hid_close() cancels
+			   and waits for any request still pending. */
+			register_string_error_to_buffer(&dev->last_read_error_str, L"hid_read_timeout: operation interrupted");
+			return -1;
+		}
+		if (wr != WAIT_OBJECT_0) {
 			/* There was no data this time. Return zero bytes available,
 			   but leave the Overlapped I/O running. */
 			return 0;
@@ -1269,6 +1298,25 @@ int HID_API_EXPORT HID_API_CALL hid_set_num_input_buffers(hid_device *dev, int n
 		return -1;
 	}
 	return 0;
+}
+
+void HID_API_EXPORT HID_API_CALL hid_read_interrupt(hid_device *dev)
+{
+	InterlockedExchange(&dev->interrupted, 1);
+	SetEvent(dev->interrupt_event);
+}
+
+int HID_API_EXPORT HID_API_CALL hid_is_read_interrupted(hid_device *dev)
+{
+	/* Use the same atomic access as the read path. */
+	return InterlockedCompareExchange(&dev->interrupted, 0, 0) ? 1 : 0;
+}
+
+void HID_API_EXPORT HID_API_CALL hid_read_clear_interrupt(hid_device *dev)
+{
+	/* Publish the cleared state only after the event is reset. */
+	ResetEvent(dev->interrupt_event);
+	InterlockedExchange(&dev->interrupted, 0);
 }
 
 int HID_API_EXPORT HID_API_CALL hid_set_nonblocking(hid_device *dev, int nonblock)
@@ -1435,6 +1483,13 @@ void HID_API_EXPORT HID_API_CALL hid_close(hid_device *dev)
 	if (!dev)
 		return;
 
+	if (dev->read_pending) {
+		DWORD bytes_read;
+		/* A timed-out or interrupted read may belong to another thread.
+		   Keep its buffer, OVERLAPPED and event alive until it completes. */
+		CancelIoEx(dev->device_handle, &dev->ol);
+		GetOverlappedResult(dev->device_handle, &dev->ol, &bytes_read, TRUE);
+	}
 	CancelIo(dev->device_handle);
 	free_hid_device(dev);
 }
