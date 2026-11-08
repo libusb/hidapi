@@ -148,9 +148,12 @@ static void hidapi_thread_barrier_wait(hidapi_thread_state *state)
 	pthread_barrier_wait(&state->barrier);
 }
 
-static void hidapi_thread_create(hidapi_thread_state *state, void *(*func)(void*), void *func_arg)
+/* Starts `func` on a new thread. Returns 0 on success, or a non-zero value when
+   the thread could not be started (in which case no thread was started and
+   `state->thread` must not be joined). */
+static int hidapi_thread_create(hidapi_thread_state *state, void *(*func)(void*), void *func_arg)
 {
-	pthread_create(&state->thread, NULL, func, func_arg);
+	return pthread_create(&state->thread, NULL, func, func_arg);
 }
 
 static void hidapi_thread_join(hidapi_thread_state *state)

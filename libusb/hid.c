@@ -53,6 +53,9 @@
 #include "../src/core/hidapi_input_ring.h"
 #include "hidapi_libusb_report_descriptor.h"
 
+/* A custom thread model (HIDAPI_THREAD_MODEL_INCLUDE) must provide the same
+   interface as hidapi_thread_pthread.h. In particular, hidapi_thread_create()
+   returns int: 0 on success, non-zero if the thread could not be started. */
 #ifndef HIDAPI_THREAD_MODEL_INCLUDE
 #define HIDAPI_THREAD_MODEL_INCLUDE "hidapi_thread_pthread.h"
 #endif
@@ -1465,7 +1468,12 @@ static int hidapi_initialize_device(hid_device *dev, const struct libusb_interfa
 			goto err_release_interface;
 	}
 
-	hidapi_thread_create(&dev->thread_state, read_thread, dev);
+	if (hidapi_thread_create(&dev->thread_state, read_thread, dev) != 0) {
+		/* Nothing would ever release the startup barrier below, and there is
+		   no thread to join: fail the open and undo what was set up above. */
+		LOG("hidapi_initialize_device: couldn't start the read thread\n");
+		goto err_release_interface;
+	}
 
 	/* Wait here for the read thread to be initialized. */
 	hidapi_thread_barrier_wait(&dev->thread_state);
