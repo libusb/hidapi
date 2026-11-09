@@ -159,24 +159,29 @@ static int parse_c_hex_bytes(char *line, unsigned char *data, size_t data_size, 
 	return found;
 }
 
+static int is_hex_byte_token(const char *token)
+{
+	return strlen(token) == 2 &&
+	       isxdigit((unsigned char)token[0]) &&
+	       isxdigit((unsigned char)token[1]);
+}
+
+/* Appends the run of two-digit hex tokens that ends a line, so metadata
+   before the byte dump is skipped. Only the first 128 tokens are considered. */
 static int parse_trailing_hex_bytes(char *line, unsigned char *data, size_t data_size, size_t *data_length, const char *filename)
 {
 	char *tokens[128];
 	size_t token_count = 0;
-	size_t first_hex_token;
+	/* Start of the hex-byte run that ends at the last token seen so far. */
+	size_t first_hex_token = 0;
 	char *token;
 
-	for (token = strtok(line, " \t\r\n"); token && token_count < 128; token = strtok(NULL, " \t\r\n"))
+	for (token = strtok(line, " \t\r\n");
+	     token && token_count < sizeof(tokens) / sizeof(tokens[0]);
+	     token = strtok(NULL, " \t\r\n")) {
 		tokens[token_count++] = token;
-
-	first_hex_token = token_count;
-	while (first_hex_token > 0) {
-		const char *candidate = tokens[first_hex_token - 1];
-		if (strlen(candidate) != 2 ||
-		    !isxdigit((unsigned char)candidate[0]) ||
-		    !isxdigit((unsigned char)candidate[1]))
-			break;
-		first_hex_token--;
+		if (!is_hex_byte_token(token))
+			first_hex_token = token_count;
 	}
 
 	for (size_t i = first_hex_token; i < token_count; i++) {
@@ -186,6 +191,62 @@ static int parse_trailing_hex_bytes(char *line, unsigned char *data, size_t data
 	}
 
 	return first_hex_token < token_count;
+}
+
+static int check_trailing_hex_bytes(char *line, size_t data_size, int expected_result,
+	const unsigned char *expected, size_t expected_length)
+{
+	unsigned char data[128];
+	size_t data_length = 0;
+	const int result = parse_trailing_hex_bytes(line, data, data_size, &data_length, "self-test");
+
+	return result == expected_result && data_length == expected_length &&
+	       (expected_length == 0 || memcmp(data, expected, expected_length) == 0);
+}
+
+static int test_trailing_hex_parser(void)
+{
+	char mixed[] = "Usage 0x05 abc g1 1 05 zz 05 01 a1\r\n";
+	char no_trailing_hex[] = "05 01 trailing text\n";
+	char blank[] = " \t\r\n";
+	char only_hex[] = "Ff\t0a";
+	char overflow[] = "05 06";
+	/* 129 three-character tokens: only the first 128 are considered. */
+	char limit_line[129 * 3 + 1];
+	static const unsigned char mixed_bytes[] = {0x05, 0x01, 0xa1};
+	static const unsigned char only_hex_bytes[] = {0xff, 0x0a};
+	static const unsigned char last_byte[] = {0x05};
+	unsigned char all_bytes[128];
+
+	if (!check_trailing_hex_bytes(mixed, 128, 1, mixed_bytes, sizeof(mixed_bytes)) ||
+	    !check_trailing_hex_bytes(no_trailing_hex, 128, 0, NULL, 0) ||
+	    !check_trailing_hex_bytes(blank, 128, 0, NULL, 0) ||
+	    !check_trailing_hex_bytes(only_hex, 128, 1, only_hex_bytes, sizeof(only_hex_bytes)) ||
+	    !check_trailing_hex_bytes(overflow, 1, -1, last_byte, sizeof(last_byte))) {
+		fprintf(stderr, "Trailing hex byte parsing failed\n");
+		return -1;
+	}
+
+	/* 127 non-hex tokens, then "05", then "06" beyond the limit. */
+	for (size_t i = 0; i < 129; i++)
+		memcpy(limit_line + i * 3, i < 127 ? "zz " : i == 127 ? "05 " : "06 ", 3);
+	limit_line[sizeof(limit_line) - 1] = '\0';
+	if (!check_trailing_hex_bytes(limit_line, 128, 1, last_byte, sizeof(last_byte))) {
+		fprintf(stderr, "Trailing hex byte token limit was not applied\n");
+		return -1;
+	}
+
+	/* 128 hex tokens fill the limit; the non-hex 129th token is ignored. */
+	for (size_t i = 0; i < 129; i++)
+		memcpy(limit_line + i * 3, i < 128 ? "01 " : "zz ", 3);
+	limit_line[sizeof(limit_line) - 1] = '\0';
+	memset(all_bytes, 0x01, sizeof(all_bytes));
+	if (!check_trailing_hex_bytes(limit_line, 128, 1, all_bytes, sizeof(all_bytes))) {
+		fprintf(stderr, "Trailing hex byte run at the token limit was not parsed\n");
+		return -1;
+	}
+
+	return 0;
 }
 
 static bool read_report_descriptor(const char *filename, unsigned char *data, size_t data_size, size_t *data_length)
@@ -324,6 +385,8 @@ static int test_report_descriptor_parser(void)
 		fprintf(stderr, "C-style report descriptor fixture parsing failed\n");
 		return -1;
 	}
+	if (test_trailing_hex_parser() < 0)
+		return -1;
 	if (get_max_report_size(missing_report_size, sizeof(missing_report_size), REPORT_DESCR_INPUT) != -1 ||
 	    get_max_report_size(truncated_item, sizeof(truncated_item), REPORT_DESCR_INPUT) != -1) {
 		fprintf(stderr, "Malformed report descriptor was not rejected\n");
