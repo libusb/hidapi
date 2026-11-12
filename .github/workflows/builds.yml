@@ -424,7 +424,7 @@ jobs:
       run: |
         # Warning flags go to make rather than configure, where -Werror would
         # break configure's own feature tests.
-        make CFLAGS="-g -O2 ${GNU_COMPILE_FLAGS}"
+        make V=1 CFLAGS="-g -O2 ${GNU_COMPILE_FLAGS}"
         make DESTDIR="${PWD}/install" install
     - name: Check artifacts
       uses: andstor/file-existence-action@v2
