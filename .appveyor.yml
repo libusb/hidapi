@@ -4,13 +4,15 @@
 # the VERSION file plus the short commit hash (see below).
 version: '{build}'
 
+# AppVeyor builds the Visual Studio solution with the Visual Studio 2015
+# toolchain, the oldest MSVC in CI. Everything else, including the Cygwin
+# build, runs on GitHub Actions (.github/workflows/builds.yml).
+os: Visual Studio 2015
+
 environment:
   matrix:
-  - BUILD_ENV: msbuild
-    arch: x64
-  - BUILD_ENV: msbuild
-    arch: Win32
-  - BUILD_ENV: cygwin
+  - arch: x64
+  - arch: Win32
 
 # Derive the build version from the repo: <VERSION>-<short commit>.<build number>,
 # e.g. 0.16.0-1a2b3c4.42. The build number keeps it unique even if the same
@@ -21,26 +23,5 @@ before_build:
       $short = git rev-parse --short HEAD
       Update-AppveyorBuild -Version "$base-$short.$env:APPVEYOR_BUILD_NUMBER"
 
-for:
-  -
-    matrix:
-      only:
-        - BUILD_ENV: msbuild
-
-    os: Visual Studio 2015
-
-    build_script:
-      - cmd: msbuild .\windows\hidapi.sln /p:Configuration=Release /p:Platform=%arch% /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll"
-
-  -
-    matrix:
-      only:
-        - BUILD_ENV: cygwin
-
-    os: Visual Studio 2022
-
-    install:
-      - cmd: C:\cygwin64\setup-x86_64.exe --quiet-mode --no-shortcuts --upgrade-also --packages autoconf,automake
-
-    build_script:
-      - cmd: C:\cygwin64\bin\bash -exlc "cd $APPVEYOR_BUILD_FOLDER; ./bootstrap; ./configure; make"
+build_script:
+  - cmd: msbuild .\windows\hidapi.sln /p:Configuration=Release /p:Platform=%arch% /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll"
