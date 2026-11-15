@@ -56,17 +56,16 @@ generate example/test code that respects it. The authoritative reference is
 
 ### Library lifecycle
 
-- Call `hid_init()` before any other HIDAPI function. Implicit lazy initialization exists, but
-  must not be relied upon when more than one thread may make the first call.
-- Call `hid_exit()` last, after every device has been closed. `hid_exit()` deinitializes the
-  whole library; no HIDAPI function other than a new `hid_init()` may be called after it, and
-  device handles obtained before it are invalid.
-- `hid_init()`/`hid_exit()` must never run concurrently with any other HIDAPI function.
+- Call `hid_init()` before starting threads that use HIDAPI. Implicit lazy initialization
+  exists, but must not be relied upon when more than one thread may make the first call.
+- Call `hid_exit()` last, after all other calls have returned and every device has been closed.
+  `hid_exit()` deinitializes the whole library; no HIDAPI function other than a new `hid_init()`
+  may be called after it, and device handles obtained before it are invalid.
 
 ### Concurrency
 
-- HIDAPI v0.x.x is **not thread-safe**. The following must not be called concurrently from
-  different threads: `hid_init`, `hid_exit`, `hid_enumerate`, `hid_open`, `hid_open_path`,
+- HIDAPI v0.x.x is **not thread-safe**. The following functions must be serialized with one
+  another: `hid_init`, `hid_exit`, `hid_enumerate`, `hid_open`, `hid_open_path`,
   `hid_close`, `hid_error(NULL)` — the global error string is one reason.
 - Functions taking a `hid_device *` are not individually thread-safe, but different devices may
   be used from different threads — i.e. a dedicated thread per device.
