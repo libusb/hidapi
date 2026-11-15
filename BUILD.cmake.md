@@ -88,8 +88,11 @@ Some of the [standard](https://cmake.org/cmake/help/latest/manual/cmake-variable
 HIDAPI-specific CMake variables:
 
 - `HIDAPI_BUILD_HIDTEST` - when set to TRUE, build a small test application `hidtest`;
-- `HIDAPI_WITH_TESTS` - when set to TRUE, build all (unit-)tests;
-currently this option is only available on Windows, since only Windows backend has tests;
+- `HIDAPI_WITH_TESTS` - when set to TRUE, build the tests available for the selected backends.
+Defaults to FALSE on Linux and macOS. On Windows, and on other platforms when libusb is enabled,
+defaults to TRUE for Debug builds and FALSE otherwise. Virtual-device tests require
+CMake 3.16 or newer and skip when their device provider is unavailable.
+See [HIDAPI tests](src/tests/README.md) for coverage and setup requirements.
 
 <details>
   <summary>Linux and FreeBSD-specific variables</summary>
@@ -148,6 +151,7 @@ Available CMake targets after successful `find_package(hidapi)`:
 - `hidapi::include` - if you need only to include `<hidapi.h>` but not link against the library;
 - `hidapi::winapi` - same as `hidapi::hidapi` on Windows; available only on Windows;
 - `hidapi::darwin` - same as `hidapi::hidapi` on macOS; available only on macOS;
+- `hidapi::netbsd` - available when the native NetBSD uhid backend is built;
 - `hidapi::libusb` - available when libusb backend is used/available;
 - `hidapi::hidraw` - available when hidraw backend is used/available on Linux or FreeBSD;
 
@@ -224,6 +228,7 @@ Available CMake targets after `add_subdirectory(hidapi)` _are the same as in cas
 - `hidapi_include` - the interface library; `hidapi::include` is an alias of it;
 - `hidapi_winapi` - library target on Windows; `hidapi::winapi` is an alias of it;
 - `hidapi_darwin` - library target on macOS; `hidapi::darwin` is an alias of it;
+- `hidapi_netbsd` - library target for the NetBSD uhid backend; `hidapi::netbsd` is an alias of it;
 - `hidapi_libusb` - library target for libusb backend; `hidapi::libusb` is an alias of it;
 - `hidapi_hidraw` - library target for hidraw backend; `hidapi::hidraw` is an alias of it;
 - `hidapi-libusb` - an alias of `hidapi_libusb` for compatibility with raw library name;

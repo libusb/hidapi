@@ -89,13 +89,18 @@ to your project's build system, then you need:
 depending on your platform and the backend you want to use:
     - [`windows\hid.c`](windows/hid.c);
     - [`linux/hid.c`](linux/hid.c);
+    - [`freebsd/hid.c`](freebsd/hid.c);
+    - [`netbsd/hid.c`](netbsd/hid.c);
     - [`libusb/hid.c`](libusb/hid.c);
     - [`mac/hid.c`](mac/hid.c);
 - add a [`hidapi`](hidapi) folder to the include path when building `hid.c`;
 - make the platform/backend specific [dependencies](#prerequisites) available during the compilation/linking, when building `hid.c`;
 
 NOTE: the above doesn't guarantee that having a copy of `<backend>/hid.c` and `hidapi/hidapi.h` is enough to build HIDAPI.
-The only guarantee that `<backend>/hid.c` includes all necessary sources to compile it as a single file.
+The only guarantee is that `<backend>/hid.c` includes all necessary sources to compile it as a single translation unit.
+Preserve the relative paths of included files. The macOS and libusb backends require
+`src/core/hidapi_input_ring.h`; libusb also requires `libusb/hidapi_libusb_report_descriptor.h`
+and its thread-model header (`libusb/hidapi_thread_pthread.h` by default).
 
 Check the manual makefiles for a simple example/reference of what are the dependencies of each specific backend.
 

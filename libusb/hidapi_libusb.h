@@ -80,6 +80,8 @@ extern "C" {
 		 * When the timeout is set to 0, the function will not exit,
 		 * until the write operation is performed or an error occurred.
 		 *
+		 * @ingroup API
+		 * @param dev A device handle returned from hid_open().
 		 * @param timeout New timeout value in milliseconds.
 		 */
 		HID_API_EXPORT void HID_API_CALL hid_libusb_set_write_timeout(hid_device *dev, unsigned int timeout);
@@ -98,6 +100,8 @@ extern "C" {
 		 * When the timeout is set to 0, the function will not exit,
 		 * until the write operation is performed or an error occurred.
 		 *
+		 * @ingroup API
+		 * @param dev A device handle returned from hid_open().
 		 * @param timeout New timeout value in milliseconds.
 		 */
 		HID_API_EXPORT void HID_API_CALL hid_libusb_set_send_output_report_timeout(hid_device *dev, unsigned int timeout);
@@ -116,6 +120,8 @@ extern "C" {
 		 * When the timeout is set to 0, the function will not exit,
 		 * until the write operation is performed or an error occurred.
 		 *
+		 * @ingroup API
+		 * @param dev A device handle returned from hid_open().
 		 * @param timeout New timeout value in milliseconds.
 		 */
 		HID_API_EXPORT void HID_API_CALL hid_libusb_set_send_feature_report_timeout(hid_device *dev, unsigned int timeout);

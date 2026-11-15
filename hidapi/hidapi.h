@@ -386,7 +386,7 @@ extern "C" {
 
 			This function is intended for logging/debugging purposes.
 
-			This function guarantees to never return NULL for a valid @ref dev.
+			This function guarantees to never return NULL for a valid @p dev.
 			If there was no error in the last call to hid_read/hid_read_error -
 			the returned string clearly indicates that.
 
