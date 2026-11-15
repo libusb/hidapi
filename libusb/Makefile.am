@@ -31,4 +31,4 @@ endif
 hdrdir = $(includedir)/hidapi
 hdr_HEADERS = $(top_srcdir)/hidapi/hidapi.h hidapi_libusb.h
 
-EXTRA_DIST = Makefile-manual
+EXTRA_DIST = Makefile-manual hidapi_libusb_report_descriptor.h hidapi_thread_pthread.h
