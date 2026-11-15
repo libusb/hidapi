@@ -25,6 +25,7 @@ env:
 jobs:
   macos-automake:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}macos-automake
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: macos-latest
 
@@ -49,6 +50,7 @@ jobs:
 
   macos-cmake:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}macos-cmake
     if: github.event.action != 'labeled' || github.event.label.name == 'ci-codeql'
     # CodeQL traced builds require macOS and Xcode earlier than version 27.
     runs-on: macos-15
@@ -158,6 +160,7 @@ jobs:
 
   ubuntu-cmake:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}ubuntu-cmake
     if: github.event.action != 'labeled' || github.event.label.name == 'ci-codeql'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -275,6 +278,7 @@ jobs:
 
   windows-cmake-msvc:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}windows-cmake-msvc
     if: github.event.action != 'labeled' || github.event.label.name == 'ci-codeql'
     runs-on: windows-latest
     timeout-minutes: 30
@@ -429,6 +433,7 @@ jobs:
 
   windows-cmake-mingw:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}windows-cmake-mingw
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: windows-latest
 
@@ -473,6 +478,7 @@ jobs:
 
   windows-cygwin:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}windows-cygwin
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: windows-latest
 
@@ -532,6 +538,7 @@ jobs:
 
   windows-msbuild:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}windows-msbuild
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: windows-latest
 
@@ -571,6 +578,7 @@ jobs:
 
   fedora-mingw:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}fedora-mingw
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: ubuntu-latest
     container: fedora:latest
@@ -642,6 +650,7 @@ jobs:
 
   archlinux:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}archlinux
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: ubuntu-latest
     container: archlinux:latest
@@ -717,6 +726,7 @@ jobs:
 
   alpine:
 
+    name: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.action == 'labeled') && 'CodeQL / ' || '' }}alpine
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled')
     runs-on: ubuntu-latest
     container: alpine:edge
