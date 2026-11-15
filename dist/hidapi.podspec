@@ -5,7 +5,7 @@ Pod::Spec.new do |spec|
   spec.summary      = "A Simple library for communicating with USB and Bluetooth HID devices on Linux, Mac and Windows."
 
   spec.description  = <<-DESC
-  HIDAPI is a multi-platform library which allows an application to interface with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS. HIDAPI can be either built as a shared library (.so, .dll or .dylib) or can be embedded directly into a target application by adding a single source file (per platform) and a single header.
+  HIDAPI is a multi-platform library which allows an application to interface with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS. HIDAPI can be either built as a shared library (.so, .dll or .dylib) or can be embedded directly into a target application by adding one backend source file and its supporting headers and source files.
                    DESC
 
   spec.homepage     = "https://github.com/libusb/hidapi"

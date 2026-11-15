@@ -5,15 +5,22 @@ Updating a Version:
 2. HID_API_VERSION_MAJOR/HID_API_VERSION_MINOR/HID_API_VERSION_PATCH in hidapi.h.
 
 Before firing a new release:
-1. Run the "Checks" Githtub Action
-2. Make sure no defects are found at: https://scan.coverity.com/projects/hidapi
-3. Fix if any
+1. Update the Version (if not yet updated) and select the release commit on master.
+   Verify its build and test results.
+   Check that the expected virtual-device tests ran rather than skipped.
+2. Run the "Checks" GitHub Action for that commit.
+3. Wait for its Coverity analysis at https://scan.coverity.com/projects/hidapi
+   and fix any outstanding defects. A successful submission is not a completed analysis.
+4. Verify the "Docs" workflow built and deployed documentation from that commit.
+   Documentation deploys on master updates, not release tags.
 
 Firing a new release:
-1. Update the Version (if not yet updated).
-2. Prepare the Release Notes.
-3. Store the Release Notes into a file.
-4. Create locally an annotated git tag with release notes attached, e.g.: `git tag -aF ../hidapi_release_notes hidapi-<VERSION>`
-5. Push newly created tag: `git push origin hidapi-<VERSION>`
-6. Grab the hidapi-win.zip from Summary page of "GitHub Builds" Action for latest master build.
-7. Create a Github Release with hidapi-win.zip attached, for newly created tag.
+1. Prepare the Release Notes.
+2. Store the Release Notes in an ignored local file, e.g. build/release-notes.txt.
+3. Create an annotated git tag for the verified commit with release notes attached,
+   e.g.: `git tag -aF build/release-notes.txt hidapi-<VERSION> <release-commit>`
+4. Push newly created tag: `git push origin hidapi-<VERSION>`
+5. Grab hidapi-win.zip from the "GitHub Builds" Action for the tagged commit.
+   Verify the archive contents and DLL versions before attaching it.
+6. Create a GitHub Release for the new tag with hidapi-win.zip attached.
+7. Verify the published release, asset download and API documentation.

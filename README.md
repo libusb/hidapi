@@ -10,8 +10,8 @@
 HIDAPI is a multi-platform library which allows an application to interface
 with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
 HIDAPI can be either built as a shared library (`.so`, `.dll` or `.dylib`) or
-can be embedded directly into a target application by adding a _single source_
-file (per platform) and a single header.<br>
+can be embedded directly into a target application by adding one backend source
+file and its supporting headers and source files.<br>
 See [remarks](BUILD.md#embedding-hidapi-directly-into-your-source-tree) on embedding _directly_ into your build system.
 
 HIDAPI library was originally developed by Alan Ott ([signal11](https://github.com/signal11)).
@@ -31,19 +31,21 @@ It was moved to [libusb/hidapi](https://github.com/libusb/hidapi) on June 4th, 2
 
 ## About
 
-### HIDAPI has four back-ends:
+### HIDAPI back-ends:
 * Windows (using `hid.dll`)
 * Linux/hidraw (using the Kernel's hidraw driver)
+* FreeBSD/hidraw (using the Kernel's hidraw driver)
+* NetBSD/uhid (using the Kernel's uhid driver)
 * libusb (using libusb-1.0 - Linux/BSD/other UNIX-like systems)
 * macOS (using IOHidManager)
 
-On Linux, either the hidraw or the libusb back-end can be used. There are
+On Linux and FreeBSD, either the hidraw or the libusb back-end can be used. There are
 tradeoffs, and the functionality supported is slightly different. Both are
 built by default. It is up to the application linking to hidapi to choose
 the backend at link time by linking to either `libhidapi-libusb` or
 `libhidapi-hidraw`.
 
-Note that you will need to install an udev rule file with your application
+On Linux, you will need to install an udev rule file with your application
 for unprivileged users to be able to access HID devices with hidapi. Refer
 to the [69-hid.rules](udev/69-hid.rules) file in the `udev` directory
 for an example.
