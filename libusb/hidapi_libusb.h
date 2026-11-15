@@ -51,7 +51,7 @@ extern "C" {
 
 		/** @brief Similar to @ref hid_error but gives a libusb error code.
 
-			Since version 0.15.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+			Since version 0.16.0, @ref HID_API_VERSION >= HID_API_MAKE_VERSION(0, 16, 0)
 
 			If the error occurred is not immediately caused by a libusb function call,
 			the returned value is 1. @ref hid_error would still contain a valid and meaningful error message.
