@@ -13,13 +13,13 @@ jobs:
       - name: Install Doxygen
         run: sudo apt satisfy "doxygen (>= 1.9.6)"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - run: doxygen
         working-directory: doxygen
 
       - name: Save doxygen docs as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HIDAPI_doxygen_docs
           path: ${{ github.workspace }}/doxygen/html
@@ -33,7 +33,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: downlod artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: HIDAPI_doxygen_docs
           path: docs

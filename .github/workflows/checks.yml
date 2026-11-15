@@ -20,11 +20,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         path: src
     - name: Setup MSVC
-      uses: TheMrMilchmann/setup-msvc-dev@v2.0.0
+      uses: TheMrMilchmann/setup-msvc-dev@v4
       with:
         arch: x64
     - uses: ./src/.coverity/setup
@@ -47,7 +47,7 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw 'cov-manage-emit failed' }
         tar -czf ../coverity-windows.tar.gz cov-int coverity-version.txt
         if ($LASTEXITCODE -ne 0) { throw 'tar failed' }
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: coverity-windows
         path: coverity-windows.tar.gz
@@ -58,7 +58,7 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         path: src
     - uses: ./src/.coverity/setup
@@ -80,7 +80,7 @@ jobs:
         cov-build --dir cov-int ninja
         cov-manage-emit --ident > coverity-version.txt
         tar -czf ../coverity-macos.tar.gz cov-int coverity-version.txt
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: coverity-macos
         path: coverity-macos.tar.gz
@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         path: src
     - uses: ./src/.coverity/setup
@@ -116,7 +116,7 @@ jobs:
         cov-build --dir cov-int ninja
         cov-manage-emit --ident > coverity-version.txt
         tar -czf ../coverity-linux.tar.gz cov-int coverity-version.txt
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: coverity-linux
         path: coverity-linux.tar.gz
@@ -128,7 +128,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         path: src
     - uses: ./src/.coverity/setup
@@ -136,7 +136,7 @@ jobs:
       with:
         platform: linux64
         token: ${{ secrets.COVERITY_SCAN_TOKEN }}
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         pattern: coverity-*
         path: captures
@@ -150,7 +150,7 @@ jobs:
         python3 src/.coverity/merge.py captures cov-int
         tar -czf cov-int.tar.gz cov-int
     - name: Archive merged capture
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverity-combined
         path: |

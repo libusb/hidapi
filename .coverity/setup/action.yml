@@ -23,7 +23,7 @@ runs:
         "https://scan.coverity.com/download/cxx/$COVERITY_PLATFORM")
       [[ "$hash" =~ ^[[:xdigit:]]{32}$ ]] || { echo 'Invalid package hash'; exit 1; }
       echo "hash=$hash" >> "$GITHUB_OUTPUT"
-  - uses: actions/cache/restore@v4
+  - uses: actions/cache/restore@v6
     id: cache
     with:
       path: cov-root
@@ -89,7 +89,7 @@ runs:
   - name: Verify tool installation
     shell: bash
     run: cov-manage-emit --ident
-  - uses: actions/cache/save@v4
+  - uses: actions/cache/save@v6
     if: steps.cache.outputs.cache-hit != 'true'
     with:
       path: cov-root

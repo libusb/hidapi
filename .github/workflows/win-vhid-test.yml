@@ -31,7 +31,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci-virtual-device')
     runs-on: windows-2022
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     # Sets up the MSVC developer environment (cl/msbuild on PATH) by locating
     # the installed Visual Studio (no hard-coded path or edition).
@@ -46,7 +46,7 @@ jobs:
     # once; later runs restore it from the cache and install offline.
     - name: Cache the WDK installer layout
       id: wdk-cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: wdk-layout
         key: wdk-layout-26100.6584
@@ -92,7 +92,7 @@ jobs:
         Copy-Item $devcon $out\
         Get-ChildItem -Recurse $out | Select-Object FullName
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: vhidmini-driver
         path: src/tests/windows/driver/x64/Release/
@@ -102,9 +102,9 @@ jobs:
     needs: build-driver
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: vhidmini-driver
         path: driver-pkg
