@@ -11,7 +11,7 @@ HIDAPI is a multi-platform library which allows an application to interface
 with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
 HIDAPI can be either built as a shared library (`.so`, `.dll` or `.dylib`) or
 can be embedded directly into a target application by adding one backend source
-file and its supporting headers and source files.<br>
+file as a compilation unit, with its supporting headers available at compile time.<br>
 See [remarks](BUILD.md#embedding-hidapi-directly-into-your-source-tree) on embedding _directly_ into your build system.
 
 HIDAPI library was originally developed by Alan Ott ([signal11](https://github.com/signal11)).
