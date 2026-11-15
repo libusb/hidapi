@@ -13,10 +13,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: codeql-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'labeled' && github.event.label.name || 'scan' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   analyze:
     name: CodeQL (${{ matrix.platform }})
@@ -25,6 +21,9 @@ jobs:
       (contains(github.event.pull_request.labels.*.name, 'ci-codeql') &&
        (github.event.action != 'labeled' || github.event.label.name == 'ci-codeql'))
     runs-on: ${{ matrix.os }}
+    concurrency:
+      group: codeql-${{ matrix.platform }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 20
     permissions:
       contents: read
