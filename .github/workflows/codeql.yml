@@ -28,6 +28,11 @@ jobs:
     permissions:
       contents: read
       security-events: write
+    env:
+      # Manual C/C++ builds require a full database rather than an overlay.
+      CODEQL_OVERLAY_DATABASE_MODE: none
+      # CodeQL's Windows path resolver loads a JNI native library.
+      JDK_JAVA_OPTIONS: --enable-native-access=ALL-UNNAMED
     strategy:
       fail-fast: false
       matrix:
@@ -43,7 +48,7 @@ jobs:
             os: macos-15
             generator: Unix Makefiles
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         timeout-minutes: 5
