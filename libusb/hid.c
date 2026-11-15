@@ -585,7 +585,7 @@ static void get_path(char (*result)[64], libusb_device *dev, int config_number, 
 
 	if (num_ports > 0) {
 		int n = snprintf(str, sizeof("000-000"), "%u-%u", libusb_get_bus_number(dev), port_numbers[0]);
-		for (uint8_t i = 1; i < num_ports; i++) {
+		for (int i = 1; i < num_ports; i++) {
 			n += snprintf(&str[n], sizeof(".000"), ".%u", port_numbers[i]);
 		}
 		n += snprintf(&str[n], sizeof(":000.000"), ":%u.%u", (uint8_t)config_number, (uint8_t)interface_number);
