@@ -7,12 +7,6 @@
 | `BSD, last build (branch/PR)` | [![builds.sr.ht status](https://builds.sr.ht/~z3ntu/hidapi.svg)](https://builds.sr.ht/~z3ntu/hidapi) |
 | `Coverity Scan (last)` | [![Coverity Scan](https://scan.coverity.com/projects/583/badge.svg)](https://scan.coverity.com/projects/hidapi) |
 
-The GitHub Builds workflow runs CodeQL on every push to `master`, weekly, and
-on manual dispatch. Pull requests opt in with the `ci-codeql` label. Scans reuse
-the native CMake builds for Windows, macOS, and both Linux backends, using the
-default security queries. Native BSD backends and inactive preprocessor branches
-are outside this coverage.
-
 HIDAPI is a multi-platform library which allows an application to interface
 with USB and Bluetooth HID-Class devices on Windows, Linux, FreeBSD, and macOS.
 HIDAPI can be either built as a shared library (`.so`, `.dll` or `.dylib`) or

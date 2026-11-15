@@ -58,6 +58,8 @@ jobs:
       security-events: write
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      # CodeQL can launch later CMake invocations through Rosetta.
+      CMAKE_APPLE_SILICON_PROCESSOR: arm64
 
     steps:
     - uses: actions/checkout@v3
