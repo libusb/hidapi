@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
     - name: Install build tools
       run: brew install autoconf automake libtool
     - name: Configure Automake
@@ -36,7 +36,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     - name: Install dependencies
@@ -65,7 +65,7 @@ jobs:
         # verifies the provider builds and the tests run/link.
         ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
     - name: Check artifacts
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/shared/lib/libhidapi.dylib, \
                 install/shared/include/hidapi/hidapi.h, \
@@ -119,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     - name: Install dependencies
@@ -161,7 +161,7 @@ jobs:
         # exit); ASan use-after-free / overflow detection stays active.
         sudo env "ASAN_OPTIONS=detect_leaks=0" ctest --output-on-failure
     - name: Check artifacts
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/shared/lib/libhidapi-libusb.so, \
                 install/shared/lib/libhidapi-hidraw.so, \
@@ -215,7 +215,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     - name: Install dependencies
@@ -236,7 +236,7 @@ jobs:
       working-directory: build/msvc
       run: cmake --build . --config RelWithDebInfo --target install
     - name: Check artifacts CMake MSVC
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/msvc/lib/hidapi.lib, \
                 install/msvc/bin/hidapi.dll, \
@@ -277,7 +277,7 @@ jobs:
       run: |
         nmake install
     - name: Check artifacts CMake NMake MSVC
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/nmake/lib/hidapi.lib, \
                 install/nmake/bin/hidapi.dll, \
@@ -310,7 +310,7 @@ jobs:
       run: |
         nmake install
     - name: Check artifacts CMake NMake ClangCL
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/clang_cl/lib/hidapi.lib, \
                 install/clang_cl/bin/hidapi.dll, \
@@ -348,7 +348,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     # MinGW builds with gcc and runs in its own job, deliberately without the
@@ -362,7 +362,7 @@ jobs:
       working-directory: build\mingw
       run: cmake --build . --target install
     - name: Check artifacts MinGW
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/mingw/lib/libhidapi.dll.a, \
                 install/mingw/bin/libhidapi.dll, \
@@ -408,7 +408,7 @@ jobs:
     - name: Check out with LF line endings
       shell: pwsh
       run: git config --global core.autocrlf input
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     # gcc-g++ too: configure.ac runs AC_PROG_CXX, and without a C++ compiler
     # libtool's C++ preprocessor check fails configure.
     - name: Install Cygwin
@@ -427,7 +427,7 @@ jobs:
         make V=1 CFLAGS="-g -O2 ${GNU_COMPILE_FLAGS}"
         make DESTDIR="${PWD}/install" install
     - name: Check artifacts
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/usr/local/bin/cyghidapi-0.dll, \
                 install/usr/local/lib/libhidapi.dll.a, \
@@ -449,19 +449,19 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - uses: microsoft/setup-msbuild@v1.1
+    - uses: actions/checkout@v7
+    - uses: microsoft/setup-msbuild@v3
     - name: MSBuild x86 MSVC
       run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=Win32
     - name: Check artifacts x86
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "windows/Release/hidapi.dll, windows/Release/hidapi.lib, windows/Release/hidapi.pdb"
         fail: true
     - name: MSBuild x64 MSVC
       run: msbuild windows\hidapi.sln /p:Configuration=Release /p:Platform=x64
     - name: Check artifacts x64
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "windows/x64/Release/hidapi.dll, windows/x64/Release/hidapi.lib, windows/x64/Release/hidapi.pdb"
         fail: true
@@ -475,7 +475,7 @@ jobs:
         Copy-Item "windows\x64\Release\hidapi.dll","windows\x64\Release\hidapi.lib","windows\x64\Release\hidapi.pdb" -Destination "artifacts\x64"
         Copy-Item "hidapi\hidapi.h","windows\hidapi_winapi.h" -Destination "artifacts\include"
     - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: hidapi-win
         path: artifacts/
@@ -487,7 +487,7 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     - name: Install dependencies
@@ -518,7 +518,7 @@ jobs:
       working-directory: hidapisrc/windows
       run: make -f Makefile-manual OS=MINGW CC=x86_64-w64-mingw32-gcc
     - name: Check artifacts
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/shared-cmake/bin/libhidapi.dll, \
                 install/shared-cmake/lib/libhidapi.dll.a, \
@@ -557,7 +557,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     - name: Install dependencies
@@ -593,7 +593,7 @@ jobs:
         cd ../libusb
         make -f Makefile-manual
     - name: Check artifacts
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/shared-cmake/lib/libhidapi-libusb.so, \
                 install/shared-cmake/lib/libhidapi-hidraw.so, \
@@ -634,7 +634,7 @@ jobs:
       # A bug in musl: https://www.openwall.com/lists/musl/2020/01/20/2
       ALPINE_COMPILE_FLAGS: ${GNU_COMPILE_FLAGS} -Wno-overflow
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         path: hidapisrc
     - name: Install dependencies
@@ -669,7 +669,7 @@ jobs:
         cd ../libusb
         make -f Makefile-manual
     - name: Check artifacts
-      uses: andstor/file-existence-action@v2
+      uses: andstor/file-existence-action@v3
       with:
         files: "install/shared-cmake/lib/libhidapi-libusb.so, \
                 install/shared-cmake/lib/libhidapi-hidraw.so, \
