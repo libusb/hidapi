@@ -1,0 +1,84 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: '23 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.platform }})
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci-codeql') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci-codeql'))
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: codeql-${{ matrix.platform }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      # Manual C/C++ builds require a full database rather than an overlay.
+      CODEQL_OVERLAY_DATABASE_MODE: none
+      # CodeQL's Windows path resolver loads a JNI native library.
+      JDK_JAVA_OPTIONS: --enable-native-access=ALL-UNNAMED
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-24.04
+            generator: Unix Makefiles
+          - platform: windows
+            os: windows-latest
+            generator: NMake Makefiles
+          - platform: macos
+            # CodeQL tracing requires macOS and Xcode earlier than version 27.
+            os: macos-15
+            generator: Unix Makefiles
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev libusb-1.0-0-dev
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: x64
+      - name: Select macOS toolchain
+        if: runner.os == 'macOS'
+        run: |
+          echo "DEVELOPER_DIR=/Applications/Xcode_16.4.app/Contents/Developer" >> "$GITHUB_ENV"
+          echo "CMAKE_APPLE_SILICON_PROCESSOR=arm64" >> "$GITHUB_ENV"
+      - name: Configure
+        timeout-minutes: 5
+        run: cmake -S . -B build -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=Release -DHIDAPI_WITH_TESTS=OFF -DHIDAPI_BUILD_HIDTEST=OFF
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        timeout-minutes: 5
+        with:
+          languages: c-cpp
+          build-mode: manual
+      - name: Build
+        timeout-minutes: 5
+        run: cmake --build build --config Release
+      - name: Analyze CodeQL
+        uses: github/codeql-action/analyze@v4
+        timeout-minutes: 10
+        with:
+          category: /language:c-cpp/os:${{ matrix.platform }}
