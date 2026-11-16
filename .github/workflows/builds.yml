@@ -3,7 +3,8 @@ name: GitHub Builds
 on: [push, pull_request]
 
 env:
-  NIX_COMPILE_FLAGS:   -Wall -Wextra -pedantic -Werror
+  # -Wshorten-64-to-32 is on by default in Xcode builds (and so in `pod lib lint`)
+  NIX_COMPILE_FLAGS:   -Wall -Wextra -pedantic -Werror -Wshorten-64-to-32
   GNU_COMPILE_FLAGS: -Wall -Wextra -pedantic -Werror -Wformat-signedness
   MSVC_COMPILE_FLAGS: /W4 /WX
 
