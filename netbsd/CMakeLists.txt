@@ -47,5 +47,7 @@ endif()
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
     OUTPUT_NAME "hidapi-netbsd"
     LIBRARY_NAME "hidapi-netbsd"
+    BACKEND_TARGET hidapi_netbsd
+    LIBS_PRIVATE "${CMAKE_THREAD_LIBS_INIT}"
     DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the netbsd implementation."
 )
