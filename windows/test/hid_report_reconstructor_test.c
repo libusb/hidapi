@@ -99,8 +99,7 @@ static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 		printf("  Usage (page): 0x%hx (0x%hx)\n", usage, usage_page);
 	}
 
-	hidp_preparsed_data static_pp_data;
-	memset(&static_pp_data, 0, sizeof(static_pp_data));
+	hidp_preparsed_data static_pp_data = {0};
 	hidp_preparsed_data *pp_data = &static_pp_data;
 
 	unsigned int rt_idx;

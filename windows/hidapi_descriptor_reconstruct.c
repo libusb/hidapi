@@ -243,10 +243,10 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	int max_coll_level = 0;
 	int *coll_levels = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
 	int *coll_number_of_direct_childs = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
-	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
-		coll_levels[collection_node_idx] = -1;
-		coll_number_of_direct_childs[collection_node_idx] = 0;
-	}
+	memset(coll_levels, -1,
+	       pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
+	memset(coll_number_of_direct_childs, 0,
+	       pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
 
 	{
 		int actual_coll_level = 0;
@@ -382,9 +382,8 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	struct rd_main_item_node **coll_end_lookup = (struct rd_main_item_node **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
 	{
 		int *coll_last_written_child = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
-		for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
-			coll_last_written_child[collection_node_idx] = -1;
-		}
+		memset(coll_last_written_child, -1,
+		       pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
 
 		int actual_coll_level = 0;
 		USHORT collection_node_idx = 0;
@@ -528,12 +527,8 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	{
 		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
 		struct rd_main_item_node *last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
-		for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
-			for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-				last_bit_position[rt_idx][reportid_idx] = -1;
-				last_report_item_lookup[rt_idx][reportid_idx] = NULL;
-			}
-		}
+		memset(last_bit_position, -1, sizeof(last_bit_position));
+		memset(last_report_item_lookup, 0, sizeof(last_report_item_lookup)); /* fill with NULL pointers */
 
 		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
