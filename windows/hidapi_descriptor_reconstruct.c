@@ -528,7 +528,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
 		struct rd_main_item_node *last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
 		memset(last_bit_position, -1, sizeof(last_bit_position));
-		memset(last_report_item_lookup, 0, sizeof(last_report_item_lookup));
+		memset(last_report_item_lookup, NULL, sizeof(last_report_item_lookup));
 
 		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
