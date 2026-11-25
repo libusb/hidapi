@@ -35,6 +35,10 @@ static const char* hidapi_strerror_compat(int errnum, char* buf, size_t buf_size
 #endif
 }
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4815)
+#endif
 static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 {
 	FILE* file;
@@ -481,6 +485,9 @@ static hidp_preparsed_data * alloc_preparsed_data_from_file(char* filename)
 
 	return pp_data;
 }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 static BOOLEAN read_hex_data_from_text_file(const char *filename, unsigned char *data_out, size_t data_size, size_t *actual_read)
 {
