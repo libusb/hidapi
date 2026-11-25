@@ -4,6 +4,11 @@ cmake = import('cmake')
 
 hidapi_build_options = cmake.subproject_options()
 hidapi_build_options.set_install(true)
+if get_option('default_library') == 'static'
+	hidapi_build_options.add_cmake_defines({'BUILD_SHARED_LIBS': 'OFF'})
+elif get_option('default_library') == 'shared'
+	hidapi_build_options.add_cmake_defines({'BUILD_SHARED_LIBS': 'ON'})
+endif
 
 hidapi_build = cmake.subproject('hidapi_build_cmake', options: hidapi_build_options)
 
