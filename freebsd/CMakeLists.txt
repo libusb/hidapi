@@ -42,6 +42,8 @@ endif()
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
     OUTPUT_NAME "hidapi-hidraw"
     LIBRARY_NAME "hidapi-hidraw"
+    BACKEND_TARGET hidapi_hidraw
+    LIBS_PRIVATE "${CMAKE_THREAD_LIBS_INIT}"
     DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the hidraw implementation."
     REQUIRES_PRIVATE "libusb-1.0 >= 1.0.9"
 )

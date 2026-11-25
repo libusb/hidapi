@@ -66,5 +66,7 @@ endif()
 hidapi_configure_pc("${PROJECT_ROOT}/pc/hidapi-backend-specific.pc.in"
     OUTPUT_NAME "hidapi-darwin"
     LIBRARY_NAME "hidapi"
+    BACKEND_TARGET hidapi_darwin
+    LIBS_PRIVATE "-framework IOKit -framework CoreFoundation ${CMAKE_THREAD_LIBS_INIT}"
     DESCRIPTION "C Library for USB/Bluetooth HID device access from Linux, Mac OS X, FreeBSD, and Windows. This is the Darwin implementation."
 )
