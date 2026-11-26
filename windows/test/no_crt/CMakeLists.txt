@@ -44,8 +44,8 @@ target_link_libraries(no_crt_mem_probe PRIVATE
 )
 
 if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(no_crt_init_probe PRIVATE /GS- /Gs9999999)
-    target_compile_options(no_crt_mem_probe PRIVATE /GS- /Gs9999999)
+    target_compile_options(no_crt_init_probe PRIVATE /GS-)
+    target_compile_options(no_crt_mem_probe PRIVATE /GS-)
     target_link_options(no_crt_init_probe PRIVATE
         /NODEFAULTLIB
         /ENTRY:mainCRTStartup
@@ -57,8 +57,6 @@ if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
         /SUBSYSTEM:CONSOLE
     )
 elseif(MINGW)
-    target_compile_options(no_crt_init_probe PRIVATE -mno-stack-arg-probe)
-    target_compile_options(no_crt_mem_probe PRIVATE -mno-stack-arg-probe)
     target_link_options(no_crt_init_probe PRIVATE
         -nostdlib
         -Wl,--entry=mainCRTStartup

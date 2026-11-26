@@ -527,10 +527,10 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	//  report descriptors seem to have it, as assumed here.
 	// ***********************************************************
 	{
-		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
-		struct rd_main_item_node *last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
-		HIDAPI_MEMSET(last_bit_position, -1, sizeof(last_bit_position));
-		HIDAPI_MEMSET(last_report_item_lookup, 0, sizeof(last_report_item_lookup)); /* fill with NULL pointers */
+		int (*last_bit_position)[256] = (int (*)[256])HIDAPI_MALLOC(NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_bit_position));
+		struct rd_main_item_node *(*last_report_item_lookup)[256] = (struct rd_main_item_node *(*)[256])HIDAPI_MALLOC(NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_report_item_lookup));
+		HIDAPI_MEMSET(last_bit_position, -1, NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_bit_position));
+		HIDAPI_MEMSET(last_report_item_lookup, 0, NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_report_item_lookup)); /* fill with NULL pointers */
 
 		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
@@ -597,6 +597,9 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				}
 			}
 		}
+
+		HIDAPI_FREE(last_bit_position);
+		HIDAPI_FREE(last_report_item_lookup);
 	}
 
 

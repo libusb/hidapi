@@ -37,13 +37,8 @@ if(HIDAPI_NO_CRT)
     target_compile_definitions(hidapi_winapi PRIVATE HIDAPI_NO_CRT)
     target_link_libraries(hidapi_winapi PRIVATE shlwapi)
     if(MSVC)
-        # The descriptor reconstructor has a large stack frame. Disable stack
-        # probes and the security cookie so the static library does not need
-        # __chkstk or __security_cookie from the CRT.
-        target_compile_options(hidapi_winapi PRIVATE /GS- /Gs9999999)
-    elseif(MINGW)
-        # GCC's automatic stack probe would need ___chkstk_ms from the CRT.
-        target_compile_options(hidapi_winapi PRIVATE -mno-stack-arg-probe)
+        # The static library does not need __security_cookie from the CRT.
+        target_compile_options(hidapi_winapi PRIVATE /GS-)
     endif()
 endif()
 
