@@ -424,6 +424,40 @@ jobs:
               $ok = $false
             }
           }
+
+          $sharedBuild = "$build-shared"
+          cmake -G Ninja `
+            -B $sharedBuild `
+            -S hidapisrc `
+            "-DCMAKE_C_COMPILER=$compiler" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=ON `
+            -DHIDAPI_NO_CRT=ON `
+            -DHIDAPI_WITH_TESTS=OFF `
+            -DHIDAPI_BUILD_HIDTEST=OFF
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          cmake --build $sharedBuild
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          $dll = Get-ChildItem "$sharedBuild\src\windows" -File -Filter '*.dll' |
+            Select-Object -First 1
+          if (-not $dll) {
+            Write-Host "::error title=$compiler::no-CRT shared DLL not found"
+            $ok = $false
+            continue
+          }
+
+          $deps = dumpbin /nologo /dependents $dll.FullName | Out-String
+          if ($deps -match '(?i)(vcruntime|ucrtbase|msvcrt|api-ms-win-crt|libgcc|libwinpthread)') {
+            Write-Host "::error title=$compiler::CRT dependency found in the no-CRT shared DLL"
+            $ok = $false
+          }
+          $exports = dumpbin /nologo /exports $dll.FullName | Out-String
+          if ($exports -notmatch '(?m)\bhid_init\b') {
+            Write-Host "::error title=$compiler::hid_init missing from the no-CRT shared DLL"
+            $ok = $false
+          }
         }
         if (-not $ok) { exit 1 }
 

@@ -13,6 +13,9 @@ set(SOURCES
 
 if(BUILD_SHARED_LIBS)
     list(APPEND SOURCES hidapi.rc)
+    if(HIDAPI_NO_CRT)
+        list(APPEND SOURCES hidapi_winapi_nocrt_dllmain.c)
+    endif()
 endif()
 
 add_library(hidapi_winapi
@@ -35,10 +38,21 @@ target_compile_definitions(hidapi_winapi
 
 if(HIDAPI_NO_CRT)
     target_compile_definitions(hidapi_winapi PRIVATE HIDAPI_NO_CRT)
-    target_link_libraries(hidapi_winapi PRIVATE shlwapi)
+    target_link_libraries(hidapi_winapi PRIVATE shlwapi kernel32 user32)
     if(MSVC)
-        # The static library does not need __security_cookie from the CRT.
+        # The library does not need __security_cookie from the CRT.
         target_compile_options(hidapi_winapi PRIVATE /GS-)
+    endif()
+    if(BUILD_SHARED_LIBS)
+        if(MSVC)
+            target_link_options(hidapi_winapi PRIVATE /NODEFAULTLIB /ENTRY:DllMain)
+        elseif(MINGW)
+            target_link_options(hidapi_winapi PRIVATE
+                -nostdlib
+                -nodefaultlibs
+                -Wl,--entry=DllMain
+            )
+        endif()
     endif()
 endif()
 
