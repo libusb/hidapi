@@ -38,7 +38,7 @@ target_compile_definitions(hidapi_winapi
 
 if(HIDAPI_NO_CRT)
     target_compile_definitions(hidapi_winapi PRIVATE HIDAPI_NO_CRT)
-    target_link_libraries(hidapi_winapi PRIVATE shlwapi kernel32 user32)
+    target_link_libraries(hidapi_winapi PRIVATE kernel32 shlwapi user32)
     if(MSVC)
         # The library does not need __security_cookie from the CRT.
         target_compile_options(hidapi_winapi PRIVATE /GS-)
