@@ -18,7 +18,7 @@
 ********************************************************/
 #include "hidapi_descriptor_reconstruct.h"
 
-#include "hidapi_winapi_crt.h"
+#include "hidapi_winapi_crt_compat.h"
 
 /**
  * @brief References to report descriptor buffer.

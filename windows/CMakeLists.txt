@@ -8,13 +8,13 @@ set(SOURCES
     hidapi_hidclass.h
     hidapi_hidpi.h
     hidapi_hidsdi.h
-    hidapi_winapi_crt.h
+    hidapi_winapi_crt_compat.h
 )
 
 if(BUILD_SHARED_LIBS)
     list(APPEND SOURCES hidapi.rc)
     if(HIDAPI_NO_CRT)
-        list(APPEND SOURCES hidapi_winapi_nocrt_dllmain.c)
+        list(APPEND SOURCES hidapi_winapi_dllmain.c)
     endif()
 endif()
 

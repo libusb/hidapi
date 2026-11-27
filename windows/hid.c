@@ -55,7 +55,7 @@ typedef LONG NTSTATUS;
 #include "hidapi_hidclass.h"
 #include "hidapi_hidsdi.h"
 
-#include "hidapi_winapi_crt.h"
+#include "hidapi_winapi_crt_compat.h"
 
 #ifdef MIN
 #undef MIN

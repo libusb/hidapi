@@ -17,8 +17,8 @@
         https://github.com/libusb/hidapi .
 ********************************************************/
 
-#ifndef HIDAPI_WINAPI_CRT_H__
-#define HIDAPI_WINAPI_CRT_H__
+#ifndef HIDAPI_WINAPI_CRT_COMPAT_H__
+#define HIDAPI_WINAPI_CRT_COMPAT_H__
 
 #ifndef HIDAPI_NO_CRT
 
@@ -201,4 +201,4 @@ static inline long hid_internal_wcstol_hex(const wchar_t *string, wchar_t **endp
 
 #endif /* HIDAPI_NO_CRT */
 
-#endif /* HIDAPI_WINAPI_CRT_H__ */
+#endif /* HIDAPI_WINAPI_CRT_COMPAT_H__ */
