@@ -12,6 +12,9 @@ if(NOT HIDAPI_LIBRARY)
     message(FATAL_ERROR "HIDAPI_LIBRARY is required")
 endif()
 
+set(HIDAPI_SHARED_LIBRARY "" CACHE FILEPATH "Optional no-CRT shared DLL")
+set(HIDAPI_SHARED_IMPLIB "" CACHE FILEPATH "Import library for HIDAPI_SHARED_LIBRARY")
+
 set(PROBE_INIT_SOURCE "${CMAKE_CURRENT_LIST_DIR}/init_probe.c")
 set(PROBE_MEM_SOURCE "${CMAKE_CURRENT_LIST_DIR}/mem_probe.c")
 set(PROBE_INCLUDES "${HIDAPI_SOURCE_DIR}/hidapi")
@@ -42,31 +45,49 @@ target_link_libraries(no_crt_mem_probe PRIVATE
     user32
     shlwapi
 )
+if(HIDAPI_SHARED_LIBRARY AND HIDAPI_SHARED_IMPLIB)
+    add_library(hidapi_no_crt_shared SHARED IMPORTED)
+    set_target_properties(hidapi_no_crt_shared PROPERTIES
+        IMPORTED_LOCATION "${HIDAPI_SHARED_LIBRARY}"
+        IMPORTED_IMPLIB "${HIDAPI_SHARED_IMPLIB}"
+    )
 
-if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
-    target_compile_options(no_crt_init_probe PRIVATE /GS-)
-    target_compile_options(no_crt_mem_probe PRIVATE /GS-)
-    target_link_options(no_crt_init_probe PRIVATE
-        /NODEFAULTLIB
-        /ENTRY:mainCRTStartup
-        /SUBSYSTEM:CONSOLE
+    add_executable(no_crt_shared_init_probe "${PROBE_INIT_SOURCE}")
+    target_include_directories(no_crt_shared_init_probe PRIVATE "${PROBE_INCLUDES}")
+    target_compile_definitions(no_crt_shared_init_probe PRIVATE HID_API_NO_EXPORT_DEFINE)
+    target_link_libraries(no_crt_shared_init_probe PRIVATE
+        hidapi_no_crt_shared
+        kernel32
+        user32
+        shlwapi
     )
-    target_link_options(no_crt_mem_probe PRIVATE
-        /NODEFAULTLIB
-        /ENTRY:mainCRTStartup
-        /SUBSYSTEM:CONSOLE
+    add_custom_command(TARGET no_crt_shared_init_probe POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${HIDAPI_SHARED_LIBRARY}"
+            "$<TARGET_FILE_DIR:no_crt_shared_init_probe>"
     )
-elseif(MINGW)
-    target_link_options(no_crt_init_probe PRIVATE
-        -nostdlib
-        -Wl,--entry=mainCRTStartup
-        -Wl,--subsystem,console
-    )
-    target_link_options(no_crt_mem_probe PRIVATE
-        -nostdlib
-        -Wl,--entry=mainCRTStartup
-        -Wl,--subsystem,console
-    )
-else()
-    message(FATAL_ERROR "Unsupported no-CRT toolchain")
 endif()
+
+set(NO_CRT_PROBE_TARGETS no_crt_init_probe no_crt_mem_probe)
+if(TARGET no_crt_shared_init_probe)
+    list(APPEND NO_CRT_PROBE_TARGETS no_crt_shared_init_probe)
+endif()
+
+foreach(probe IN LISTS NO_CRT_PROBE_TARGETS)
+    if(MSVC OR CMAKE_C_SIMULATE_ID STREQUAL "MSVC")
+        target_compile_options(${probe} PRIVATE /GS-)
+        target_link_options(${probe} PRIVATE
+            /NODEFAULTLIB
+            /ENTRY:mainCRTStartup
+            /SUBSYSTEM:CONSOLE
+        )
+    elseif(MINGW OR CYGWIN)
+        target_link_options(${probe} PRIVATE
+            -nostdlib
+            -Wl,--entry=mainCRTStartup
+            -Wl,--subsystem,console
+        )
+    else()
+        message(FATAL_ERROR "Unsupported no-CRT toolchain")
+    endif()
+endforeach()

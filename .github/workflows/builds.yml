@@ -458,6 +458,47 @@ jobs:
             Write-Host "::error title=$compiler::hid_init missing from the no-CRT shared DLL"
             $ok = $false
           }
+
+          $implib = Get-ChildItem "$sharedBuild\src\windows" -File |
+            Where-Object { $_.Name -eq 'hidapi.lib' -or $_.Name -eq 'libhidapi.dll.a' } |
+            Select-Object -First 1
+          if (-not $implib) {
+            Write-Host "::error title=$compiler::no-CRT shared import library not found"
+            $ok = $false
+            continue
+          }
+
+          $sharedProbeBuild = "$build\shared-probe"
+          cmake -G Ninja `
+            -B $sharedProbeBuild `
+            -S hidapisrc\windows\test\no_crt `
+            "-DCMAKE_C_COMPILER=$compiler" `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DHIDAPI_SOURCE_DIR=$((Get-Location).Path)\hidapisrc" `
+            "-DHIDAPI_LIBRARY=$($lib.FullName)" `
+            "-DHIDAPI_SHARED_LIBRARY=$($dll.FullName)" `
+            "-DHIDAPI_SHARED_IMPLIB=$($implib.FullName)"
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          cmake --build $sharedProbeBuild --target no_crt_shared_init_probe
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          $sharedProbePath = Join-Path $sharedProbeBuild "no_crt_shared_init_probe.exe"
+          $proc = Start-Process -FilePath $sharedProbePath -PassThru
+          if (-not $proc.WaitForExit(5000)) {
+            $proc.Kill()
+            Write-Host "::error title=$compiler/no_crt_shared_init_probe::shared no-CRT probe timed out"
+            $ok = $false
+          } elseif ($proc.ExitCode -ne 0) {
+            Write-Host "::error title=$compiler/no_crt_shared_init_probe::shared no-CRT probe exited with $($proc.ExitCode)"
+            $ok = $false
+          }
+
+          $deps = dumpbin /nologo /dependents $sharedProbePath | Out-String
+          if ($deps -match '(?i)(vcruntime|ucrtbase|msvcrt|api-ms-win-crt|libgcc|libwinpthread)') {
+            Write-Host "::error title=$compiler/no_crt_shared_init_probe::CRT dependency found in the shared no-CRT probe"
+            $ok = $false
+          }
         }
         if (-not $ok) { exit 1 }
 
