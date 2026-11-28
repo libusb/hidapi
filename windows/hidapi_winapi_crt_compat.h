@@ -46,22 +46,22 @@ static inline void hid_internal_towupper(wchar_t *string)
 		*p = (wchar_t)towupper(*p);
 }
 
-#define HIDAPI_MALLOC(n) malloc(n)
+#define HIDAPI_MALLOC(n) malloc((n))
 #define HIDAPI_CALLOC(n, size) calloc((n), (size))
-#define HIDAPI_FREE(p) free(p)
+#define HIDAPI_FREE(p) free((p))
 #define HIDAPI_MEMCPY(dest, src, bytes) memcpy((dest), (src), (bytes))
 #define HIDAPI_MEMSET(dest, value, bytes) memset((dest), (value), (bytes))
 #define HIDAPI_MEMCMP(lhs, rhs, bytes) memcmp((lhs), (rhs), (bytes))
-#define HIDAPI_WCSLEN(s) wcslen(s)
+#define HIDAPI_WCSLEN(s) wcslen((s))
 #define HIDAPI_WCSCMP(lhs, rhs) wcscmp((lhs), (rhs))
 #define HIDAPI_WCSSTR(haystack, needle) wcsstr((haystack), (needle))
 #define HIDAPI_WCSTOL_HEX(s, end) wcstol((s), (end), 16)
 #ifdef __CYGWIN__
-#define HIDAPI_WCSDUP(s) wcsdup(s)
+#define HIDAPI_WCSDUP(s) wcsdup((s))
 #else
-#define HIDAPI_WCSDUP(s) _wcsdup(s)
+#define HIDAPI_WCSDUP(s) _wcsdup((s))
 #endif
-#define HIDAPI_STRDUP(s) _strdup(s)
+#define HIDAPI_STRDUP(s) _strdup((s))
 
 #else /* HIDAPI_NO_CRT */
 
@@ -186,18 +186,18 @@ static inline long hid_internal_wcstol_hex(const wchar_t *string, wchar_t **endp
 	return value;
 }
 
-#define HIDAPI_MALLOC(n) hid_internal_malloc(n)
+#define HIDAPI_MALLOC(n) hid_internal_malloc((n))
 #define HIDAPI_CALLOC(n, size) hid_internal_calloc((n), (size))
-#define HIDAPI_FREE(p) hid_internal_free(p)
+#define HIDAPI_FREE(p) hid_internal_free((p))
 #define HIDAPI_MEMCPY(dest, src, bytes) hid_internal_memcpy((dest), (src), (bytes))
 #define HIDAPI_MEMSET(dest, value, bytes) hid_internal_memset((dest), (value), (bytes))
 #define HIDAPI_MEMCMP(lhs, rhs, bytes) hid_internal_memcmp((lhs), (rhs), (bytes))
-#define HIDAPI_WCSLEN(s) ((size_t)lstrlenW(s))
+#define HIDAPI_WCSLEN(s) ((size_t)lstrlenW((s)))
 #define HIDAPI_WCSCMP(lhs, rhs) hid_internal_wcscmp((lhs), (rhs))
 #define HIDAPI_WCSSTR(haystack, needle) StrStrW((haystack), (needle))
 #define HIDAPI_WCSTOL_HEX(s, end) hid_internal_wcstol_hex((s), (end))
-#define HIDAPI_WCSDUP(s) hid_internal_wcsdup(s)
-#define HIDAPI_STRDUP(s) hid_internal_strdup(s)
+#define HIDAPI_WCSDUP(s) hid_internal_wcsdup((s))
+#define HIDAPI_STRDUP(s) hid_internal_strdup((s))
 #define HIDAPI_SWPRINTF(dest, count, ...) wnsprintfW((dest), (int)(count), __VA_ARGS__)
 #define HIDAPI_WCSNCPY(dest, dest_count, src) lstrcpynW((dest), (src), (int)(dest_count))
 

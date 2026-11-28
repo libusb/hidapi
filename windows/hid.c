@@ -38,14 +38,13 @@ extern "C" {
 typedef LONG NTSTATUS;
 #endif
 
-#ifdef __MINGW32__
+#if defined(__MINGW32__) || defined(__CYGWIN__)
 #include <ntdef.h>
-#include <winbase.h>
-#define WC_ERR_INVALID_CHARS 0x00000080
 #endif
 
-#ifdef __CYGWIN__
-#include <ntdef.h>
+#ifdef __MINGW32__
+#include <winbase.h>
+#define WC_ERR_INVALID_CHARS 0x00000080
 #endif
 
 /*#define HIDAPI_USE_DDK*/
