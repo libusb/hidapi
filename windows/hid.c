@@ -38,16 +38,13 @@ extern "C" {
 typedef LONG NTSTATUS;
 #endif
 
-#ifdef __MINGW32__
+#if defined(__MINGW32__) || defined(__CYGWIN__)
 #include <ntdef.h>
-#include <winbase.h>
-#define WC_ERR_INVALID_CHARS 0x00000080
 #endif
 
-#ifdef __CYGWIN__
-#include <ntdef.h>
-#include <wctype.h>
-#define _wcsdup wcsdup
+#ifdef __MINGW32__
+#include <winbase.h>
+#define WC_ERR_INVALID_CHARS 0x00000080
 #endif
 
 /*#define HIDAPI_USE_DDK*/
@@ -56,19 +53,7 @@ typedef LONG NTSTATUS;
 #include "hidapi_hidclass.h"
 #include "hidapi_hidsdi.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-/* MSVC secure CRT (VS2005+) provides swprintf_s/wcsncpy_s.
-   Older MSVC and GCC/MinGW/Cygwin use the classic variants. */
-#if defined(_MSC_VER) && (_MSC_VER >= 1400)
-#define HIDAPI_SWPRINTF swprintf_s
-#define HIDAPI_WCSNCPY(dest, dest_count, src) wcsncpy_s((dest), (dest_count), (src), _TRUNCATE)
-#else
-#define HIDAPI_SWPRINTF swprintf
-#define HIDAPI_WCSNCPY(dest, dest_count, src) wcsncpy((dest), (src), (dest_count))
-#endif
+#include "hidapi_winapi_crt_compat.h"
 
 #ifdef MIN
 #undef MIN
@@ -153,7 +138,7 @@ static int lookup_functions()
 #define RESOLVE(lib_handle, x) do { \
 	FARPROC proc_addr = GetProcAddress(lib_handle, #x); \
 	if (!proc_addr) goto err; \
-	memcpy(&x, &proc_addr, sizeof(x)); \
+	HIDAPI_MEMCPY(&x, &proc_addr, sizeof(x)); \
 } while (0)
 
 	RESOLVE(hid_lib_handle, HidD_GetHidGuid);
@@ -213,7 +198,7 @@ static void free_hid_device(hid_device *dev);
 
 static hid_device *new_hid_device()
 {
-	hid_device *dev = (hid_device*) calloc(1, sizeof(hid_device));
+	hid_device *dev = (hid_device*) HIDAPI_CALLOC(1, sizeof(hid_device));
 
 	if (dev == NULL) {
 		return NULL;
@@ -230,9 +215,9 @@ static hid_device *new_hid_device()
 	dev->last_read_error_str = NULL;
 	dev->read_pending = FALSE;
 	dev->read_buf = NULL;
-	memset(&dev->ol, 0, sizeof(dev->ol));
+	HIDAPI_MEMSET(&dev->ol, 0, sizeof(dev->ol));
 	dev->ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
-	memset(&dev->write_ol, 0, sizeof(dev->write_ol));
+	HIDAPI_MEMSET(&dev->write_ol, 0, sizeof(dev->write_ol));
 	dev->write_ol.hEvent = CreateEvent(NULL, FALSE, FALSE /*initial state f=nonsignaled*/, NULL);
 	dev->interrupt_event = CreateEvent(NULL, TRUE /*manual reset*/, FALSE /*initial state nonsignaled*/, NULL);
 	if (dev->interrupt_event == NULL) {
@@ -255,20 +240,20 @@ static void free_hid_device(hid_device *dev)
 	CloseHandle(dev->write_ol.hEvent);
 	CloseHandle(dev->interrupt_event);
 	CloseHandle(dev->device_handle);
-	free(dev->last_error_str);
-	free(dev->last_read_error_str);
+	HIDAPI_FREE(dev->last_error_str);
+	HIDAPI_FREE(dev->last_read_error_str);
 	dev->last_error_str = NULL;
 	dev->last_read_error_str = NULL;
-	free(dev->write_buf);
-	free(dev->feature_buf);
-	free(dev->read_buf);
+	HIDAPI_FREE(dev->write_buf);
+	HIDAPI_FREE(dev->feature_buf);
+	HIDAPI_FREE(dev->read_buf);
 	hid_free_enumeration(dev->device_info);
-	free(dev);
+	HIDAPI_FREE(dev);
 }
 
 static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR *op)
 {
-	free(*error_buffer);
+	HIDAPI_FREE(*error_buffer);
 	*error_buffer = NULL;
 
 	/* Only clear out error messages if NULL is passed into op */
@@ -287,7 +272,7 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 		system_err_buf, ARRAYSIZE(system_err_buf),
 		NULL);
 
-	DWORD op_len = (DWORD)wcslen(op);
+	DWORD op_len = (DWORD)HIDAPI_WCSLEN(op);
 
 	DWORD op_prefix_len =
 		op_len
@@ -298,7 +283,7 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 		+ system_err_len
 		;
 
-	*error_buffer = (WCHAR *)calloc(msg_len + 1, sizeof (WCHAR));
+	*error_buffer = (WCHAR *)HIDAPI_CALLOC(msg_len + 1, sizeof (WCHAR));
 	WCHAR *msg = *error_buffer;
 
 	if (!msg)
@@ -334,11 +319,11 @@ static void register_winapi_error_to_buffer(wchar_t **error_buffer, const WCHAR 
 
 static void register_string_error_to_buffer(wchar_t **error_buffer, const WCHAR *string_error)
 {
-	free(*error_buffer);
+	HIDAPI_FREE(*error_buffer);
 	*error_buffer = NULL;
 
 	if (string_error) {
-		*error_buffer = _wcsdup(string_error);
+		*error_buffer = HIDAPI_WCSDUP(string_error);
 	}
 }
 
@@ -431,10 +416,10 @@ static void* hid_internal_get_devnode_property(DEVINST dev_node, const DEVPROPKE
 	if (cr != CR_BUFFER_SMALL || property_type != expected_property_type)
 		return NULL;
 
-	property_value = (PBYTE)calloc(len, sizeof(BYTE));
+	property_value = (PBYTE)HIDAPI_CALLOC(len, sizeof(BYTE));
 	cr = CM_Get_DevNode_PropertyW(dev_node, property_key, &property_type, property_value, &len, 0);
 	if (cr != CR_SUCCESS) {
-		free(property_value);
+		HIDAPI_FREE(property_value);
 		return NULL;
 	}
 
@@ -452,32 +437,28 @@ static void* hid_internal_get_device_interface_property(const wchar_t* interface
 	if (cr != CR_BUFFER_SMALL || property_type != expected_property_type)
 		return NULL;
 
-	property_value = (PBYTE)calloc(len, sizeof(BYTE));
+	property_value = (PBYTE)HIDAPI_CALLOC(len, sizeof(BYTE));
 	cr = CM_Get_Device_Interface_PropertyW(interface_path, property_key, &property_type, property_value, &len, 0);
 	if (cr != CR_SUCCESS) {
-		free(property_value);
+		HIDAPI_FREE(property_value);
 		return NULL;
 	}
 
 	return property_value;
 }
 
-static void hid_internal_towupper(wchar_t* string)
-{
-	for (wchar_t* p = string; *p; ++p) *p = towupper(*p);
-}
 
 static int hid_internal_extract_int_token_value(wchar_t* string, const wchar_t* token)
 {
 	int token_value;
 	wchar_t* startptr, * endptr;
 
-	startptr = wcsstr(string, token);
+	startptr = HIDAPI_WCSSTR(string, token);
 	if (!startptr)
 		return -1;
 
-	startptr += wcslen(token);
-	token_value = wcstol(startptr, &endptr, 16);
+	startptr += HIDAPI_WCSLEN(token);
+	token_value = HIDAPI_WCSTOL_HEX(startptr, &endptr);
 	if (endptr == startptr)
 		return -1;
 
@@ -514,7 +495,7 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 	   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers
 	   https://docs.microsoft.com/windows-hardware/drivers/usbcon/enumeration-of-interfaces-not-grouped-in-collections
 	*/
-	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += wcslen(hardware_id) + 1) {
+	for (wchar_t* hardware_id = hardware_ids; *hardware_id; hardware_id += HIDAPI_WCSLEN(hardware_id) + 1) {
 		/* Normalize to upper case */
 		hid_internal_towupper(hardware_id);
 
@@ -536,16 +517,16 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 	}
 
 	/* Try to get USB device manufacturer string if not provided by HidD_GetManufacturerString. */
-	if (wcslen(dev->manufacturer_string) == 0) {
+	if (HIDAPI_WCSLEN(dev->manufacturer_string) == 0) {
 		wchar_t* manufacturer_string = (wchar_t *)hid_internal_get_devnode_property(dev_node, &DEVPKEY_Device_Manufacturer, DEVPROP_TYPE_STRING);
 		if (manufacturer_string) {
-			free(dev->manufacturer_string);
+			HIDAPI_FREE(dev->manufacturer_string);
 			dev->manufacturer_string = manufacturer_string;
 		}
 	}
 
 	/* Try to get USB device serial number if not provided by HidD_GetSerialNumberString. */
-	if (wcslen(dev->serial_number) == 0) {
+	if (HIDAPI_WCSLEN(dev->serial_number) == 0) {
 		DEVINST usb_dev_node = dev_node;
 		if (dev->interface_number != -1) {
 			/* Get devnode parent to reach out composite parent USB device.
@@ -556,7 +537,7 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 		}
 
 		/* Get the device id of the USB device. */
-		free(device_id);
+		HIDAPI_FREE(device_id);
 		device_id = (wchar_t *)hid_internal_get_devnode_property(usb_dev_node, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
 		if (!device_id)
 			goto end;
@@ -565,15 +546,15 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 		   For USB devices it may contain device's serial number.
 		   https://docs.microsoft.com/windows-hardware/drivers/install/instance-ids
 		*/
-		for (wchar_t *ptr = device_id + wcslen(device_id); ptr > device_id; --ptr) {
+		for (wchar_t *ptr = device_id + HIDAPI_WCSLEN(device_id); ptr > device_id; --ptr) {
 			/* Instance ID is unique only within the scope of the bus.
 			   For USB devices it means that serial number is not available. Skip. */
 			if (*ptr == L'&')
 				break;
 
 			if (*ptr == L'\\') {
-				free(dev->serial_number);
-				dev->serial_number = _wcsdup(ptr + 1);
+				HIDAPI_FREE(dev->serial_number);
+				dev->serial_number = HIDAPI_WCSDUP(ptr + 1);
 				break;
 			}
 		}
@@ -584,8 +565,8 @@ static void hid_internal_get_usb_info(struct hid_device_info* dev, DEVINST dev_n
 		dev->interface_number = 0;
 
 end:
-	free(device_id);
-	free(hardware_ids);
+	HIDAPI_FREE(device_id);
+	HIDAPI_FREE(hardware_ids);
 }
 
 /* HidD_GetProductString/HidD_GetManufacturerString/HidD_GetSerialNumberString is not working for BLE HID devices
@@ -594,25 +575,25 @@ end:
 */
 static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_node)
 {
-	if (wcslen(dev->manufacturer_string) == 0) {
+	if (HIDAPI_WCSLEN(dev->manufacturer_string) == 0) {
 		/* Manufacturer Name String (UUID: 0x2A29) */
 		wchar_t* manufacturer_string = (wchar_t *)hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_Manufacturer, DEVPROP_TYPE_STRING);
 		if (manufacturer_string) {
-			free(dev->manufacturer_string);
+			HIDAPI_FREE(dev->manufacturer_string);
 			dev->manufacturer_string = manufacturer_string;
 		}
 	}
 
-	if (wcslen(dev->serial_number) == 0) {
+	if (HIDAPI_WCSLEN(dev->serial_number) == 0) {
 		/* Serial Number String (UUID: 0x2A25) */
 		wchar_t* serial_number = (wchar_t *)hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_DeviceAddress, DEVPROP_TYPE_STRING);
 		if (serial_number) {
-			free(dev->serial_number);
+			HIDAPI_FREE(dev->serial_number);
 			dev->serial_number = serial_number;
 		}
 	}
 
-	if (wcslen(dev->product_string) == 0) {
+	if (HIDAPI_WCSLEN(dev->product_string) == 0) {
 		/* Model Number String (UUID: 0x2A24) */
 		wchar_t* product_string = (wchar_t *)hid_internal_get_devnode_property(dev_node, (const DEVPROPKEY*)&PKEY_DeviceInterface_Bluetooth_ModelNumber, DEVPROP_TYPE_STRING);
 		if (!product_string) {
@@ -625,7 +606,7 @@ static void hid_internal_get_ble_info(struct hid_device_info* dev, DEVINST dev_n
 		}
 
 		if (product_string) {
-			free(dev->product_string);
+			HIDAPI_FREE(dev->product_string);
 			dev->product_string = product_string;
 		}
 	}
@@ -646,7 +627,9 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 	wchar_t *device_id = NULL, *compatible_ids = NULL;
 	CONFIGRET cr;
 	DEVINST dev_node;
-	hid_internal_detect_bus_type_result result = { 0 };
+	hid_internal_detect_bus_type_result result;
+
+	HIDAPI_MEMSET(&result, 0, sizeof(result));
 
 	/* Get the device id from interface path */
 	device_id = (wchar_t *)hid_internal_get_device_interface_property(interface_path, &DEVPKEY_Device_InstanceId, DEVPROP_TYPE_STRING);
@@ -669,27 +652,27 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 		goto end;
 
 	/* Now we can parse parent's compatible IDs to find out the device bus type */
-	for (wchar_t* compatible_id = compatible_ids; *compatible_id; compatible_id += wcslen(compatible_id) + 1) {
+	for (wchar_t* compatible_id = compatible_ids; *compatible_id; compatible_id += HIDAPI_WCSLEN(compatible_id) + 1) {
 		/* Normalize to upper case */
 		hid_internal_towupper(compatible_id);
 
 		/* USB devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support
 		   https://docs.microsoft.com/windows-hardware/drivers/install/standard-usb-identifiers */
-		if (wcsstr(compatible_id, L"USB") != NULL) {
+		if (HIDAPI_WCSSTR(compatible_id, L"USB") != NULL) {
 			result.bus_type = HID_API_BUS_USB;
 			break;
 		}
 
 		/* Bluetooth devices
 		   https://docs.microsoft.com/windows-hardware/drivers/bluetooth/installing-a-bluetooth-device */
-		if (wcsstr(compatible_id, L"BTHENUM") != NULL) {
+		if (HIDAPI_WCSSTR(compatible_id, L"BTHENUM") != NULL) {
 			result.bus_type = HID_API_BUS_BLUETOOTH;
 			break;
 		}
 
 		/* Bluetooth LE devices */
-		if (wcsstr(compatible_id, L"BTHLEDEVICE") != NULL) {
+		if (HIDAPI_WCSSTR(compatible_id, L"BTHLEDEVICE") != NULL) {
 			result.bus_type = HID_API_BUS_BLUETOOTH;
 			result.bus_flags |= HID_API_BUS_FLAG_BLE;
 			break;
@@ -697,14 +680,14 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 
 		/* I2C devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-support-and-power-management */
-		if (wcsstr(compatible_id, L"PNP0C50") != NULL) {
+		if (HIDAPI_WCSSTR(compatible_id, L"PNP0C50") != NULL) {
 			result.bus_type = HID_API_BUS_I2C;
 			break;
 		}
 
 		/* SPI devices
 		   https://docs.microsoft.com/windows-hardware/drivers/hid/plug-and-play-for-spi */
-		if (wcsstr(compatible_id, L"PNP0C51") != NULL) {
+		if (HIDAPI_WCSSTR(compatible_id, L"PNP0C51") != NULL) {
 			result.bus_type = HID_API_BUS_SPI;
 			break;
 		}
@@ -713,8 +696,8 @@ static hid_internal_detect_bus_type_result hid_internal_detect_bus_type(const wc
 	result.dev_node = dev_node;
 
 end:
-	free(device_id);
-	free(compatible_ids);
+	HIDAPI_FREE(device_id);
+	HIDAPI_FREE(compatible_ids);
 	return result;
 }
 
@@ -723,7 +706,7 @@ static char *hid_internal_UTF16toUTF8(const wchar_t *src)
 	char *dst = NULL;
 	int len = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, src, -1, NULL, 0, NULL, NULL);
 	if (len) {
-		dst = (char*)calloc(len, sizeof(char));
+		dst = (char*)HIDAPI_CALLOC(len, sizeof(char));
 		if (dst == NULL) {
 			return NULL;
 		}
@@ -738,7 +721,7 @@ static wchar_t *hid_internal_UTF8toUTF16(const char *src)
 	wchar_t *dst = NULL;
 	int len = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, src, -1, NULL, 0);
 	if (len) {
-		dst = (wchar_t*)calloc(len, sizeof(wchar_t));
+		dst = (wchar_t*)HIDAPI_CALLOC(len, sizeof(wchar_t));
 		if (dst == NULL) {
 			return NULL;
 		}
@@ -760,7 +743,7 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	hid_internal_detect_bus_type_result detect_bus_type_result;
 
 	/* Create the record. */
-	dev = (struct hid_device_info*)calloc(1, sizeof(struct hid_device_info));
+	dev = (struct hid_device_info*)HIDAPI_CALLOC(1, sizeof(struct hid_device_info));
 
 	if (dev == NULL) {
 		return NULL;
@@ -802,17 +785,17 @@ static struct hid_device_info *hid_internal_get_device_info(const wchar_t *path,
 	/* Serial Number */
 	string[0] = L'\0';
 	HidD_GetSerialNumberString(handle, string, size);
-	dev->serial_number = _wcsdup(string);
+	dev->serial_number = HIDAPI_WCSDUP(string);
 
 	/* Manufacturer String */
 	string[0] = L'\0';
 	HidD_GetManufacturerString(handle, string, size);
-	dev->manufacturer_string = _wcsdup(string);
+	dev->manufacturer_string = HIDAPI_WCSDUP(string);
 
 	/* Product String */
 	string[0] = L'\0';
 	HidD_GetProductString(handle, string, size);
-	dev->product_string = _wcsdup(string);
+	dev->product_string = HIDAPI_WCSDUP(string);
 
 	/* now, the portion that depends on string descriptors */
 	switch (dev->bus_type) {
@@ -865,10 +848,10 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 		}
 
 		if (device_interface_list != NULL) {
-			free(device_interface_list);
+			HIDAPI_FREE(device_interface_list);
 		}
 
-		device_interface_list = (wchar_t*)calloc(len, sizeof(wchar_t));
+		device_interface_list = (wchar_t*)HIDAPI_CALLOC(len, sizeof(wchar_t));
 		if (device_interface_list == NULL) {
 			register_global_error(L"Failed to allocate memory for HID device interface list");
 			return NULL;
@@ -884,7 +867,7 @@ struct hid_device_info HID_API_EXPORT * HID_API_CALL hid_enumerate(unsigned shor
 	}
 
 	/* Iterate over each device interface in the HID class, looking for the right one. */
-	for (wchar_t* device_interface = device_interface_list; *device_interface; device_interface += wcslen(device_interface) + 1) {
+	for (wchar_t* device_interface = device_interface_list; *device_interface; device_interface += HIDAPI_WCSLEN(device_interface) + 1) {
 		HANDLE device_handle = INVALID_HANDLE_VALUE;
 		HIDD_ATTRIBUTES attrib;
 
@@ -937,7 +920,7 @@ cont_close:
 	}
 
 end_of_function:
-	free(device_interface_list);
+	HIDAPI_FREE(device_interface_list);
 
 	return root;
 }
@@ -948,11 +931,11 @@ void  HID_API_EXPORT HID_API_CALL hid_free_enumeration(struct hid_device_info *d
 	struct hid_device_info *d = devs;
 	while (d) {
 		struct hid_device_info *next = d->next;
-		free(d->path);
-		free(d->serial_number);
-		free(d->manufacturer_string);
-		free(d->product_string);
-		free(d);
+		HIDAPI_FREE(d->path);
+		HIDAPI_FREE(d->serial_number);
+		HIDAPI_FREE(d->manufacturer_string);
+		HIDAPI_FREE(d->product_string);
+		HIDAPI_FREE(d);
 		d = next;
 	}
 }
@@ -976,7 +959,7 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open(unsigned short vendor_id, unsi
 		if (cur_dev->vendor_id == vendor_id &&
 		    cur_dev->product_id == product_id) {
 			if (serial_number) {
-				if (cur_dev->serial_number && wcscmp(serial_number, cur_dev->serial_number) == 0) {
+				if (cur_dev->serial_number && HIDAPI_WCSCMP(serial_number, cur_dev->serial_number) == 0) {
 					path_to_open = cur_dev->path;
 					break;
 				}
@@ -1069,11 +1052,11 @@ HID_API_EXPORT hid_device * HID_API_CALL hid_open_path(const char *path)
 	dev->output_report_length = caps.OutputReportByteLength;
 	dev->input_report_length = caps.InputReportByteLength;
 	dev->feature_report_length = caps.FeatureReportByteLength;
-	dev->read_buf = (char*) malloc(dev->input_report_length);
+	dev->read_buf = (char*) HIDAPI_MALLOC(dev->input_report_length);
 	dev->device_info = hid_internal_get_device_info(interface_path, dev->device_handle);
 
 end_of_function:
-	free(interface_path);
+	HIDAPI_FREE(interface_path);
 
 	if (device_handle != INVALID_HANDLE_VALUE) {
 		CloseHandle(device_handle);
@@ -1118,7 +1101,7 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		buf = (unsigned char *) data;
 	} else {
 		if (dev->write_buf == NULL) {
-			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+			dev->write_buf = (unsigned char *) HIDAPI_MALLOC(dev->output_report_length);
 
 			if (dev->write_buf == NULL) {
 				register_string_error(dev, L"hid_write/malloc");
@@ -1127,8 +1110,8 @@ int HID_API_EXPORT HID_API_CALL hid_write(hid_device *dev, const unsigned char *
 		}
 
 		buf = dev->write_buf;
-		memcpy(buf, data, length);
-		memset(buf + length, 0, dev->output_report_length - length);
+		HIDAPI_MEMCPY(buf, data, length);
+		HIDAPI_MEMSET(buf + length, 0, dev->output_report_length - length);
 		length = dev->output_report_length;
 	}
 
@@ -1201,7 +1184,7 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 	if (!dev->read_pending) {
 		/* Start an Overlapped I/O read. */
 		dev->read_pending = TRUE;
-		memset(dev->read_buf, 0, dev->input_report_length);
+		HIDAPI_MEMSET(dev->read_buf, 0, dev->input_report_length);
 		ResetEvent(ev);
 		res = ReadFile(dev->device_handle, dev->read_buf, (DWORD) dev->input_report_length, &bytes_read, &dev->ol);
 
@@ -1254,12 +1237,12 @@ int HID_API_EXPORT HID_API_CALL hid_read_timeout(hid_device *dev, unsigned char 
 			   HID spec, we'll skip over this byte. */
 			bytes_read--;
 			copy_len = length > bytes_read ? bytes_read : length;
-			memcpy(data, dev->read_buf+1, copy_len);
+			HIDAPI_MEMCPY(data, dev->read_buf+1, copy_len);
 		}
 		else {
 			/* Copy the whole buffer, report number and all. */
 			copy_len = length > bytes_read ? bytes_read : length;
-			memcpy(data, dev->read_buf, copy_len);
+			HIDAPI_MEMCPY(data, dev->read_buf, copy_len);
 		}
 	}
 	if (!res) {
@@ -1349,7 +1332,7 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		length_to_send = length;
 	} else {
 		if (dev->feature_buf == NULL) {
-			dev->feature_buf = (unsigned char *) malloc(dev->feature_report_length);
+			dev->feature_buf = (unsigned char *) HIDAPI_MALLOC(dev->feature_report_length);
 
 			if (dev->feature_buf == NULL) {
 				register_string_error(dev, L"hid_send_feature_report/malloc");
@@ -1358,8 +1341,8 @@ int HID_API_EXPORT HID_API_CALL hid_send_feature_report(hid_device *dev, const u
 		}
 
 		buf = dev->feature_buf;
-		memcpy(buf, data, length);
-		memset(buf + length, 0, dev->feature_report_length - length);
+		HIDAPI_MEMCPY(buf, data, length);
+		HIDAPI_MEMSET(buf + length, 0, dev->feature_report_length - length);
 		length_to_send = dev->feature_report_length;
 	}
 
@@ -1379,7 +1362,7 @@ static int hid_get_report(hid_device *dev, DWORD report_type, unsigned char *dat
 	DWORD bytes_returned = 0;
 
 	OVERLAPPED ol;
-	memset(&ol, 0, sizeof(ol));
+	HIDAPI_MEMSET(&ol, 0, sizeof(ol));
 
 	if (!data || !length) {
 		register_string_error(dev, L"Zero buffer/length");
@@ -1450,7 +1433,7 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const un
 		length_to_send = length;
 	} else {
 		if (dev->write_buf == NULL) {
-			dev->write_buf = (unsigned char *) malloc(dev->output_report_length);
+			dev->write_buf = (unsigned char *) HIDAPI_MALLOC(dev->output_report_length);
 
 			if (dev->write_buf == NULL) {
 				register_string_error(dev, L"hid_send_output_report/malloc");
@@ -1459,8 +1442,8 @@ int HID_API_EXPORT HID_API_CALL hid_send_output_report(hid_device* dev, const un
 		}
 
 		buf = dev->write_buf;
-		memcpy(buf, data, length);
-		memset(buf + length, 0, dev->output_report_length - length);
+		HIDAPI_MEMCPY(buf, data, length);
+		HIDAPI_MEMSET(buf + length, 0, dev->output_report_length - length);
 		length_to_send = dev->output_report_length;
 	}
 
@@ -1633,8 +1616,8 @@ int HID_API_EXPORT_CALL hid_winapi_get_container_id(hid_device *dev, GUID *conta
 		register_string_error(dev, L"Failed to read ContainerId property from device node");
 
 end:
-	free(interface_path);
-	free(device_id);
+	HIDAPI_FREE(interface_path);
+	HIDAPI_FREE(device_id);
 
 	return cr == CR_SUCCESS ? 0 : -1;
 }

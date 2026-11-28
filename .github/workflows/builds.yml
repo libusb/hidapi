@@ -344,6 +344,164 @@ jobs:
         ninja
 
 
+  windows-cmake-no-crt:
+
+    name: windows no-CRT
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        path: hidapisrc
+    - name: Set up MSVC developer environment
+      uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
+    - name: Install Ninja
+      shell: cmd
+      run: choco install ninja -y --no-progress
+    - name: Build and check all no-CRT compilers
+      shell: pwsh
+      run: |
+        $ok = $true
+        foreach ($compiler in @('cl', 'clang-cl', 'gcc')) {
+          Write-Host "`n===== $compiler ====="
+          $build = "build\no-crt-$compiler"
+
+          cmake -G Ninja `
+            -B $build `
+            -S hidapisrc `
+            "-DCMAKE_C_COMPILER=$compiler" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DHIDAPI_NO_CRT=ON `
+            -DHIDAPI_WITH_TESTS=OFF `
+            -DHIDAPI_BUILD_HIDTEST=OFF
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          cmake --build $build
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          $lib = Get-ChildItem "$build\src\windows" -File |
+            Where-Object { $_.Name -eq 'hidapi.lib' -or $_.Name -eq 'libhidapi.a' } |
+            Select-Object -First 1
+          if (-not $lib) {
+            Write-Host "::error title=$compiler::no-CRT static library not found"
+            $ok = $false
+            continue
+          }
+
+          $probeBuild = "$build\probes"
+          cmake -G Ninja `
+            -B $probeBuild `
+            -S hidapisrc\windows\test\no_crt `
+            "-DCMAKE_C_COMPILER=$compiler" `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DHIDAPI_SOURCE_DIR=$((Get-Location).Path)\hidapisrc" `
+            "-DHIDAPI_LIBRARY=$($lib.FullName)"
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          cmake --build $probeBuild
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          foreach ($probeName in @('no_crt_init_probe', 'no_crt_mem_probe')) {
+            $probePath = Join-Path $probeBuild "$probeName.exe"
+            $proc = Start-Process -FilePath $probePath -PassThru
+            if (-not $proc.WaitForExit(5000)) {
+              $proc.Kill()
+              Write-Host "::error title=$compiler/$probeName::no-CRT probe timed out"
+              $ok = $false
+              continue
+            }
+            if ($proc.ExitCode -ne 0) {
+              Write-Host "::error title=$compiler/$probeName::no-CRT probe exited with $($proc.ExitCode)"
+              $ok = $false
+            }
+
+            $deps = dumpbin /nologo /dependents $probePath | Out-String
+            if ($deps -match '(?i)(vcruntime|ucrtbase|msvcrt|api-ms-win-crt|libgcc|libwinpthread)') {
+              Write-Host "::error title=$compiler/$probeName::CRT dependency found in the no-CRT probe"
+              $ok = $false
+            }
+          }
+
+          $sharedBuild = "$build-shared"
+          cmake -G Ninja `
+            -B $sharedBuild `
+            -S hidapisrc `
+            "-DCMAKE_C_COMPILER=$compiler" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_SHARED_LIBS=ON `
+            -DHIDAPI_NO_CRT=ON `
+            -DHIDAPI_WITH_TESTS=OFF `
+            -DHIDAPI_BUILD_HIDTEST=OFF
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          cmake --build $sharedBuild
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          $dll = Get-ChildItem "$sharedBuild\src\windows" -File -Filter '*.dll' |
+            Select-Object -First 1
+          if (-not $dll) {
+            Write-Host "::error title=$compiler::no-CRT shared DLL not found"
+            $ok = $false
+            continue
+          }
+
+          $deps = dumpbin /nologo /dependents $dll.FullName | Out-String
+          if ($deps -match '(?i)(vcruntime|ucrtbase|msvcrt|api-ms-win-crt|libgcc|libwinpthread)') {
+            Write-Host "::error title=$compiler::CRT dependency found in the no-CRT shared DLL"
+            $ok = $false
+          }
+          $exports = dumpbin /nologo /exports $dll.FullName | Out-String
+          if ($exports -notmatch '(?m)\bhid_init\b') {
+            Write-Host "::error title=$compiler::hid_init missing from the no-CRT shared DLL"
+            $ok = $false
+          }
+
+          $implib = Get-ChildItem "$sharedBuild\src\windows" -File |
+            Where-Object { $_.Name -eq 'hidapi.lib' -or $_.Name -eq 'libhidapi.dll.a' } |
+            Select-Object -First 1
+          if (-not $implib) {
+            Write-Host "::error title=$compiler::no-CRT shared import library not found"
+            $ok = $false
+            continue
+          }
+
+          $sharedProbeBuild = "$build\shared-probe"
+          cmake -G Ninja `
+            -B $sharedProbeBuild `
+            -S hidapisrc\windows\test\no_crt `
+            "-DCMAKE_C_COMPILER=$compiler" `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DHIDAPI_SOURCE_DIR=$((Get-Location).Path)\hidapisrc" `
+            "-DHIDAPI_LIBRARY=$($lib.FullName)" `
+            "-DHIDAPI_SHARED_LIBRARY=$($dll.FullName)" `
+            "-DHIDAPI_SHARED_IMPLIB=$($implib.FullName)"
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          cmake --build $sharedProbeBuild --target no_crt_shared_init_probe
+          if ($LASTEXITCODE -ne 0) { $ok = $false; continue }
+
+          $sharedProbePath = Join-Path $sharedProbeBuild "no_crt_shared_init_probe.exe"
+          $proc = Start-Process -FilePath $sharedProbePath -PassThru
+          if (-not $proc.WaitForExit(5000)) {
+            $proc.Kill()
+            Write-Host "::error title=$compiler/no_crt_shared_init_probe::shared no-CRT probe timed out"
+            $ok = $false
+          } elseif ($proc.ExitCode -ne 0) {
+            Write-Host "::error title=$compiler/no_crt_shared_init_probe::shared no-CRT probe exited with $($proc.ExitCode)"
+            $ok = $false
+          }
+
+          $deps = dumpbin /nologo /dependents $sharedProbePath | Out-String
+          if ($deps -match '(?i)(vcruntime|ucrtbase|msvcrt|api-ms-win-crt|libgcc|libwinpthread)') {
+            Write-Host "::error title=$compiler/no_crt_shared_init_probe::CRT dependency found in the shared no-CRT probe"
+            $ok = $false
+          }
+        }
+        if (-not $ok) { exit 1 }
+
   windows-cmake-mingw:
 
     runs-on: windows-latest

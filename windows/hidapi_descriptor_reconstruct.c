@@ -18,6 +18,8 @@
 ********************************************************/
 #include "hidapi_descriptor_reconstruct.h"
 
+#include "hidapi_winapi_crt_compat.h"
+
 /**
  * @brief References to report descriptor buffer.
  * 
@@ -140,7 +142,7 @@ static struct rd_main_item_node * rd_append_main_item_node(int first_bit, int la
 		list = &(*list)->next;
 	}
 
-	new_list_node = (struct rd_main_item_node *)malloc(sizeof(*new_list_node)); // Create new list entry
+	new_list_node = (struct rd_main_item_node *)HIDAPI_MALLOC(sizeof(*new_list_node)); // Create new list entry
 	new_list_node->FirstBit = first_bit;
 	new_list_node->LastBit = last_bit;
 	new_list_node->TypeOfNode = type_of_node;
@@ -183,7 +185,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	hidp_preparsed_data *pp_data = (hidp_preparsed_data *) preparsed_data;
 
 	// Check if MagicKey is correct, to ensure that pp_data points to an valid preparse data structure
-	if (memcmp(pp_data->MagicKey, "HidP KDR", 8) != 0) {
+	if (HIDAPI_MEMCMP(pp_data->MagicKey, "HidP KDR", 8) != 0) {
 		return -1;
 	}
 
@@ -203,13 +205,13 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	
 	// Allocate memory and initialize lookup table
 	rd_bit_range ****coll_bit_range;
-	coll_bit_range = (rd_bit_range ****)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
+	coll_bit_range = (rd_bit_range ****)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(*coll_bit_range));
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
-		coll_bit_range[collection_node_idx] = (rd_bit_range ***)malloc(256 * sizeof(*coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
+		coll_bit_range[collection_node_idx] = (rd_bit_range ***)HIDAPI_MALLOC(256 * sizeof(*coll_bit_range[0])); // 256 possible report IDs (incl. 0x00)
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
-			coll_bit_range[collection_node_idx][reportid_idx] = (rd_bit_range **)malloc(NUM_OF_HIDP_REPORT_TYPES * sizeof(*coll_bit_range[0][0]));
+			coll_bit_range[collection_node_idx][reportid_idx] = (rd_bit_range **)HIDAPI_MALLOC(NUM_OF_HIDP_REPORT_TYPES * sizeof(*coll_bit_range[0][0]));
 			for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
-				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = (rd_bit_range *)malloc(sizeof(rd_bit_range));
+				coll_bit_range[collection_node_idx][reportid_idx][rt_idx] = (rd_bit_range *)HIDAPI_MALLOC(sizeof(rd_bit_range));
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->FirstBit = -1;
 				coll_bit_range[collection_node_idx][reportid_idx][rt_idx]->LastBit = -1;
 			}
@@ -241,12 +243,12 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	//  coll_number_of_direct_childs[COLLECTION_INDEX]
 	// *************************************************************************
 	int max_coll_level = 0;
-	int *coll_levels = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
-	int *coll_number_of_direct_childs = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
-	memset(coll_levels, -1,
-	       pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
-	memset(coll_number_of_direct_childs, 0,
-	       pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
+	int *coll_levels = (int *)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
+	int *coll_number_of_direct_childs = (int *)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
+	HIDAPI_MEMSET(coll_levels, -1,
+	              pp_data->NumberLinkCollectionNodes * sizeof(coll_levels[0]));
+	HIDAPI_MEMSET(coll_number_of_direct_childs, 0,
+	              pp_data->NumberLinkCollectionNodes * sizeof(coll_number_of_direct_childs[0]));
 
 	{
 		int actual_coll_level = 0;
@@ -307,9 +309,9 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// Determine child collection order of the whole hierarchy, based on previously determined bit ranges
 	// and store it this index coll_child_order[COLLECTION_INDEX][DIRECT_CHILD_INDEX]
 	// **************************************************************************************************
-	USHORT **coll_child_order = (USHORT **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
+	USHORT **coll_child_order = (USHORT **)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(*coll_child_order));
 	{
-		BOOLEAN *coll_parsed_flag = (BOOLEAN *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_parsed_flag[0]));
+		BOOLEAN *coll_parsed_flag = (BOOLEAN *)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(coll_parsed_flag[0]));
 		for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 			coll_parsed_flag[collection_node_idx] = FALSE;
 		}
@@ -319,7 +321,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 			if ((coll_number_of_direct_childs[collection_node_idx] != 0) &&
 				(coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] == FALSE)) {
 				coll_parsed_flag[link_collection_nodes[collection_node_idx].FirstChild] = TRUE;
-				coll_child_order[collection_node_idx] = (USHORT *)malloc((coll_number_of_direct_childs[collection_node_idx]) * sizeof(*coll_child_order[0]));
+				coll_child_order[collection_node_idx] = (USHORT *)HIDAPI_MALLOC((coll_number_of_direct_childs[collection_node_idx]) * sizeof(*coll_child_order[0]));
 
 				{
 					// Create list of child collection indices
@@ -369,7 +371,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				}
 			}
 		}
-		free(coll_parsed_flag);
+		HIDAPI_FREE(coll_parsed_flag);
 	}
 
 
@@ -378,12 +380,12 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	// ***************************************************************************************
 	struct rd_main_item_node *main_item_list = NULL; // List root
 	// Lookup table to find the Collection items in the list by index
-	struct rd_main_item_node **coll_begin_lookup = (struct rd_main_item_node **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
-	struct rd_main_item_node **coll_end_lookup = (struct rd_main_item_node **)malloc(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
+	struct rd_main_item_node **coll_begin_lookup = (struct rd_main_item_node **)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(*coll_begin_lookup));
+	struct rd_main_item_node **coll_end_lookup = (struct rd_main_item_node **)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(*coll_end_lookup));
 	{
-		int *coll_last_written_child = (int *)malloc(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
-		memset(coll_last_written_child, -1,
-		       pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
+		int *coll_last_written_child = (int *)HIDAPI_MALLOC(pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
+		HIDAPI_MEMSET(coll_last_written_child, -1,
+		              pp_data->NumberLinkCollectionNodes * sizeof(coll_last_written_child[0]));
 
 		int actual_coll_level = 0;
 		USHORT collection_node_idx = 0;
@@ -456,7 +458,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				collection_node_idx = link_collection_nodes[collection_node_idx].Parent;
 			}
 		}
-		free(coll_last_written_child);
+		HIDAPI_FREE(coll_last_written_child);
 	}
 
 
@@ -525,10 +527,10 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	//  report descriptors seem to have it, as assumed here.
 	// ***********************************************************
 	{
-		int last_bit_position[NUM_OF_HIDP_REPORT_TYPES][256];
-		struct rd_main_item_node *last_report_item_lookup[NUM_OF_HIDP_REPORT_TYPES][256];
-		memset(last_bit_position, -1, sizeof(last_bit_position));
-		memset(last_report_item_lookup, 0, sizeof(last_report_item_lookup)); /* fill with NULL pointers */
+		int (*last_bit_position)[256] = (int (*)[256])HIDAPI_MALLOC(NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_bit_position));
+		struct rd_main_item_node *(*last_report_item_lookup)[256] = (struct rd_main_item_node *(*)[256])HIDAPI_MALLOC(NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_report_item_lookup));
+		HIDAPI_MEMSET(last_bit_position, -1, NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_bit_position));
+		HIDAPI_MEMSET(last_report_item_lookup, 0, NUM_OF_HIDP_REPORT_TYPES * sizeof(*last_report_item_lookup)); /* fill with NULL pointers */
 
 		BOOLEAN devicehasReportIDs = FALSE;
 		struct rd_main_item_node *list = main_item_list; // List root;
@@ -595,6 +597,9 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 				}
 			}
 		}
+
+		HIDAPI_FREE(last_bit_position);
+		HIDAPI_FREE(last_report_item_lookup);
 	}
 
 
@@ -996,7 +1001,7 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 		// Go to next item in main_item_list and free the memory of the actual item
 		struct rd_main_item_node *main_item_list_prev = main_item_list;
 		main_item_list = main_item_list->next;
-		free(main_item_list_prev);
+		HIDAPI_FREE(main_item_list_prev);
 	}
 
 	// Free multidimensionable array: coll_bit_range[COLLECTION_INDEX][REPORT_ID][INPUT/OUTPUT/FEATURE]
@@ -1004,21 +1009,21 @@ int hid_winapi_descriptor_reconstruct_pp_data(void *preparsed_data, unsigned cha
 	for (USHORT collection_node_idx = 0; collection_node_idx < pp_data->NumberLinkCollectionNodes; collection_node_idx++) {
 		for (int reportid_idx = 0; reportid_idx < 256; reportid_idx++) {
 			for (int rt_idx = 0; rt_idx < NUM_OF_HIDP_REPORT_TYPES; rt_idx++) {
-				free(coll_bit_range[collection_node_idx][reportid_idx][rt_idx]);
+				HIDAPI_FREE(coll_bit_range[collection_node_idx][reportid_idx][rt_idx]);
 			}
-			free(coll_bit_range[collection_node_idx][reportid_idx]);
+			HIDAPI_FREE(coll_bit_range[collection_node_idx][reportid_idx]);
 		}
-		free(coll_bit_range[collection_node_idx]);
-		if (coll_number_of_direct_childs[collection_node_idx] != 0) free(coll_child_order[collection_node_idx]);
+		HIDAPI_FREE(coll_bit_range[collection_node_idx]);
+		if (coll_number_of_direct_childs[collection_node_idx] != 0) HIDAPI_FREE(coll_child_order[collection_node_idx]);
 	}
-	free(coll_bit_range);
-	free(coll_child_order);
+	HIDAPI_FREE(coll_bit_range);
+	HIDAPI_FREE(coll_child_order);
 
 	// Free one dimensional arrays
-	free(coll_begin_lookup);
-	free(coll_end_lookup);
-	free(coll_levels);
-	free(coll_number_of_direct_childs);
+	HIDAPI_FREE(coll_begin_lookup);
+	HIDAPI_FREE(coll_end_lookup);
+	HIDAPI_FREE(coll_levels);
+	HIDAPI_FREE(coll_number_of_direct_childs);
 
 	return (int) rpt_desc.byte_idx;
 }
