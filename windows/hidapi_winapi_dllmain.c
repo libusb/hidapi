@@ -20,6 +20,10 @@
 /* Minimal DLL entry point for the CRT-free shared build. */
 #include <windows.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
 	(void)instance;
@@ -27,3 +31,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 	(void)reserved;
 	return TRUE;
 }
+
+#ifdef __cplusplus
+}
+#endif

@@ -26,6 +26,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#ifdef __CYGWIN__
+#include <wctype.h>
+#endif
 
 /* MSVC secure CRT (VS2005+) provides swprintf_s/wcsncpy_s.
    Older MSVC and GCC/MinGW/Cygwin use the classic variants. */
@@ -62,8 +65,8 @@ static inline void hid_internal_towupper(wchar_t *string)
 
 #else /* HIDAPI_NO_CRT */
 
-#include <windows.h>
 #include <stdint.h>
+#include <windows.h>
 #include <shlwapi.h>
 
 static inline void hid_internal_towupper(wchar_t *string)

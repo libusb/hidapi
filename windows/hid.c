@@ -46,7 +46,6 @@ typedef LONG NTSTATUS;
 
 #ifdef __CYGWIN__
 #include <ntdef.h>
-#include <wctype.h>
 #endif
 
 /*#define HIDAPI_USE_DDK*/

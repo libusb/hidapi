@@ -46,7 +46,7 @@ if(HIDAPI_NO_CRT)
     if(BUILD_SHARED_LIBS)
         if(MSVC)
             target_link_options(hidapi_winapi PRIVATE /NODEFAULTLIB /ENTRY:DllMain)
-        elseif(MINGW)
+        elseif(MINGW OR CYGWIN)
             target_link_options(hidapi_winapi PRIVATE
                 -nostdlib
                 -nodefaultlibs
